@@ -1,0 +1,11 @@
+# Virtual environments
+.venv/
+venv/
+
+# Editor settings
+.vscode/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+node_modules/
