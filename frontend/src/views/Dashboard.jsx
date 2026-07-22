@@ -7,9 +7,9 @@ export default function Dashboard() {
   const [enableWordSync, setEnableWordSync] = useState(true);
   const [authText, setAuthText] = useState('');
   const [cookiesFile, setCookiesFile] = useState(null);
-  const [languageOverride, setLanguageOverride] = useState('om');
+  const [languageOverride, setLanguageOverride] = useState('en');
   const [languageOptions, setLanguageOptions] = useState([]);
-  const [languageSearch, setLanguageSearch] = useState('Oromo (Afaan Oromoo) (om)');
+  const [languageSearch, setLanguageSearch] = useState('English (en)');
   const [showLanguageDropdown, setShowLanguageDropdown] = useState(false);
   const [jobStatus, setJobStatus] = useState('idle'); // idle, processing, completed, failed
   const [segments, setSegments] = useState([]);
