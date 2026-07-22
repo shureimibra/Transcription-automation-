@@ -29,8 +29,10 @@ except ImportError:
 from .models import TranscriptionJob, TranscriptSegment
 try:
     from backend.core.services.ai_pipeline import AudioExtractor, WhisperTranscriber
+    from backend.core.services.ootranscript_editor import clean_transcript
 except ModuleNotFoundError:
     from core.services.ai_pipeline import AudioExtractor, WhisperTranscriber
+    from core.services.ootranscript_editor import clean_transcript
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +78,17 @@ def run_transcription_pipeline(job_id):
         # 2. Extract Audio
         success = False
         if job.input_source == 'url':
-            success = AudioExtractor.download_and_extract_url(job.source_url, temp_wav_path)
+            # Pass optional auth headers and cookies from the job to the extractor
+            headers = job.headers if hasattr(job, 'headers') else None
+            cookies = job.cookies if hasattr(job, 'cookies') else None
+            cookies_file = getattr(job, 'cookies_file', None)
+            success = AudioExtractor.download_and_extract_url(
+                job.source_url,
+                temp_wav_path,
+                headers=headers,
+                cookies=cookies,
+                cookies_file_path=cookies_file
+            )
         elif job.input_source == 'upload':
             if job.file_path and os.path.exists(job.file_path):
                 success = AudioExtractor.extract_from_file(job.file_path, temp_wav_path)
@@ -100,7 +112,12 @@ def run_transcription_pipeline(job_id):
         transcriber = WhisperTranscriber(model_size="base")
         
         segment_count = 0
-        for chunk in transcriber.transcribe(temp_wav_path, enable_vad=True):
+        for chunk in transcriber.transcribe(
+            temp_wav_path,
+            enable_vad=True,
+            language=job.language if getattr(job, 'language', None) else None,
+            enable_code_switching=getattr(job, 'enable_code_switching', False)
+        ):
             # Assign alternating speaker label for demo
             sec = int(chunk['start'])
             speaker = f"Speaker {(sec // 15) % 2}"
@@ -131,7 +148,38 @@ def run_transcription_pipeline(job_id):
             # Add short delay to simulate streaming feel
             time.sleep(1.0)
 
-        # 5. Complete Job
+        # Persist any language detection metadata from the transcription step
+        if getattr(transcriber, 'last_info', None) is not None:
+            job.detected_language = getattr(transcriber.last_info, 'language', None)
+            job.language_confidence = getattr(transcriber.last_info, 'language_probability', None)
+
+        # Persist any language detection metadata from the transcription step
+        if getattr(transcriber, 'last_info', None) is not None:
+            job.detected_language = getattr(transcriber.last_info, 'language', None)
+            job.language_confidence = getattr(transcriber.last_info, 'language_probability', None)
+
+        # 5. Run post-processing editor (Oromo GoTranscript rules) and save final transcript
+        try:
+            segs = list(job.segments.all().values('speaker_label', 'start_time', 'text'))
+            # adapt to editor expected keys
+            segs_for_editor = []
+            for s in segs:
+                segs_for_editor.append({
+                    'speaker_label': s.get('speaker_label'),
+                    'start_time': s.get('start_time'),
+                    'text': s.get('text')
+                })
+            cleaned = clean_transcript({'segments': segs_for_editor}, verbatim=False)
+            job.final_transcript = cleaned
+            job.save()
+            broadcast_update(job_id, {
+                'type': 'final_transcript',
+                'transcript': cleaned
+            })
+        except Exception as e:
+            logger.warning(f"Post-processing editor failed for Job {job_id}: {e}")
+
+        # 6. Complete Job
         job.status = 'completed'
         job.completed_at = timezone.now()
         job.save()
@@ -161,3 +209,15 @@ def run_transcription_pipeline(job_id):
                 os.remove(temp_wav_path)
             except Exception:
                 pass
+        # Remove any uploaded cookies file left on disk and clear job reference
+        try:
+            if hasattr(job, 'cookies_file') and job.cookies_file:
+                if os.path.exists(job.cookies_file):
+                    try:
+                        os.remove(job.cookies_file)
+                    except Exception:
+                        pass
+                job.cookies_file = None
+                job.save()
+        except Exception:
+            pass

@@ -1,0 +1,11 @@
+[tool.pyrefly]
+pythonPath = ".venv/Scripts/python.exe"
+venvPath = "."
+venv = ".venv"
+searchPaths = ["backend"]
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+pythonPath = ".venv/Scripts/python.exe"
+extraPaths = ["backend"]

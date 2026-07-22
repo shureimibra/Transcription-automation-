@@ -12,6 +12,13 @@ from .serializers import ProjectSerializer, TranscriptionJobSerializer, Transcri
 
 # Helper import to trigger celery task in production
 from .tasks import run_transcription_pipeline
+from rest_framework.views import APIView
+from rest_framework.permissions import AllowAny
+from django.http import HttpResponse
+try:
+    from backend.core.services.ootranscript_editor import clean_transcript
+except ModuleNotFoundError:
+    from core.services.ootranscript_editor import clean_transcript
 
 class ProjectViewSet(viewsets.ModelViewSet):
     queryset = Project.objects.all().order_by('-created_at')
@@ -35,9 +42,61 @@ class TranscriptionJobViewSet(viewsets.ModelViewSet):
             temp_file_path = tmp_file.name
             data['input_source'] = 'upload'
             data['source_url'] = ''
+        else:
+            # Clean and format source_url if provided
+            source_url = data.get('source_url', '')
+            if source_url and isinstance(source_url, str):
+                source_url = source_url.strip()
+                if source_url and not (source_url.startswith('http://') or source_url.startswith('https://')):
+                    source_url = 'https://' + source_url
+                data['source_url'] = source_url
+
+        # Robust project resolution
+        project_id = data.get('project')
+        valid_proj = None
+        if project_id and str(project_id).strip() not in ('null', 'undefined', ''):
+            try:
+                valid_proj = Project.objects.filter(id=project_id).first()
+            except Exception:
+                valid_proj = None
+
+        if not valid_proj:
+            default_proj, _ = Project.objects.get_or_create(
+                name='Default Project',
+                defaults={'description': 'Default workspace'}
+            )
+            data['project'] = default_proj.id
+
+        # Handle headers JSON parsing
+        if 'headers' in data and isinstance(data['headers'], str):
+            try:
+                import json
+                parsed = json.loads(data['headers'])
+                data['headers'] = parsed
+            except Exception:
+                data['headers'] = None
+
+        if 'language' in data and isinstance(data['language'], str):
+            data['language'] = data['language'].strip().lower()
+
+        # Handle cookies_file: remove uploaded file object from data dict if present to avoid DRF CharField validation error
+        if 'cookies_file' in data and not isinstance(data['cookies_file'], str):
+            data.pop('cookies_file', None)
+
+        cookies_file = request.FILES.get('cookies_file')
+        if cookies_file:
+            import tempfile
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.cookies', prefix='cookies_', dir=None)
+            for chunk in cookies_file.chunks():
+                tmp.write(chunk)
+            tmp.close()
+            data['cookies_file'] = tmp.name
 
         serializer = self.get_serializer(data=data)
-        serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            print(f"[JOB CREATION VALIDATION ERROR]: {serializer.errors}")
+            return Response({"error": "Invalid job request data", "details": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
         if temp_file_path:
             job = serializer.save(file_path=temp_file_path)
         else:
@@ -116,3 +175,106 @@ class ExportTranscriptView(views.APIView):
 
         else:
             return Response({"error": "Unsupported export format requested."}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class LanguageRegistryView(APIView):
+    """Returns the combined list of default recognized languages and trained native languages."""
+    permission_classes = [AllowAny]
+
+    def get(self, request, *args, **kwargs):
+        try:
+            from .languages import LANGUAGE_PROFILES
+            languages_list = [
+                {"code": p.code, "name": p.name}
+                for p in LANGUAGE_PROFILES.values()
+            ]
+            languages_list = sorted(languages_list, key=lambda x: x["name"])
+            return Response({"languages": languages_list})
+        except Exception:
+            default_languages = [
+                {"code": "ki", "name": "Kikuyu (Gĩkũyũ)"},
+                {"code": "om", "name": "Oromo (Afaan Oromoo)"},
+                {"code": "so", "name": "Somali (Soomaali)"},
+                {"code": "ru", "name": "Russian (Русский)"},
+                {"code": "ar", "name": "Arabic (العربية)"},
+                {"code": "zh", "name": "Chinese (中文)"},
+                {"code": "de", "name": "German (Deutsch)"},
+                {"code": "fr", "name": "French (Français)"},
+                {"code": "tr", "name": "Turkish (Türkçe)"},
+                {"code": "es", "name": "Spanish (Español)"},
+                {"code": "am", "name": "Amharic (አማርኛ)"},
+                {"code": "en", "name": "English"},
+            ]
+            return Response({"languages": default_languages})
+
+
+class LinguisticValidationView(APIView):
+    """
+    3-Layer Linguistic Validation Endpoint
+    POST payload: {"text": "raw transcript", "language": "ki"}
+    Returns JSON response:
+    {
+        "success": true,
+        "raw_text": "raw transcript",
+        "clean_text": "sanitized text",
+        "hallucinated": true/false,
+        "logs": [...],
+        "corrections": [...]
+    }
+    """
+    permission_classes = [AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        try:
+            from .serializers import LinguisticValidationRequestSerializer
+            from .languages import sanitize_and_validate_transcript, get_language_profile
+
+            serializer = LinguisticValidationRequestSerializer(data=request.data)
+            if not serializer.is_valid():
+                return Response({
+                    "success": False,
+                    "error": "Invalid validation payload",
+                    "details": serializer.errors
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            raw_text = serializer.validated_data['text']
+            lang_code = serializer.validated_data['language']
+
+            clean_text, hallucinated, logs, corrections = sanitize_and_validate_transcript(raw_text, lang_code)
+            profile = get_language_profile(lang_code)
+
+            return Response({
+                "success": True,
+                "language_code": profile.code,
+                "language_name": profile.name,
+                "raw_text": raw_text,
+                "clean_text": clean_text,
+                "hallucinated": hallucinated,
+                "logs": logs,
+                "corrections": corrections
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response({
+                "success": False,
+                "error": f"Linguistic validation pipeline error: {str(e)}"
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class OotranscriptView(APIView):
+    """Accepts raw ASR output as JSON and returns the cleaned Oromo transcript (plain text).
+
+    POST payload can be {"text": "raw transcript"} or {"segments": [{"speaker":..., "text":...}, ...]}
+    Returns plain text response containing only the polished transcript.
+    """
+    permission_classes = [AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        data = request.data
+        verbatim = bool(request.query_params.get('verbatim', False))
+        try:
+            cleaned = clean_transcript(data, verbatim=verbatim)
+            return HttpResponse(cleaned, content_type='text/plain; charset=utf-8')
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+

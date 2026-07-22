@@ -1,0 +1,9 @@
+{
+  "name": "intron-extractor-tools",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Tools to render pages and extract embedded audio links",
+  "dependencies": {
+    "puppeteer": "*"
+  }
+}
