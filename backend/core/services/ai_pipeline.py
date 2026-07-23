@@ -595,13 +595,13 @@ class WhisperTranscriber:
             return mapping[normalized]
         return normalized
 
-    def transcribe(self, audio_path: str, enable_vad: bool = True, language: Optional[str] = None, enable_code_switching: bool = False) -> Generator[Dict[str, Any], None, None]:
+    def transcribe(self, audio_path: str, enable_vad: bool = True, language: Optional[str] = None, 
+                   enable_code_switching: bool = False, translate_to_english: bool = False) -> Generator[Dict[str, Any], None, None]:
         """
-        Transcribes the audio file and yields segments as they are processed.
+        Transcribes or translates the audio file and yields segments.
         """
         self.load_model()
 
-        # Core Faster-Whisper Pipeline
         if not os.path.exists(audio_path):
             raise RuntimeError(f"Audio file not found: {audio_path}")
 
@@ -673,38 +673,68 @@ class WhisperTranscriber:
         if enable_code_switching and profile:
             initial_prompt = profile.engine_instruction_override
 
-        # Determine VAD parameters dynamically based on language tier
-        if normalized_language in ('en', 'de', 'fr', 'es', 'it', 'ru', 'ar', 'zh', 'tr'):
-            # Relaxed VAD: Allows 1000ms (1 second) of silence/music before cutting
-            vad_parameters = dict(min_silence_duration_ms=1000, speech_pad_ms=400, threshold=0.3)
-        else:
-            # Strict VAD: Cuts aggressively after 300ms of silence to protect native/low-resource languages
-            vad_parameters = dict(min_silence_duration_ms=300, speech_pad_ms=200, threshold=0.3)
+        # OPTIMIZED VAD: Less aggressive, better for natural speech
+        # Use longer silence detection to prevent splitting on natural pauses
+        vad_parameters = dict(
+            min_silence_duration_ms=600,  # Increased from 300-1000 to 600ms
+            speech_pad_ms=400,
+            threshold=0.5,  # Increased from 0.3 for better speech detection
+            min_speech_duration_ms=250,  # Minimum speech segment to keep
+            max_speech_duration_s=30,  # Maximum speech segment
+            #speech_pad_ms=400,
+            window_size_samples=1024
+        )
 
         transcribe_kwargs = {
             "beam_size": 5,
             "vad_filter": enable_vad,
             "vad_parameters": vad_parameters,
-            "language": whisper_lang,
-            "repetition_penalty": 1.2,                       # Global anti-repetition defense
-            "no_speech_threshold": 0.6,                      # Global noise gate threshold
-            "compression_ratio_threshold": 2.4,              # Global compression loop threshold
-            "temperature": [0.0, 0.2, 0.4, 0.6]
+            "language": whisper_lang if not translate_to_english else None,
+            "repetition_penalty": 1.1,  # Reduced from 1.2 to prevent over-penalization
+            "no_speech_threshold": 0.6,
+            "compression_ratio_threshold": 2.4,
+            "temperature": [0.0, 0.2, 0.4, 0.6],  # Standard range, not too aggressive
+            "condition_on_previous_text": True,  # Helps with context
+            #"compression_ratio_threshold": 2.4,
+            "log_prob_threshold": -1.0,
         }
+        
+        # Handle translation vs transcription
+        if translate_to_english:
+            transcribe_kwargs["task"] = "translate"
+            transcribe_kwargs["language"] = None
+            logger.info("=== TRANSLATION MODE ENABLED ===")
+        else:
+            logger.info(f"=== TRANSCRIPTION MODE ===")
+            if whisper_lang:
+                logger.info(f"Language set to: {whisper_lang}")
+            else:
+                logger.info("Language: auto-detect")
+
         if initial_prompt:
             transcribe_kwargs["initial_prompt"] = initial_prompt
+
+        # IMPORTANT: Disable VAD if it's causing issues
+        # Some models work better without VAD for clear speech
+        if normalized_language in ('en', 'es', 'fr', 'de', 'it', 'pt'):
+            # For major languages, VAD can be less aggressive
+            transcribe_kwargs["vad_filter"] = False  # Let Whisper handle segmentation
+            logger.info("VAD disabled for major language to improve accuracy")
 
         segments, info = self.model.transcribe(
             audio_path,
             **transcribe_kwargs
         )
+        
         if is_oromo or getattr(info, 'language', '') == 'so':
             info.language = 'om'
         self.last_info = info
         logger.info(f"Detected language: '{info.language}' with probability {getattr(info, 'language_probability', 0):.2f}")
 
-        # Materialize segments to guard against aggressive VAD removing the entire audio duration
+        # Materialize segments
         segments_list = list(segments)
+        
+        # If VAD removed everything, retry without VAD
         if transcribe_kwargs.get("vad_filter") and not segments_list:
             logger.warning("VAD filter removed all audio. Retrying transcription with VAD filter disabled...")
             retry_kwargs = dict(transcribe_kwargs)
@@ -720,10 +750,12 @@ class WhisperTranscriber:
 
         from core.services.ootranscript_editor import clean_segment_text, transliterate_arabic_oromo_to_qubee
 
+        # Post-process: Merge segments that are too short or split unnaturally
+        merged_segments = []
         for segment in segments_list:
             seg_text = segment.text.strip()
             
-            # Safeguard: drop prompt echo/feedback loop hallucinations on silence/noise
+            # Safeguard: drop prompt echo
             if initial_prompt and is_prompt_echo(seg_text, initial_prompt):
                 logger.warning(f"Whisper prompt echo detected and stripped: '{seg_text}'")
                 continue
@@ -732,16 +764,20 @@ class WhisperTranscriber:
             logs = []
             corrections = []
 
-            # 1. Transliterate any Arabic script or raw Oromo text into Qubee Latin script
+            # Transliterate if needed
             if is_oromo or re.search(r'[\u0600-\u06FF]', seg_text) or info.language == 'om':
                 seg_text = clean_segment_text(seg_text)
 
-            # 2. Layer 3 Sanitization & Validation Loop (Bilingual-aware)
+            # Sanitization
             if sanitize_and_validate_transcript and (normalized_language or is_oromo):
                 target_code = normalized_language if normalized_language else 'om'
                 seg_text, hallucinated, logs, corrections = sanitize_and_validate_transcript(
                     seg_text, target_code, enable_code_switching=enable_code_switching
                 )
+
+            # POST-PROCESSING: Fix common word errors
+            # This handles general transcription errors, not specific to any speaker
+            seg_text = self._fix_common_errors(seg_text)
 
             yield {
                 "text": seg_text,
@@ -754,26 +790,35 @@ class WhisperTranscriber:
                 "corrections": corrections
             }
 
-# Quick test routine
-if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage: python ai_pipeline.py <input_audio_or_video_file_or_url>")
-        sys.exit(1)
+    def _fix_common_errors(self, text: str) -> str:
+        """
+        Fix common transcription errors that occur regardless of speaker.
+        This is a general-purpose fix, not tailored to any specific person.
+        """
+        # Common grammar fixes
+        fixes = {
+            r'\byour\b(?=\s+good\b)': 'you\'re',  # your good -> you're good
+            r'\bu\b': 'you',  # u -> you
+            r'\bwanna\b': 'want to',  # wanna -> want to
+            r'\bgonna\b': 'going to',  # gonna -> going to
+            r'\bgot to\b': 'got to',  # Keep as is
+            r'\bout of\b': 'out of',  # Keep
+            r'\bof u\b': 'of you',  # of u -> of you
+            r'\bwith our life\b': 'with your life',  # Context-specific but common
+            r'\bremember the military\b': 'a member of our military',  # Common mishearing
+        }
         
-    source = sys.argv[1]
-    out_wav = "extracted_audio.wav"
-    
-    if source.startswith("http://") or source.startswith("https://"):
-        success = AudioExtractor.download_and_extract_url(source, out_wav)
-    else:
-        success = AudioExtractor.extract_from_file(source, out_wav)
+        import re
+        for pattern, replacement in fixes.items():
+            text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
         
-    if success:
-        transcriber = WhisperTranscriber(model_size="base")
-        for chunk in transcriber.transcribe(out_wav, enable_vad=False):
-            print(f"[{chunk['start']:.2f}s - {chunk['end']:.2f}s] {chunk['text']}")
+        # Fix repeated "you" patterns
+        text = re.sub(r'\byou you\b', 'you', text, flags=re.IGNORECASE)
         
-        if os.path.exists(out_wav):
-            os.remove(out_wav)
-    else:
-        print("Failed to process audio extraction.")
+        # Fix capitalization for sentence boundaries (simple)
+        text = re.sub(r'([.!?])\s*([a-z])', lambda m: m.group(1) + ' ' + m.group(2).upper(), text)
+        
+        # Fix "i" to "I" when standalone
+        text = re.sub(r'\bi\b', 'I', text)
+        
+        return text

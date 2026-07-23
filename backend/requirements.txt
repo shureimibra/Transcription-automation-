@@ -1,4 +1,4 @@
-(Django>=5.0,<5.1
+Django>=5.0,<5.1
 djangorestframework>=3.14,<3.15
 channels>=4.0,<4.1
 daphne>=4.1,<4.2
@@ -7,11 +7,12 @@ python-docx>=1.1.0
 faster-whisper>=1.0.0
 pywin32; sys_platform == 'win32'
 django-cors-headers>=4.3.0
+yt-dlp
 
 # Fine-tuning dependencies
 transformers>=4.40.0
 datasets>=2.15.0
-accelerate>=1.22.0
+accelerate
 peft>=0.5.0
 safetensors>=0.3.0
 torch>=2.0.0
