@@ -1,0 +1,300 @@
+# The translation polish prompt
+
+**What this is.** One prompt, copied into your own Gemini (or any capable
+assistant), that takes the French our system produced and brings it to
+Eagle's submission standard.
+
+**Why it exists.** Our platform translates every task before you take it.
+That draft is good but not final. Closing the last gap on our own API would
+cost more per month than the whole operation earns, so that step is yours —
+and it is the reason a task takes twenty minutes rather than five.
+
+**How to use it:** copy everything between the two `====` lines, paste it
+into a new chat, then paste the French body underneath it. Full step-by-step
+in `TASKER_GUIDE.md`.
+
+---
+
+## The prompt
+
+```
+====================== COPY FROM HERE ======================
+You are a professional French translator preparing a document for
+submission to a transcription and translation marketplace. The text below
+is a machine-produced French translation of an English audio transcript.
+Your job is to bring it to professional publication standard.
+
+WHAT YOU MUST NOT DO — these cause automatic rejection:
+- Do not add any commentary, preamble, heading, or closing remark.
+  Do not write "Here is the corrected version" or anything similar.
+  Your entire reply must be the corrected French text and nothing else.
+- Do not summarise, shorten, expand, or reorganise. Every idea in the
+  input must appear in your output, in the same order.
+- Do not leave any English word or phrase untranslated, unless it is a
+  proper noun, a brand, an acronym, or a title that is conventionally kept
+  in its original form.
+- Do not invent, remove, or alter any number, date, percentage, currency
+  amount, measurement, proper noun, or acronym. Every one of these in the
+  input must appear in your output with the same value.
+- KEEP EVERY NUMBER IN THE SAME FORM AND THE SAME PRECISION. Never round,
+  never compute, and never turn a fraction or a spelled-out number into a
+  decimal. "16 and 2 thirds percent" becomes "16 et deux tiers pour cent",
+  NEVER "16,67" - the arithmetic is right and the translation is wrong,
+  because it states a precision the speaker did not. A decade, a year or a
+  citation is copied across unchanged.
+- Do not add explanatory notes, translator's notes, or footnotes.
+- Do not introduce square brackets. If the source already contains a
+  bracketed tag such as [inaudible] or [crosstalk], keep it, translated.
+  Never invent one, and never delete one the source gave you.
+- OFFICIAL NAMES GET ONE FORM AND KEEP IT. The name of a statute, a court,
+  an institution, a case or an organisation may be kept in English - but
+  whichever form you choose, use that exact form EVERY time it appears.
+  Never translate it in one sentence and leave it in English in the next,
+  and never shorten it on later mentions.
+- Do not add any website, domain name, URL, email address, book title,
+  citation or reference that is not already in the text. If the speaker
+  describes something without naming it, leave it undescribed. Supplying
+  the name you believe is correct is an invention, however plausible.
+- Write only in French. Not one word of Spanish, Italian, Portuguese or
+  English may appear in your output, except inside a quotation, a title or
+  a proper name that the text itself keeps in its original language.
+- Translate EVERY term, including ones a French reader would probably
+  understand. "slaveholders" must become "proprietaires d'esclaves", not be
+  left as it stands because the meaning is transparent. If you have already
+  translated a term once, never leave it untranslated later in the same
+  document.
+- Use no formatting characters at all. No asterisks, no underscores, no
+  markdown. Titles are written in plain text: The Mind of the South, not
+  *The Mind of the South*. What you produce is submitted as plain text and
+  an asterisk arrives as literal punctuation in the middle of a sentence.
+
+WHAT TO FIX:
+1. Fluency. Rewrite anything that reads as machine-translated so that it
+   reads as though written by a native French professional. Fix word order,
+   agreement, tense, register, and awkward literal renderings.
+2. Terminology consistency. Once you choose a French term for a recurring
+   concept, use that same term everywhere. Never render one source term
+   three different ways.
+3. Register. Match the source. Formal source stays formal; conversational
+   source stays natural, not stiff.
+4. Domain accuracy. Identify what the document is about and use the correct
+   professional vocabulary for that field — legal, medical, scientific,
+   academic, technical, financial, or general. Where a field has a settled
+   French term of art, use it rather than a literal translation. If a term
+   is genuinely ambiguous, choose the reading most consistent with the rest
+   of the document; never guess wildly and never flag it in the text.
+5. Cohesion. The source is a spoken transcript, so it may contain false
+   starts, repetitions, and filler that survived translation. Remove them
+   and join the sentences so the result reads as clean written French.
+   Preserve meaning; remove only the disfluency.
+
+FRENCH TYPOGRAPHY — apply all of these:
+- Narrow non-breaking space before ; : ! and ?
+- Guillemets with inner spacing for quotations: « comme ceci »
+  Never straight ASCII quotes.
+- Decimal comma, not a point: 3,14 — never 3.14
+- Space before the percent sign: 50 % — never 50%
+- Space as thousands separator: 2 582 — never 2,582 and never 2582
+- Apostrophes as ’ (typographic), not '
+- Capitalise only the first word of a title, plus proper nouns
+
+STRUCTURE:
+- Keep the paragraph breaks of the input. One blank line between
+  paragraphs. Do not merge everything into one block and do not add
+  headings that are not in the input.
+
+Reply with the corrected French text only.
+
+Here is the text:
+======================= COPY TO HERE ========================
+```
+
+---
+
+## Why each rule is there
+
+Every rule above corresponds to something that is either **checked
+automatically before you can submit**, or **known to cause a rejection**.
+None of it is stylistic preference.
+
+| Rule | What enforces it |
+|---|---|
+| Number FORM unchanged | Nothing automatic sees it: `16,67` has the same VALUE as 16 2/3. Written after task 4813 was blocked for it |
+| One form per official name | Not automatically checkable — see "What a FAILED review said" |
+| Brackets kept, never invented | An accepted document ended in `[incompréhensible]`; the old rule would have had a worker delete it |
+| No spellchecker damage | `language.autocorrect-damage` — **HIGH**, named in a failed review |
+| No character corruption | `encoding.mojibake` — **CRITICAL**. 205 sequences went unseen by every other check |
+| No commentary | `check_commentary` — a "Here is..." line blocks submission |
+| Nothing dropped or padded | `check_length_anomaly` — flags a paragraph that vanished |
+| No English left behind | `check_source_leakage` — flags surviving source text |
+| Numbers unchanged | `check_numbers` — **CRITICAL**, blocks submission outright |
+| No repeated paragraph | `check_duplication` — the signature of a model looping |
+| No invented references | `entity.invented-reference` — **HIGH**. Added after a real run supplied `planethunters.org`, a site the speaker never named |
+| French only | `language.foreign-word` — **MEDIUM**. Added after a real run wrote Spanish `decir` where French needs `dire`. Quoted titles are exempt |
+| No formatting characters | Stripped automatically on paste-back, after a real run wrapped book titles in `*asterisks*`. Eagle receives plain text |
+| Every term translated | Not automatically checkable. A real run left `slaveholders` in English in one sentence while translating it correctly two lines earlier — the kind of thing only a reader catches |
+| Decimal comma | `typography.fr.decimal-separator` — **MEDIUM**, treated as a *meaning* defect: `3.14` read by a French reader as a thousands separator is a different number |
+| Guillemets | `typography.fr.guillemets` |
+| Space before `%` | `typography.fr.percent-spacing` |
+| NBSP before `; : ! ?` | `typography.fr.nbsp-before-high-punctuation` |
+
+The number rule is the one to take most seriously. It is the only
+**CRITICAL** check in this list and it blocks submission with no override.
+
+One thing it no longer does: converting a spelled-out number to a figure
+("one" → "1") is **not** flagged, because the value is unchanged and nothing
+was invented. That used to block perfectly good work. Changing a value, or
+introducing a figure the speaker never gave, still blocks.
+
+## Why it covers every Eagle niche
+
+There is deliberately no list of domains with special instructions for each.
+Eagle sends legal, medical, academic, scientific, technical, financial and
+general material, and a fixed list would be wrong the first time something
+arrives that is not on it. Rule 4 instead asks the assistant to **identify
+the domain from the document and apply that field's conventions** — which is
+the same approach the platform's own quality engine takes: domain is
+discovered per document, never hardcoded.
+
+## Long documents
+
+A twenty-minute task is roughly **3,900 words / 23,000 characters**. If your
+assistant truncates or slows down, split the body in half and run the prompt
+twice, then join the two outputs with a blank line between them.
+
+Split **at a paragraph break**, never mid-sentence, and make sure the second
+half starts where the first ended — no overlap and no gap. Terminology
+consistency is the thing most likely to suffer across a split, so if a key
+term appears in both halves, check it reads the same in both.
+
+## What a real run actually produced
+
+This prompt was tested on a genuine task before being handed to anyone. A
+1,903-word machine draft came back at 1,874 words — nothing dropped, nothing
+padded — with every key term intact (`LGM1`, `LGM2`, `BLC1`, `Proxima`,
+`Parkes`, `Kepler`, `TESS`, `2019`, `2012`). Sentence punctuation was
+repaired, mid-sentence capitals from transcript boundaries were fixed, and
+guillemets and typographic apostrophes were applied correctly. It took under
+two minutes.
+
+Three things went wrong, and all three are now checked automatically:
+
+- **An invented reference.** `planethunters.org` appeared in the output. It
+  is the correct site for what the speaker was describing, and it is
+  nowhere in the English. A plausible invention is more dangerous than an
+  obvious one, because nobody questions it.
+- **A Spanish word.** "on peut *decir* que la planète est là" — French
+  needs `dire`. Close enough to read as a typo, far enough to be wrong.
+- **Square brackets**, which the prompt already forbade and the assistant
+  used anyway.
+
+That is why the two rules above about references and language exist: they
+were written from a defect, not from imagination. Read your output for
+those three specifically.
+
+## What the first live submission found
+
+Task 4452, a 25-minute lecture, submitted and accepted on 29 August 2026.
+3,084 English words became 3,206 French — nothing dropped across the whole
+recording. Three things needed fixing before it went:
+
+- **`slaveholders` left in English** in one sentence, while the same
+  document rendered it correctly as `proprietaires d'esclaves` two lines
+  earlier. Nothing automatic caught it; the foreign-word check carries
+  function words, not vocabulary.
+- **18 markdown asterisks** around book titles. Now stripped on paste-back,
+  because Eagle receives plain text and would have shown them literally.
+- **An ASR error in the SOURCE**: the speaker said "the 1800s", the machine
+  heard "the 18s", and the translation sensibly wrote "les annees 1800" —
+  which the gate then reported as an invented number. The fix was to
+  correct the English, not the French.
+
+That last one is worth remembering. When a number finding looks wrong,
+check the English first: the transcript is machine-made and the translation
+may be more faithful than its source.
+
+## What a FAILED review said
+
+The first review feedback we have seen, and the only direct evidence of what
+a reviewer actually marks down. Three items, in their words:
+
+**1. `don't` for `dont`.**
+
+> « don't nous avons tous entendu parler » -> « dont nous avons tous entendu
+> parler ». *don't is an English/French typo. The correct French relative
+> pronoun is dont.*
+
+An English spellchecker run over French text. This is now checked
+automatically (`language.autocorrect-damage`, HIGH) along with `Vie siecle`
+for `VIe siecle`, which is the same corrector turning "the 6th century" into
+"the life century".
+
+It was briefly MEDIUM, because an ACCEPTED document had been found
+containing ten of them. This feedback settled it: acceptance elsewhere meant
+the defect got past one reviewer, not that it is tolerated.
+
+**2 and 3. An official name used in two forms.**
+
+> « la Family Law Reform Act » ... *The English statutory title may be
+> retained, but it should be consistently treated as the official name of
+> the legislation rather than translated inconsistently.*
+>
+> « designer la Family Law Act comme loi applicable » ... *Grammatically
+> acceptable, but the statutory title should be kept consistent throughout
+> the transcript.*
+
+Note what is NOT being asked for. The reviewer does not object to the
+English title being kept — that is explicitly allowed. The objection is that
+the document used more than one form for one Act.
+
+**This one is not automatically checkable and is not pretended to be.**
+`Family Law Reform Act` and `Family Law Act` may be two different statutes,
+so a rule that flagged the pair would be wrong about half the time. It is in
+the prompt instead, and the check prompt asks for a list of every official
+name with each form it appears in — which is a job for a reader, not a
+regex.
+
+## What three accepted documents taught us
+
+Accepted work is the only evidence that separates a real finding from noise,
+and running the gate over three of them found the gate wrong more often than
+the documents:
+
+| Finding on ACCEPTED work | Verdict |
+|---|---|
+| `19th` -> `XIXe` reported as an altered identifier code | false positive, exemption added |
+| `60-year-old` -> `60 ans` reported the same way | false positive, exemption added |
+| `the` inside *The Mind of the South* reported as a foreign word | false positive, unquoted titles now exempt |
+| NBSP missing before `; : ! ?` | true, and tolerated — seen on two accepted documents |
+| 205 mojibake sequences invisible to every check | real blind spot, now CRITICAL |
+| 15 spellchecker errors invisible to every check | real blind spot, now HIGH |
+
+Three false positives removed, two blind spots closed. Send accepted work
+and failed reviews both: the first tells us what the gate gets wrong, the
+second tells us what it is missing.
+
+## Translating from scratch
+
+When the machine translation is missing — the platform's own quota can run
+out — the same rules apply, with one change to the opening line:
+
+> The text below is the English transcript of a recorded lecture. Translate
+> it into French to professional publication standard.
+
+and one addition to the instructions:
+
+> This is a spoken transcript, so it contains false starts, repetitions and
+> filler. Remove those and join the sentences so the French reads as clean
+> written prose. Preserve every idea; remove only the disfluency.
+
+Everything else is unchanged. A 25-minute task is about 3,000 words, which
+is usually two chats: split at a paragraph break, never mid-sentence, and
+join the halves with a blank line.
+
+## What this prompt does not do
+
+It does not check itself. Paste the result back into the platform and let
+the gate run — that is what catches a dropped paragraph or an invented
+figure, and it does so without anyone needing to read French. If the gate
+reports findings, fix those specific items and re-check. Do not submit
+around a finding.

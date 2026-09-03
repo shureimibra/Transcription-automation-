@@ -1,0 +1,181 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ===================================================================== *
+ * THE PALETTE
+ *
+ * Every colour the application uses is defined once, here, as a
+ * space-separated RGB triplet. `tailwind.config.js` maps its token names
+ * (`surface`, `ink`, `status-ready`) onto these variables, so the ~290
+ * places that already say `bg-surface` or `text-ink-mute` re-theme
+ * themselves and no screen has to be edited to gain a second theme.
+ *
+ * EXACTLY TWO RULES, AND THE STAMP DECIDES.
+ *
+ * The first version of this file had three: a light `:root`, a dark
+ * `@media (prefers-color-scheme: dark)` guarded by `:not([data-theme=light])`,
+ * and a dark `[data-theme="dark"]`. Each was correct on its own and the
+ * three of them together depended on a `:not()`, a media query and source
+ * order all agreeing -- and a light stamp on a dark machine came out dark
+ * anyway. Debugging it meant reasoning about specificity to answer "why is
+ * this page dark", which is the wrong question to have to ask.
+ *
+ * So the media query is gone. `theme.jsx` and the boot script in index.html
+ * ALWAYS write `data-theme`, never leave it absent, and the two rules below
+ * are mutually exclusive with identical specificity. The page is dark if and
+ * only if <html data-theme="dark">, which is a fact you can read in the
+ * inspector in one second rather than derive.
+ *
+ * There is no no-JavaScript case to fall back for: this is a React
+ * application, so if the stamp did not run, nothing did.
+ *
+ * WHY LIGHT IS THE BASE. Our taskers spend their day on Eagle, which is a
+ * white interface, and they move between the two screens task by task. A
+ * tool that inverts under them every few minutes is tiring in a way that is
+ * hard to name and easy to blame on the tool.
+ * ===================================================================== */
+
+:root,
+:root[data-theme="light"] {
+  /* Surfaces, ground upward. The neutrals carry a slight violet bias so
+     they sit with the indigo rather than fighting it -- a pure grey beside
+     this accent reads as unconsidered. */
+  --canvas:   246 246 251;
+  --surface:  255 255 255;
+  --raised:   251 251 254;
+  --overlay:  239 239 247;
+  --edge:     230 230 240;
+  --edging:   211 211 228;
+
+  --ink:      26 26 46;
+  --ink-dim:  78 80 105;
+  --ink-mute: 123 125 150;
+
+  /* Interactive indigo. */
+  --accent:        91 95 199;
+  --accent-soft:   234 234 248;
+  --accent-strong: 74 78 181;
+  --accent-ink:    60 63 158;
+
+  /* The deep navy, spent on exactly one primary action per surface. */
+  --brand:        27 27 107;
+  --brand-soft:   228 228 242;
+  --brand-strong: 18 18 78;
+
+  /* Money gets a channel of its own and shares it with nothing. */
+  --money:      31 163 74;
+  --money-soft: 234 247 238;
+  --money-ink:  21 128 61;
+
+  --status-new:       123 125 150;
+  --status-assigned:  110  95 208;
+  --status-progress:   47 111 208;
+  --status-review:    183 121  31;
+  --status-ready:      31 163  74;
+  --status-submitted:  44 125 160;
+  --status-approved:   21 128  61;
+  --status-rejected:  209  67  67;
+  --status-failed:    169  50  38;
+  --status-cancelled: 138 140 163;
+
+  --shadow-panel: 0 1px 2px rgb(26 26 46 / .04), 0 8px 24px -14px rgb(26 26 46 / .16);
+  --shadow-lift:  0 2px 4px rgb(26 26 46 / .06), 0 18px 34px -20px rgb(26 26 46 / .26);
+
+  color-scheme: light;
+}
+
+/* Dark. The only other rule in the file, and the only thing that can make
+   the application dark. Same specificity as the light rule above and
+   mutually exclusive with it, so source order cannot decide the outcome. */
+:root[data-theme="dark"] {
+  --canvas:   12 13 22;
+  --surface:  19 20 31;
+  --raised:   26 28 41;
+  --overlay:  35 38 54;
+  --edge:     42 45 64;
+  --edging:   58 62 85;
+
+  --ink:      233 234 242;
+  --ink-dim:  167 170 192;
+  --ink-mute: 118 122 146;
+
+  --accent:        138 142 232;
+  --accent-soft:    35  38  74;
+  --accent-strong: 165 168 240;
+  --accent-ink:    185 188 245;
+
+  --brand:         75  79 192;
+  --brand-soft:    30  32  80;
+  --brand-strong: 106 110 220;
+
+  --money:       53 196 107;
+  --money-soft:  18  48  30;
+  --money-ink:   95 217 138;
+
+  --status-new:       135 146 162;
+  --status-assigned:  142 130 224;
+  --status-progress:   91 155 224;
+  --status-review:    217 164  65;
+  --status-ready:      53 196 107;
+  --status-submitted:  87 166 201;
+  --status-approved:   70 201 122;
+  --status-rejected:  232 107 107;
+  --status-failed:    217 112  95;
+  --status-cancelled: 107 113 128;
+
+  --shadow-panel: 0 1px 2px rgb(0 0 0 / .5), 0 8px 24px -12px rgb(0 0 0 / .6);
+  --shadow-lift:  0 2px 6px rgb(0 0 0 / .55), 0 20px 40px -18px rgb(0 0 0 / .7);
+
+  color-scheme: dark;
+}
+
+/* ===================================================================== *
+ * BASE
+ * ===================================================================== */
+
+html, body, #root {
+  min-height: 100%;
+  /* Set on html as well as body so an over-scroll bounce or a short route
+     never reveals the browser's default white behind the app. */
+  background-color: rgb(var(--canvas));
+  color: rgb(var(--ink));
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Digits that sit in columns -- durations, money, counts, the deadline
+   clock -- line up, and a ticking countdown stops jittering as it counts. */
+.tabular-nums { font-variant-numeric: tabular-nums; }
+
+/* Headings should break where a person would break them. */
+h1, h2, h3 { text-wrap: balance; }
+
+/* A scrollbar that belongs to the theme rather than to the browser. */
+* {
+  scrollbar-color: rgb(var(--edging)) transparent;
+  scrollbar-width: thin;
+}
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: rgb(var(--edging));
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-clip: content-box;
+}
+
+/* Anyone who has asked their system to reduce motion gets no spinners
+   whirling and no fade-ins -- the interface still works, it just stops
+   moving. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

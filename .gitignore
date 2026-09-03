@@ -1,0 +1,97 @@
+# Virtual environments
+.venv/
+venv/
+
+# Editor settings
+.vscode/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+node_modules/
+.env
+# Local Eagle Web session credentials. The benchmark/probe scripts in
+# backend/ read EAGLE_COOKIE from the environment (see
+# backend/scripts/eagle_credentials.py) -- a session cookie must never
+# become a string literal in a tracked file again.
+.env.local
+*.cookies.txt
+
+# Large local media and cache artifacts produced by the benchmark scripts.
+# Untracked already, but listing them stops `git add -A` from sweeping in
+# tens of megabytes of client audio alongside a code change.
+backend/*.wav
+backend/*.mp3
+backend/*.wav.temp.part
+backend/task_*.html
+backend/page_*.html
+backend/diarized_*_cache.json
+
+# Local databases and backups
+backend/db.sqlite3
+backend/db.sqlite3.*
+
+# Local runtime / Python bundles
+.python311-runtime/
+*.zip
+
+# Local media and caches
+backend/media_cache/
+*.wav
+*.mp3
+*.wav.temp.part
+
+# Local benchmark/test artifacts
+backend/benchmark/
+backend/benchmark_*.txt
+backend/benchmark_*.log
+backend/benchmark_*.json
+backend/*benchmark*.py
+backend/probe_*.py
+backend/run_*benchmark*.py
+backend/download_*.py
+backend/dump_cache.py
+backend/inspect_*.py
+backend/finish_*.log
+backend/final_french_clean.txt
+backend/translated_*.txt
+backend/task_*_eagle_transcription.txt
+page.html
+
+# Vite generated files
+frontend/vite.config.js.timestamp-*
+
+# Local databases and backups
+backend/db.sqlite3
+backend/db.sqlite3.*
+
+# Local runtime / Python bundles
+.python311-runtime/
+*.zip
+
+# Local media and caches
+backend/media_cache/
+*.wav
+*.mp3
+*.wav.temp.part
+
+# Local benchmark/test artifacts
+backend/benchmark/
+backend/benchmark_*.txt
+backend/benchmark_*.log
+backend/benchmark_*.json
+backend/*benchmark*.py
+backend/probe_*.py
+backend/run_*benchmark*.py
+backend/download_*.py
+backend/dump_cache.py
+backend/inspect_*.py
+backend/finish_*.log
+backend/final_french_clean.txt
+backend/translated_*.txt
+backend/task_*_eagle_transcription.txt
+page.html
+
+# Vite generated files
+frontend/vite.config.js.timestamp-*
+

@@ -1,0 +1,75 @@
+Django>=5.0,<5.1
+djangorestframework>=3.14,<3.15
+channels>=4.0,<4.1
+daphne>=4.1,<4.2
+celery>=5.3,<5.4
+python-docx>=1.1.0
+faster-whisper>=1.0.0
+pywin32; sys_platform == 'win32'
+django-cors-headers>=4.3.0
+
+# PostgreSQL driver (Phase 2). Production runs on PostgreSQL because the
+# task-claiming logic depends on select_for_update, which is a silent no-op
+# on SQLite -- see apps.workforce.services. SQLite remains available for
+# local development via DB_ENGINE=sqlite.
+psycopg[binary]>=3.1
+
+# ON LINUX, INSTALL TORCH FROM THE CPU INDEX FIRST. `pip install torch`
+# defaults to the CUDA build on Linux and to the CPU build on Windows, so a
+# machine with no GPU silently pulls ~2.5 GB of CUDA libraries it can never
+# use -- and, on a box whose /tmp is a small tmpfs, fails partway through
+# with "No space left on device" while 200+ GB sits free on the real disk.
+#
+# The verified environment runs torch 2.13.0+cpu. Before this file:
+#
+#     pip install torch torchaudio torchcodec #         --index-url https://download.pytorch.org/whl/cpu
+#
+# Then `pip install -r requirements.txt` sees torch already satisfied and
+# leaves it alone.
+#
+# NOTE: torch, torchaudio, scikit-learn and speechbrain are load-bearing but
+# arrive transitively through pyannote.audio rather than being declared here.
+# Phase 1 recorded that gap: a fresh environment installed from this file
+# alone resolves different versions than the one this platform was verified
+# on, and the resulting test run silently skips the ASR and diarization
+# suites. Pinning them is a Phase 5 task.
+yt-dlp>=2026.7.4
+curl_cffi>=0.5.10
+
+# Real speaker diarization (core.services.diarization), opt-in via the
+# "Enable Speaker Diarization" checkbox. Runs entirely locally/offline once
+# its model is downloaded -- no per-call API -- but that one-time download
+# requires a free HuggingFace account that has accepted the
+# pyannote/speaker-diarization-3.1 model's license terms, plus an access
+# token set via one of HF_TOKEN / HUGGINGFACE_TOKEN / PYANNOTE_AUTH_TOKEN.
+# Without that token configured, diarization is skipped automatically and
+# the platform falls back to its previous placeholder speaker labels --
+# this dependency being installed (or not) never breaks transcription.
+pyannote.audio>=3.1,<3.2
+# Hard runtime dependency of pyannote.audio's speaker_verification pipeline
+# (imported unconditionally, not lazily) -- omitting it makes every
+# diarization-enabled job silently fail to load the model with
+# "No module named 'matplotlib'", caught by SpeakerDiarizer._load's broad
+# except and treated as "diarization unavailable" rather than surfaced.
+matplotlib>=3.11,<4.0
+# torchaudio's audio-loading path now requires torchcodec for actual
+# decode calls (not just import) -- without it, diarize() gets past model
+# loading fine but fails on the first real inference call with "TorchCodec
+# is required for load_with_torchcodec".
+torchcodec>=0.15,<0.16
+
+# Dynamic media discovery (core.services.dynamic_discovery) -- the last-resort
+# stage that resolves audio on JavaScript-rendered pages, where the player and
+# its media URL only exist after the page's own scripts have run. Reached only
+# after the static scrape AND yt-dlp's generic extractor have both failed, so
+# no URL that already works ever launches a browser.
+#
+# Optional in exactly the same way pyannote is: without this installed the
+# stage self-disables (dynamic_discovery.is_available() -> False) and such URLs
+# fail as they do today. Nothing else in the pipeline depends on it.
+#
+# Needs a one-time browser download after pip install, which pip cannot do:
+#     python -m playwright install chromium
+# Without that step the package imports fine but the browser launch raises,
+# which is reported as "unavailable" rather than as a download failure.
+playwright>=1.45,<2.0

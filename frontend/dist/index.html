@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Shurz</title>
+    <meta name="theme-color" content="#1b1b6b" />
+
+    <!-- "THIS PAGE HANDLES ITS OWN THEMING. DO NOT HELP."
+         Chrome's Auto Dark Mode for Web Contents, and every dark-mode
+         browser extension, darkens pages they judge to be light-only. A page
+         that declares support for BOTH schemes is left alone; one that
+         declares only `color-scheme: light` is treated as a page that has
+         not thought about it and gets inverted anyway.
+         The per-theme `color-scheme` in index.css still decides how form
+         controls and scrollbars render. This says something different: that
+         the decision is already ours to make. -->
+    <meta name="color-scheme" content="light dark" />
+
+    <!-- Rubik, the face the platform our taskers already use is setting.
+         Preconnected because a headline that swaps on every page load reads
+         as a slow app even when nothing else is slow. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Rubik:ital,wght@0,300..700;1,400..500&display=swap"
+    />
+
+    <!-- THE THEME IS STAMPED BEFORE THE FIRST PAINT, ALWAYS.
+         React cannot do this: by the time it mounts the browser has drawn a
+         frame, and someone who chose dark would watch a white page flash
+         first. The stylesheet keys off this attribute and nothing else, so
+         it is written unconditionally -- resolving "follow the system" HERE
+         rather than leaving the attribute off and asking a media query to
+         cover for it. Deliberately tiny and failure-tolerant: a browser with
+         storage blocked still gets a correctly themed page, it just will not
+         remember the choice. -->
+    <script>
+      (function () {
+        var pref = null;
+        try { pref = localStorage.getItem('theme'); } catch (e) {}
+        var theme = pref === 'dark' || pref === 'light' ? pref : null;
+        if (!theme) {
+          var dark = false;
+          try {
+            dark = window.matchMedia
+              && window.matchMedia('(prefers-color-scheme: dark)').matches;
+          } catch (e) {}
+          theme = dark ? 'dark' : 'light';
+        }
+        document.documentElement.setAttribute('data-theme', theme);
+      })();
+    </script>
+    <script type="module" crossorigin src="/assets/index-meXe5QYO.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-e4clVSo5.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

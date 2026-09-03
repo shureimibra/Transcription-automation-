@@ -1,0 +1,987 @@
+"""
+The checks that must NOT be delegated to a language model (RULE 4, spec 19).
+
+Everything here answers a question with exactly one correct answer that code
+settles cheaply and exactly: did every number survive, did the URLs come
+through intact, is the output suspiciously short, did the model leave
+commentary in the deliverable. An LLM asked "are all the numbers the same?"
+returns a plausible opinion and misses the one that matters; a multiset
+comparison cannot miss it.
+
+These findings are also the ones a repair loop is least entitled to argue
+with. `detector='deterministic'` travels on every issue this module raises
+so the audit prompt can be told which findings are facts, and so a
+re-audit that "resolves" a numeric mismatch without the number changing is
+visible as the contradiction it is.
+
+LOCALE-AWARE NUMBER COMPARISON is the subtle part. "3.14" translated into
+French is correctly "3,14", and a naive string diff reports a defect on a
+perfect translation while still missing "10 mg" becoming "100 mg". So
+numbers are parsed to values, not compared as text -- see `extract_numbers`.
+"""
+import re
+from decimal import Decimal, InvalidOperation
+from typing import Dict, List, Optional, Sequence, Tuple
+
+from .issues import IssueCategory, QualityIssue, Severity
+from .typography import check_typography
+
+# ---------------------------------------------------------------------- #
+# Numbers
+# ---------------------------------------------------------------------- #
+
+# A number possibly carrying grouping separators and a decimal part, in
+# either the anglophone (1,234.56) or francophone (1 234,56) convention.
+#
+# The space-grouped alternative comes FIRST and demands groups of exactly
+# three digits. Without that constraint a plain space would join any two
+# adjacent numbers -- "10 20" would parse as 1020 -- and a list of figures
+# in a transcript would report a fabricated mismatch on every line.
+#
+# Deliberately does not capture a sign: a leading '-' is far more often a
+# dash or a hyphen in transcript text than a negative quantity, and a false
+# "minus lost" finding on every dashed clause would drown the real ones.
+_NUMBER_RE = re.compile(
+    r'\d{1,3}(?:[   ]\d{3})+(?:[,.]\d+)?'
+    r'|\d+(?:[,.]\d+)*'
+)
+
+# Groups of exactly three digits, which is what a thousands separator
+# separates. Used to tell "1,234" (grouping) from "1,23" (a decimal comma).
+_GROUPED_RE = re.compile(r'^\d{1,3}(?:[   ,.]\d{3})+$')
+
+
+def _to_decimal(token: str) -> Optional[Decimal]:
+    """
+    Parses one numeric token under either convention, or returns None.
+
+    The ambiguous case is a single separator with three digits after it:
+    "1,234" is one thousand two hundred thirty-four in English and could be
+    1.234 in French. It is resolved as GROUPING, because thousands are
+    vastly more common in prose than a three-decimal fraction -- and because
+    guessing wrong in this direction produces a false match (two readings
+    that agree) rather than a false alarm.
+    """
+    cleaned = token.strip()
+    if not cleaned:
+        return None
+    if _GROUPED_RE.match(cleaned):
+        # Pure grouping: every separator is a thousands mark.
+        digits = re.sub(r'[   ,.]', '', cleaned)
+        try:
+            return Decimal(digits)
+        except InvalidOperation:
+            return None
+
+    # Otherwise the LAST separator, if any, is the decimal mark and anything
+    # before it is grouping.
+    match = re.search(r'[,.](\d+)$', cleaned)
+    if match:
+        integer_part = re.sub(r'[   ,.]', '', cleaned[:match.start()])
+        fraction = match.group(1)
+        raw = f'{integer_part or "0"}.{fraction}'
+    else:
+        raw = re.sub(r'[   ,.]', '', cleaned)
+    try:
+        return Decimal(raw)
+    except InvalidOperation:
+        return None
+
+
+#: A decade written the English way: 1850s, 1900s. The trailing "s" is not
+#: part of the value, and a parser that refuses the whole token reports the
+#: year as missing from a translation that rendered it perfectly well as
+#: "les annees 1850".
+_DECADE_RE = re.compile(r'\b(\d{3,4})s\b')
+
+
+def extract_numbers(text: str) -> List[Decimal]:
+    """Every number in `text` as a value, order preserved. Trailing grouping
+    characters are trimmed so "in 2024, the" does not parse as "2024,"."""
+    values = []
+    # Decades first: "the 1850s" carries the value 1850, and a source and a
+    # translation will never agree on the plural.
+    for match in _DECADE_RE.finditer(text or ''):
+        value = _to_decimal(match.group(1))
+        if value is not None:
+            values.append(value)
+    for match in _NUMBER_RE.finditer(text or ''):
+        token = match.group(0).rstrip(' ,.  ')
+        value = _to_decimal(token)
+        if value is not None:
+            values.append(value)
+    return values
+
+
+def _multiset(values: Sequence) -> Dict:
+    counts = {}
+    for value in values:
+        counts[value] = counts.get(value, 0) + 1
+    return counts
+
+
+def _multiset_diff(left: Dict, right: Dict) -> Tuple[List, List]:
+    """(only-in-left, only-in-right), each expanded by multiplicity so a
+    number that appears twice in the source and once in the target is
+    reported rather than cancelling out."""
+    missing, added = [], []
+    for value, count in left.items():
+        delta = count - right.get(value, 0)
+        if delta > 0:
+            missing.extend([value] * delta)
+    for value, count in right.items():
+        delta = count - left.get(value, 0)
+        if delta > 0:
+            added.extend([value] * delta)
+    return missing, added
+
+
+def _format_values(values, limit: int = 6) -> str:
+    shown = ', '.join(str(value.normalize()) for value in values[:limit])
+    return shown + ('...' if len(values) > limit else '')
+
+
+# --------------------------------------------------------------------- #
+# Numbers that were written as words
+# --------------------------------------------------------------------- #
+
+#: Small cardinals in the languages this platform actually moves between.
+#: Only 0-20 and the round tens: beyond that, spelled-out numbers are rare
+#: in speech and the parsing ("quatre-vingt-dix-sept") stops being worth it.
+_NUMBER_WORDS = {
+    # English
+    'zero': 0, 'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5,
+    'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10,
+    'eleven': 11, 'twelve': 12, 'thirteen': 13, 'fourteen': 14,
+    'fifteen': 15, 'sixteen': 16, 'seventeen': 17, 'eighteen': 18,
+    'nineteen': 19, 'twenty': 20, 'thirty': 30, 'forty': 40, 'fifty': 50,
+    'sixty': 60, 'seventy': 70, 'eighty': 80, 'ninety': 90,
+    'hundred': 100, 'thousand': 1000, 'million': 1000000,
+    # French
+    'zéro': 0, 'un': 1, 'une': 1, 'deux': 2, 'trois': 3, 'quatre': 4,
+    'cinq': 5, 'sept': 7, 'huit': 8, 'neuf': 9, 'dix': 10, 'onze': 11,
+    'douze': 12, 'treize': 13, 'quatorze': 14, 'quinze': 15, 'seize': 16,
+    'vingt': 20, 'trente': 30, 'quarante': 40, 'cinquante': 50,
+    'soixante': 60, 'cent': 100, 'mille': 1000,
+}
+_WORD_RE = re.compile(r"[A-Za-zÀ-ÿ]+", re.UNICODE)
+
+
+#: A French ordinal in Roman numerals: XIXe, XXe, IIIe. This is how French
+#: writes centuries -- "le XIXe siecle" for "the 19th century" -- so a
+#: value-for-value comparison sees 19 vanish from every translation that
+#: followed the convention correctly.
+#:
+#: Only the ORDINAL form is matched (Roman numeral immediately followed by
+#: e/er/eme). A bare "I" or "X" in running text is a letter, and treating it
+#: as a number would forgive real defects by accident.
+_ROMAN_ORDINAL_RE = re.compile(r'\b([IVXLCDM]{1,7})(?:e|er|ere|eme|ème)\b')
+_ROMAN_VALUES = {'I': 1, 'V': 5, 'X': 10, 'L': 50, 'C': 100, 'D': 500, 'M': 1000}
+
+
+def _roman_value(token: str):
+    """Classical Roman numeral to int, or None if it is not one."""
+    total, previous = 0, 0
+    for character in reversed(token.upper()):
+        value = _ROMAN_VALUES.get(character)
+        if value is None:
+            return None
+        total = total - value if value < previous else total + value
+        previous = max(previous, value)
+    return total or None
+
+
+def spelled_number_values(text: str) -> set:
+    """
+    Values written as words rather than digits.
+
+    USED ONLY TO FORGIVE, NEVER TO ACCUSE. A speaker says "little green man
+    one" and a translator writes "little green man 1" -- the value is
+    identical and nothing was invented, but a digit-only comparison calls
+    that an invented quantity and blocks the submission. Since `numeric` is
+    the one CRITICAL check with no override, that false positive stops a
+    worker submitting perfect work.
+
+    It is deliberately NOT used on the missing-from-target side. This list
+    over-generates -- French "un" and "une" are far more often the
+    indefinite article than the number -- and an over-generating source list
+    would manufacture numbers the source never stated and then report them
+    as dropped. Forgiving an addition is safe in a way that inventing an
+    omission is not.
+    """
+    values = set()
+    for word in _WORD_RE.findall((text or '').lower()):
+        if word in _NUMBER_WORDS:
+            values.add(Decimal(_NUMBER_WORDS[word]))
+    # Roman ordinals, which is how French writes a century.
+    for match in _ROMAN_ORDINAL_RE.finditer(text or ''):
+        value = _roman_value(match.group(1))
+        if value is not None:
+            values.add(Decimal(value))
+    return values
+
+
+def check_numbers(
+    source: str, target: str, segment_index: Optional[int] = None
+) -> List[QualityIssue]:
+    """
+    Every number in the source must appear in the target and vice versa.
+
+    CRITICAL severity, unconditionally. This is the "10 mg becomes 100 mg"
+    class, and there is no domain in which silently changing a quantity is
+    a minor issue -- a dose, a monetary amount, a statute number and a
+    tolerance all fail the same way.
+    """
+    source_values = _multiset(extract_numbers(source))
+    target_values = _multiset(extract_numbers(target))
+    missing, added = _multiset_diff(source_values, target_values)
+
+    # A figure the source spelled out is not an invented figure. See
+    # spelled_number_values: this forgives, it never accuses.
+    # A figure the source spelled out is not an invented figure, and a figure
+    # the TARGET spelled out is not a missing one. Both directions forgive;
+    # neither manufactures a defect.
+    #
+    # The second half was absent and it blocked a real submission: English
+    # "20 minutes", French "vingt minutes", reported as a dropped number.
+    # Same value, different notation -- which is the translator's job.
+    if added:
+        added = [v for v in added if v not in spelled_number_values(source)]
+    if missing:
+        missing = [v for v in missing if v not in spelled_number_values(target)]
+
+    # MULTIPLICITY IS NOT MEANINGFUL ACROSS A TRANSLATION. A source saying
+    # "1850" four times and a translation saying it three, having merged two
+    # sentences, has dropped no fact. What matters is whether a value appears
+    # at all -- a changed or invented figure, not a recount.
+    source_set = set(extract_numbers(source))
+    target_set = set(extract_numbers(target))
+    missing = [v for v in dict.fromkeys(missing) if v not in target_set]
+    added = [v for v in dict.fromkeys(added) if v not in source_set]
+
+    issues = []
+    if missing:
+        issues.append(QualityIssue(
+            category=IssueCategory.NUMERIC, severity=Severity.CRITICAL,
+            problem=(
+                'Number(s) present in the source are absent from the output: '
+                + _format_values(missing) + '.'
+            ),
+            correction='Restore every quantity exactly as the source states it.',
+            source_span=_format_values(missing),
+            rule='numeric.missing-from-target',
+            segment_index=segment_index, detector='deterministic',
+        ))
+    if added:
+        issues.append(QualityIssue(
+            category=IssueCategory.NUMERIC, severity=Severity.CRITICAL,
+            problem=(
+                'Number(s) in the output do not appear in the source: '
+                + _format_values(added) + '.'
+            ),
+            correction=(
+                'Remove invented quantities, or correct one that was mistyped.'
+            ),
+            target_span=_format_values(added),
+            rule='numeric.absent-from-source',
+            segment_index=segment_index, detector='deterministic',
+        ))
+    return issues
+
+
+# ---------------------------------------------------------------------- #
+# Verbatim tokens: URLs, e-mail, identifiers
+# ---------------------------------------------------------------------- #
+
+#: A run of Title Case words, including the small connecting words a title
+#: is allowed to contain: "The Mind of the South", "Trouble the Water".
+_TITLE_RUN_RE = re.compile(
+    r"\b[A-Z][\w'’-]+"
+    r"(?:\s+(?:[A-Z][\w'’-]+|of|the|and|in|on|a|an|to|for|from|with))*"
+    r"\s+[A-Z][\w'’-]+"
+)
+
+_URL_RE = re.compile(r'https?://[^\s<>"\')\]]+', re.IGNORECASE)
+_EMAIL_RE = re.compile(r'[\w.+-]+@[\w-]+\.[\w.-]+')
+# An identifier-shaped token: letters and digits mixed, or a dotted/hyphenated
+# code. Catches article references, part numbers, gene symbols, case numbers.
+_IDENTIFIER_RE = re.compile(r'\b(?=[\w-]*\d)(?=[\w-]*[A-Za-z])[A-Za-z0-9]+(?:[-.][A-Za-z0-9]+)*\b')
+
+
+def _check_verbatim(
+    source: str, target: str, pattern, label: str, rule: str,
+    severity: Severity, segment_index: Optional[int],
+) -> List[QualityIssue]:
+    # A DECADE IS NOT AN IDENTIFIER CODE. "1780s" matches the identifier
+    # shape -- digits plus a letter -- but French drops the plural ("les
+    # annees 1780"), so demanding it survive character-for-character reports
+    # a correct translation as having altered a code.
+    def _keep(token):
+        # Not identifier codes, however much they look like one:
+        #   1780s        a decade; French drops the plural
+        #   mid-1780s    the same, with an English prefix
+        #   60-year      a compound adjective; French says "60 ans"
+        #   60-year-old  the same, with a second part -- the old pattern
+        #                allowed only one, so this was reported as a code
+        #   19th, 21st   an ordinal; French writes XIXe, XXIe
+        # Demanding these survive character-for-character reports a correct
+        # translation as having altered a code.
+        #
+        # THE ORDINALS AND THE SECOND HYPHEN PART WERE ADDED FROM EVIDENCE:
+        # task 4452 was ACCEPTED by the platform, and our gate reported
+        # "60-year-old, 20th, 19th" as altered identifiers against a French
+        # text that had rendered every one of them correctly.
+        return not re.match(
+            r'^(?:[a-z]+-)?\d{1,4}(?:st|nd|rd|th|s)?(?:-[a-z]{2,})*$',
+            str(token), re.IGNORECASE)
+
+    source_tokens = _multiset([t for t in pattern.findall(source or '') if _keep(t)])
+    target_tokens = _multiset([t for t in pattern.findall(target or '') if _keep(t)])
+    missing, _ = _multiset_diff(source_tokens, target_tokens)
+    if not missing:
+        return []
+    shown = ', '.join(str(token) for token in missing[:5])
+    return [QualityIssue(
+        category=IssueCategory.ENTITY, severity=severity,
+        problem=f'{label} from the source is missing or altered in the output: {shown}.',
+        correction=f'{label} must be reproduced character-for-character.',
+        source_span=shown, rule=rule,
+        segment_index=segment_index, detector='deterministic',
+    )]
+
+
+def check_verbatim_tokens(
+    source: str, target: str, segment_index: Optional[int] = None
+) -> List[QualityIssue]:
+    """
+    URLs and e-mail addresses are never translated, so any difference is a
+    defect -- HIGH, because a broken link in a deliverable is visible and
+    embarrassing but does not misstate a fact.
+
+    Identifiers are checked at MEDIUM. The pattern is intentionally loose
+    and will occasionally match an ordinary alphanumeric word that the
+    target language legitimately renders differently, so this one informs
+    rather than blocks under the default policy.
+    """
+    issues = []
+    issues += _check_verbatim(
+        source, target, _URL_RE, 'A URL', 'entity.url-altered',
+        Severity.HIGH, segment_index,
+    )
+    issues += _check_verbatim(
+        source, target, _EMAIL_RE, 'An e-mail address', 'entity.email-altered',
+        Severity.HIGH, segment_index,
+    )
+    issues += _check_verbatim(
+        source, target, _IDENTIFIER_RE, 'An identifier code',
+        'entity.identifier-altered', Severity.MEDIUM, segment_index,
+    )
+    return issues
+
+
+# ---------------------------------------------------------------------- #
+# Output integrity
+# ---------------------------------------------------------------------- #
+
+# Phrasings a model uses when it addresses the operator instead of producing
+# the deliverable. Anchored to line starts or wrapped in markers so ordinary
+# prose that happens to contain "note that" is not caught.
+_COMMENTARY_PATTERNS = (
+    re.compile(r'^\s*(?:##+\s*)?(?:final|revised|corrected)\s+(?:translation|text|version)\s*:?\s*$',
+               re.IGNORECASE | re.MULTILINE),
+    re.compile(r'^\s*(?:here(?:\'s| is)\s+the\s+\w+|as an ai\b|i (?:have|\'ve)\s+translated)',
+               re.IGNORECASE | re.MULTILINE),
+    re.compile(r'^\s*(?:note|disclaimer|translator[\'s]* note)\s*:',
+               re.IGNORECASE | re.MULTILINE),
+    re.compile(r'[✅❌⚠]'),  # check mark, cross mark, warning sign
+    re.compile(r'^\s*```', re.MULTILINE),
+)
+
+# A paragraph repeated verbatim -- the classic symptom of a model looping.
+_PARAGRAPH_SPLIT = re.compile(r'\n\s*\n')
+
+
+#: A bare domain: "planethunters.org", "bbc.co.uk". Distinct from _URL_RE,
+#: which requires a scheme and therefore misses every domain a person says
+#: out loud -- which is most of them, in a transcript.
+_DOMAIN_RE = re.compile(
+    r'\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+'
+    r'(?:com|org|net|edu|gov|int|mil|io|co|ai|app|dev|uk|fr|de|au|ca|info|biz)\b',
+    re.IGNORECASE,
+)
+
+
+def check_invented_references(
+    source: str, target: str, segment_index: Optional[int] = None
+) -> List[QualityIssue]:
+    """
+    A URL, domain or e-mail address in the output that the source never
+    mentioned.
+
+    WHY THIS IS ITS OWN CHECK. `check_verbatim_tokens` looks for references
+    that went MISSING; this looks for ones that ARRIVED. A model asked to
+    tidy a transcript will helpfully supply the website it believes is being
+    described, and a plausible invention is more dangerous than an
+    implausible one -- nobody questions it.
+
+    Found on a real task: a polished translation contained
+    "planethunters.org", which appears nowhere in the English and nowhere in
+    the machine draft. It is the correct site for what the speaker was
+    describing, which is exactly why it slipped past a human reader.
+
+    HIGH, not CRITICAL: a fabricated reference is serious, but unlike a
+    changed quantity it does not silently alter a stated fact, and blocking
+    outright would make a stray mention of a domain unsubmittable.
+    """
+    issues = []
+    for pattern, label in ((_URL_RE, 'URL'), (_EMAIL_RE, 'E-mail address'),
+                           (_DOMAIN_RE, 'Domain')):
+        in_source = {t.lower().rstrip('.,;:') for t in pattern.findall(source or '')}
+        in_target = {t.lower().rstrip('.,;:') for t in pattern.findall(target or '')}
+        # A domain inside a URL the source did state is not an invention.
+        source_blob = (source or '').lower()
+        added = sorted(t for t in in_target - in_source if t not in source_blob)
+        if not added:
+            continue
+        shown = ', '.join(added[:5])
+        issues.append(QualityIssue(
+            category=IssueCategory.ENTITY, severity=Severity.HIGH,
+            problem=f'{label}(s) in the output that the source never mentions: {shown}.',
+            correction='Remove anything the speaker did not actually say.',
+            target_span=shown,
+            rule='entity.invented-reference',
+            segment_index=segment_index, detector='deterministic',
+        ))
+    return issues
+
+
+
+# --------------------------------------------------------------------- #
+# A third language in the output
+# --------------------------------------------------------------------- #
+
+#: Words that are unmistakably one language and NOT the target. Every entry
+#: is checked to be a non-word in the target language -- shared vocabulary
+#: (French/Spanish "no", "final", "total") is deliberately absent, because a
+#: checker that fires on correct text teaches people to ignore it.
+#:
+#: Keyed by target language: what does NOT belong when writing French.
+_FOREIGN_MARKERS = {
+    'fr': {
+        # Spanish -- the neighbour a model slips into most often.
+        'decir', 'hacer', 'pero', 'porque', 'entonces', 'tambien', 'también',
+        'ahora', 'siempre', 'nosotros', 'ustedes', 'muy', 'aqui', 'aquí',
+        'esto', 'eso', 'ellos', 'estaba', 'puede', 'hay', 'desde', 'hasta',
+        'cuando', 'donde', 'dónde', 'sobre', 'todos', 'algo', 'nada',
+        # Italian
+        'perché', 'anche', 'sono', 'questo', 'quello', 'sempre', 'adesso',
+        # Portuguese
+        'porque', 'muito', 'ainda', 'depois', 'porém',
+        # English function words that survive a translation pass
+        'the', 'and', 'with', 'from', 'that', 'this', 'which', 'because',
+        'there', 'their', 'would', 'could', 'should', 'about', 'these',
+    },
+    'en': {
+        'decir', 'hacer', 'pero', 'porque', 'entonces', 'nosotros',
+        'toujours', 'parce', 'aussi', 'maintenant', 'beaucoup', 'quelque',
+        'lorsque', 'ainsi', 'donc', 'cela', 'était', 'peuvent',
+    },
+}
+_TOKEN_RE = re.compile(r"[A-Za-zÀ-ÿ]{2,}", re.UNICODE)
+#: Guillemets, straight quotes and curly quotes -- anything a writer marks
+#: as a quotation, title or borrowed name.
+_QUOTED_RE = re.compile(r'«[^»]*»|"[^"]*"|“[^”]*”', re.UNICODE)
+
+
+def check_foreign_language(
+    text: str, target_language: Optional[str] = None,
+    segment_index: Optional[int] = None,
+) -> List[QualityIssue]:
+    """
+    A word from a language that is neither the source nor the target.
+
+    WHY IT NEEDED ITS OWN CHECK. `check_source_leakage` looks for the SOURCE
+    surviving into the output -- English left in a French translation. It
+    cannot see a THIRD language, and a model polishing French will
+    occasionally reach for Spanish, which is close enough to read as a typo
+    and far enough to be wrong.
+
+    Found on a real task: "on peut decir que la planète est là". `decir` is
+    Spanish; the French is `dire`. Every existing check passed it, and a
+    reviewer who does not read French had nothing to go on.
+
+    MEDIUM. It is a genuine defect, but a single stray word is a correction
+    rather than a reason to refuse a whole document -- and the list cannot
+    be exhaustive, so treating it as fatal would misrepresent how much it
+    can promise.
+    """
+    markers = _FOREIGN_MARKERS.get((target_language or '').strip().lower()[:2])
+    if not markers or not text:
+        return []
+
+    # QUOTED MATERIAL IS FOREIGN ON PURPOSE. A title, a nickname or a
+    # citation is kept in its original language by convention -- « The Dish »
+    # is the telescope's actual name, and "little green man 1" is what the
+    # signal was called. Flagging those trains people to ignore the check,
+    # which costs more than the words it would have caught.
+    scanned = _QUOTED_RE.sub(' ', text)
+
+    # AND A TITLE IS STILL A TITLE WITHOUT QUOTATION MARKS ROUND IT.
+    #
+    # The capitalised-word guard below skips "The" and "South", but the
+    # lowercase "the" in the MIDDLE of an unquoted title survives it, so
+    # "intitulé The Mind of the South" -- correct, and a title that must not
+    # be translated -- reported a foreign word.
+    #
+    # Measured against task 4452, a document the platform ACCEPTED: two of
+    # its three findings were false positives of exactly this kind. That is
+    # the expensive sort of wrong. The screen already tells workers these
+    # notes are "worth a look, not worth stalling for", and a check that
+    # fires on correct text finishes the job of teaching them to skip it --
+    # taking the genuine findings down with it.
+    scanned = _TITLE_RUN_RE.sub(' ', scanned)
+
+    found = []
+    for token in _TOKEN_RE.findall(scanned):
+        # A CAPITALISED WORD IS A NAME, NOT A LANGUAGE SLIP. "The Guardian"
+        # and "The Dish" are what they are called; flagging the article in
+        # them produces noise on correct text, and a checker that fires on
+        # correct text is one people learn to skip. A genuine leak --
+        # "decir", "pero", a stray lowercase "the" -- is lower case.
+        if token[:1].isupper():
+            continue
+        lowered = token.lower()
+        if lowered in markers and lowered not in found:
+            found.append(lowered)
+
+    if not found:
+        return []
+    shown = ', '.join(found[:6])
+    return [QualityIssue(
+        category=IssueCategory.TERMINOLOGY, severity=Severity.MEDIUM,
+        problem=(
+            f'Word(s) that do not belong in the target language: {shown}.'
+        ),
+        correction='Replace with the correct target-language word.',
+        target_span=shown,
+        rule='language.foreign-word',
+        segment_index=segment_index, detector='deterministic',
+    )]
+
+
+#: The signature of UTF-8 bytes read as Latin-1/cp1252. These pairs do not
+#: occur in real French, Spanish, German or Portuguese text: "Ã©" is what
+#: "é" becomes, "â€™" is what a typographic apostrophe becomes, "Â«" is what
+#: a guillemet becomes.
+_MOJIBAKE_RE = re.compile(
+    r'Ã[ -¿-©¨ª«¬®¯°±²³´µ¶·¹º»¼½¾¿§¦¥¤£¢¡]'
+    r'|â€[-™œ¢“”˜ž]|Â[ -¿«»°©®±²³µ¶·¹º]'
+)
+
+#: Enough of them to be certain. One stray sequence could conceivably be
+#: quoted material; a document full of them is corrupted.
+_MOJIBAKE_THRESHOLD = 3
+
+
+def check_encoding(text: str, segment_index: Optional[int] = None) -> List[QualityIssue]:
+    """
+    Text that has been through a broken copy-paste.
+
+    WHY THIS IS CRITICAL AND NOT COSMETIC. UTF-8 read back as Latin-1 turns
+    every accented character into two: "conjugué" becomes "conjuguÃ©",
+    "d'accord" becomes "dâ€™accord". A French document delivered that way is
+    unreadable and is a certain rejection -- and unlike a mistranslation, it
+    is not a judgement call, so there is no reason to let it through.
+
+    IT IS INVISIBLE TO EVERY OTHER CHECK. Measured on a real accepted
+    document that had been through a bad paste: 205 corrupted sequences, and
+    the foreign-language, duplication and commentary checks all reported
+    nothing. The text still looked like French to them.
+
+    THE WORKER CANNOT NECESSARILY SEE IT EITHER. On a translation task they
+    may not read the target language, and "Ã©" looks no stranger than any
+    other accented character to somebody who does not know what it should
+    have been.
+    """
+    found = _MOJIBAKE_RE.findall(text or '')
+    if len(found) < _MOJIBAKE_THRESHOLD:
+        return []
+    return [QualityIssue(
+        category=IssueCategory.STRUCTURE, severity=Severity.CRITICAL,
+        problem=(
+            f'The text is character-corrupted: {len(found)} sequences such as '
+            f'{found[0]!r} appear, which is what accented characters become '
+            f'after a broken copy-paste.'
+        ),
+        correction=(
+            'Copy the text again from the source. Paste it as plain text, and '
+            'check that accented letters look right before saving.'
+        ),
+        target_span=found[0],
+        rule='encoding.mojibake',
+        segment_index=segment_index, detector='deterministic',
+    )]
+
+
+#: Words an ENGLISH autocorrect produces when it is run over another
+#: language, keyed by target language. Each entry is (pattern, correct form,
+#: what it actually means) and every one is unambiguous: the mangled form is
+#: not a word of the target language in that position, so there is no
+#: judgement involved in reporting it.
+_AUTOCORRECT = {
+    'fr': (
+        # "dont" (of which / whose) is one of the commonest words in formal
+        # French. An English dictionary sees a typo and inserts an
+        # apostrophe. Seen 10 times in a single accepted document.
+        (re.compile(r"\bdon['’]t\b"), 'dont',
+         "\"don't\" is English; French \"dont\" takes no apostrophe"),
+        # "VIe siecle" -> "Vie siecle", because "vie" IS a French word, so
+        # the corrector is confident. It turns "the 6th century" into "the
+        # life century". Seen 4 times in the same document.
+        (re.compile(r'\bVie(?=\s+si[eè]cle)'), 'VIe',
+         '"Vie siecle" reads as "life century"; the ordinal is "VIe"'),
+    ),
+}
+
+
+def check_autocorrect(text: str, target_language: str,
+                      segment_index: Optional[int] = None) -> List[QualityIssue]:
+    """
+    Damage done by a spellchecker set to the wrong language.
+
+    FOUND ON A THIRD ACCEPTED DOCUMENT, and invisible to everything else we
+    run: the foreign-word, encoding and typography checks all returned
+    nothing on text containing fifteen instances of it. The document was
+    properly encoded and read as fluent French; a corrector had simply been
+    through it with an English dictionary.
+
+    HIGH, ON THE REVIEWER'S OWN EVIDENCE. This was MEDIUM for one day, on
+    the reasoning that the platform had accepted a document full of it. Then
+    a review came back FAILED with this at the top of the reasons:
+
+        "don't nous avons tous entendu parler" -> "dont nous avons tous
+        entendu parler". don't is an English/French typo. The correct
+        French relative pronoun is dont.
+
+    So it is not merely untidy: a reviewer reads it as a mistake and marks
+    the work down for it. Acceptance elsewhere meant the defect slipped past
+    one reviewer, not that it is tolerated.
+
+    Still not blocking, because the gate blocks only on CRITICAL and this
+    does not make a document unusable the way corrupted text does.
+
+    ONLY UNAMBIGUOUS CASES. Every entry is a form that is simply not a word
+    of the target language where it appears, so the check never has to
+    decide whether the author meant it.
+    """
+    rules = _AUTOCORRECT.get((target_language or '').strip().lower()[:2])
+    if not rules or not text:
+        return []
+
+    issues = []
+    for pattern, correct, explanation in rules:
+        hits = pattern.findall(text)
+        if not hits:
+            continue
+        issues.append(QualityIssue(
+            category=IssueCategory.LINGUISTIC, severity=Severity.HIGH,
+            problem=(
+                f'{len(hits)} occurrence(s) of a word an English spellchecker '
+                f'has altered: {explanation}.'
+            ),
+            correction=f'Replace every one with "{correct}".',
+            target_span=correct,
+            rule='language.autocorrect-damage',
+            segment_index=segment_index, detector='deterministic',
+        ))
+    return issues
+
+
+#: Second-person address, split by register. Only languages with a real
+#: T-V distinction appear here; English has none, so there is nothing to be
+#: inconsistent about.
+_ADDRESS_FORMS = {
+    # The word boundaries are load-bearing and were lost once already:
+    # an escaping slip turned every backslash-b into a literal backspace
+    # character, so the patterns compiled, ran, and matched NOTHING --
+    # reporting every document clean. A check that cannot fail is worse
+    # than no check, because it is indistinguishable from a passing one.
+    'fr': (
+        re.compile(r"\b(?:tu|t['’]as|t['’]es|toi|ton|ta|tes|tiens)\b",
+                   re.IGNORECASE),
+        re.compile(r'\b(?:vous|votre|vos|vôtre)\b', re.IGNORECASE),
+        'tu', 'vous',
+    ),
+    'es': (
+        re.compile(r'\b(?:tú|ti|tuyo|tuya|tus)\b', re.IGNORECASE),
+        re.compile(r'\b(?:usted|ustedes)\b', re.IGNORECASE),
+        'tú', 'usted',
+    ),
+    'de': (
+        re.compile(r'\b(?:du|dich|dir|dein|deine|deinem|deinen)\b'),
+        re.compile(r'\b(?:Sie|Ihnen|Ihre|Ihrem|Ihren)\b'),
+        'du', 'Sie',
+    ),
+}
+
+
+def check_address_consistency(text: str, target_language: str,
+                              segment_index: Optional[int] = None) -> List[QualityIssue]:
+    """
+    One document addressing its audience two different ways.
+
+    WRITTEN FROM A FAILED REVIEW. Task 4639 came back rejected, and the
+    second item on the reviewer's list was a sudden tutoiement partway
+    through a document that had been using vous:
+
+        « Une, tu l'as comme tu veux »  ->  "Tutoiement soudain"
+
+    Switching mid-document reads as two different people talking, and it is
+    one of the few naturalness defects that a machine CAN see: the forms are
+    closed sets of common words.
+
+    MEDIUM AND ADVISORY, because the mix is not always wrong. French `vous`
+    is polite singular AND ordinary plural, so a speaker addressing one
+    person as `tu` and the room as `vous` is correct. The check reports the
+    inconsistency and the counts; a person decides. Blocking on it would
+    refuse legitimate documents, and refusing correct work is how a check
+    gets ignored.
+    """
+    forms = _ADDRESS_FORMS.get((target_language or '').strip().lower()[:2])
+    if not forms or not text:
+        return []
+
+    familiar_re, polite_re, familiar_name, polite_name = forms
+    familiar = familiar_re.findall(text)
+    polite = polite_re.findall(text)
+    if not familiar or not polite:
+        return []
+
+    # WHICHEVER IS RARER IS THE LIKELY SLIP. A document with sixty `vous`
+    # and two `tu` is a vous document with two mistakes in it; naming the
+    # minority form tells the worker what to search for.
+    minority, majority = ((familiar_name, polite_name)
+                          if len(familiar) <= len(polite)
+                          else (polite_name, familiar_name))
+    return [QualityIssue(
+        category=IssueCategory.LINGUISTIC, severity=Severity.MEDIUM,
+        problem=(
+            f'The translation addresses its audience both ways: '
+            f'{len(familiar)} familiar ("{familiar_name}") and {len(polite)} '
+            f'polite ("{polite_name}"). A review was failed for switching '
+            f'partway through.'
+        ),
+        correction=(
+            f'Pick one and use it throughout. The "{minority}" forms are the '
+            f'rarer, so they are the likely slips -- unless the speaker really '
+            f'is addressing one person and a group separately.'
+        ),
+        target_span=minority,
+        rule='language.mixed-address',
+        segment_index=segment_index, detector='deterministic',
+    )]
+
+
+def check_commentary(text: str, segment_index: Optional[int] = None) -> List[QualityIssue]:
+    """
+    The deliverable must contain the content and nothing else (spec 28).
+
+    Only run for submission-bound profiles. A general cleanup pass has no
+    such requirement, and a lecture transcript can legitimately contain the
+    words "here is the translation" because a speaker said them.
+    """
+    issues = []
+    for pattern in _COMMENTARY_PATTERNS:
+        match = pattern.search(text or '')
+        if match:
+            issues.append(QualityIssue(
+                category=IssueCategory.LEAKAGE, severity=Severity.HIGH,
+                problem=(
+                    'The output contains AI commentary or scaffolding rather '
+                    'than only the deliverable content.'
+                ),
+                correction='Remove headings, notes, status markers and fences.',
+                target_span=match.group(0).strip()[:80],
+                rule='leakage.commentary',
+                segment_index=segment_index, detector='deterministic',
+            ))
+            break
+    return issues
+
+
+def check_duplication(text: str, segment_index: Optional[int] = None) -> List[QualityIssue]:
+    paragraphs = [p.strip() for p in _PARAGRAPH_SPLIT.split(text or '') if p.strip()]
+    seen = set()
+    for paragraph in paragraphs:
+        # Short paragraphs repeat legitimately in a transcript ("Yes.",
+        # "Right."), so only substantial blocks count as a loop symptom.
+        if len(paragraph) < 80:
+            continue
+        if paragraph in seen:
+            return [QualityIssue(
+                category=IssueCategory.COMPLETENESS, severity=Severity.HIGH,
+                problem='A paragraph is repeated verbatim in the output.',
+                correction='Remove the duplicated block.',
+                target_span=paragraph[:80],
+                rule='completeness.duplicated-paragraph',
+                segment_index=segment_index, detector='deterministic',
+            )]
+        seen.add(paragraph)
+    return []
+
+
+def check_empty_output(
+    source: str, target: str, segment_index: Optional[int] = None
+) -> List[QualityIssue]:
+    if (source or '').strip() and not (target or '').strip():
+        return [QualityIssue(
+            category=IssueCategory.COMPLETENESS, severity=Severity.CRITICAL,
+            problem='The output is empty although the source has content.',
+            correction='Produce output for every source segment.',
+            source_span=(source or '').strip()[:80],
+            rule='completeness.empty-output',
+            segment_index=segment_index, detector='deterministic',
+        )]
+    return []
+
+
+# Ratio of target characters to source characters outside which the output is
+# suspicious. Wide because languages genuinely differ in verbosity -- French
+# runs ~15-20% longer than English, agglutinative languages far shorter -- so
+# these bounds catch a truncation or a doubling, not ordinary expansion.
+LENGTH_RATIO_FLOOR = 0.45
+LENGTH_RATIO_CEILING = 2.4
+# Below this, ratios are noise: a four-word segment can double in length for
+# entirely correct reasons.
+_MIN_CHARS_FOR_RATIO = 200
+
+
+def check_length_anomaly(
+    source: str, target: str, segment_index: Optional[int] = None
+) -> List[QualityIssue]:
+    """
+    Catches wholesale truncation and runaway generation.
+
+    Only applied above _MIN_CHARS_FOR_RATIO. This is a blunt instrument by
+    design: it exists to catch the case where half the document silently
+    vanished, which a semantic auditor reading one chunk at a time is
+    structurally unable to notice.
+    """
+    source_length = len((source or '').strip())
+    target_length = len((target or '').strip())
+    if source_length < _MIN_CHARS_FOR_RATIO or not target_length:
+        return []
+    ratio = target_length / source_length
+    if ratio < LENGTH_RATIO_FLOOR:
+        return [QualityIssue(
+            category=IssueCategory.COMPLETENESS, severity=Severity.HIGH,
+            problem=(
+                f'The output is {ratio:.0%} the length of the source, which '
+                'suggests content was omitted or summarized.'
+            ),
+            correction=(
+                'Translate the source completely. Do not summarize or '
+                'condense unless summarization was explicitly requested.'
+            ),
+            rule='completeness.output-too-short',
+            segment_index=segment_index, detector='deterministic',
+        )]
+    if ratio > LENGTH_RATIO_CEILING:
+        return [QualityIssue(
+            category=IssueCategory.COMPLETENESS, severity=Severity.MEDIUM,
+            problem=(
+                f'The output is {ratio:.0%} of the source length, which '
+                'suggests material was added or duplicated.'
+            ),
+            correction='Remove anything the source does not say.',
+            rule='completeness.output-too-long',
+            segment_index=segment_index, detector='deterministic',
+        )]
+    return []
+
+
+def check_source_leakage(
+    source: str, target: str, segment_index: Optional[int] = None
+) -> List[QualityIssue]:
+    """
+    Long verbatim runs of source text surviving into a translation.
+
+    Matched on word sequences rather than characters, and only at eight
+    words or more. Proper nouns, quoted titles, code and formulae are all
+    SUPPOSED to survive verbatim, and every one of them is short -- eight
+    consecutive identical words is a sentence the model skipped, not a name
+    it correctly preserved.
+    """
+    source_words = re.findall(r"[\w'-]+", (source or '').lower())
+    target_lower = (target or '').lower()
+    if len(source_words) < 8:
+        return []
+    run = 8
+    for start in range(0, len(source_words) - run + 1):
+        phrase = ' '.join(source_words[start:start + run])
+        if phrase in target_lower:
+            return [QualityIssue(
+                category=IssueCategory.LEAKAGE, severity=Severity.HIGH,
+                problem=(
+                    'A run of source-language text was carried into the '
+                    'output untranslated.'
+                ),
+                correction='Translate the whole passage into the target language.',
+                source_span=phrase[:80],
+                rule='leakage.untranslated-source',
+                segment_index=segment_index, detector='deterministic',
+            )]
+    return []
+
+
+def run_deterministic_checks(
+    source: str,
+    target: str,
+    target_language: Optional[str] = None,
+    segment_index: Optional[int] = None,
+    *,
+    is_translation: bool = True,
+    submission_ready: bool = False,
+) -> List[QualityIssue]:
+    """
+    Every deterministic check appropriate to this run, in one call.
+
+    `is_translation` gates the leakage check: for a same-language cleanup
+    pass, source text surviving verbatim into the output is the CORRECT
+    outcome for most of the document, so running it would report the whole
+    transcript as defective.
+
+    `submission_ready` gates the commentary check, for the reason given on
+    check_commentary.
+    """
+    issues = []
+    issues += check_empty_output(source, target, segment_index)
+    # An empty target makes every remaining comparison meaningless -- and
+    # would emit a "every number is missing" finding on top of the real one.
+    if not (target or '').strip():
+        return issues
+
+    issues += check_numbers(source, target, segment_index)
+    issues += check_verbatim_tokens(source, target, segment_index)
+    # References that ARRIVED rather than went missing, and words from a
+    # third language. Both were found by running a real polished
+    # translation through this function and comparing with a human read.
+    issues += check_invented_references(source, target, segment_index)
+    issues += check_foreign_language(target, target_language, segment_index)
+    issues += check_duplication(target, segment_index)
+    issues += check_length_anomaly(source, target, segment_index)
+    issues += check_typography(target, target_language, segment_index)
+    # Corruption from a broken paste. Cheap, certain, and invisible to
+    # every other check here -- the text still parses as the right language.
+    issues += check_encoding(target, segment_index)
+    # A spellchecker set to the wrong language. Invisible to every check
+    # above -- the text is well-formed and reads as the right language.
+    issues += check_autocorrect(target, target_language, segment_index)
+    # Familiar vs polite address, mixed in one document. Named in a failed
+    # review, and one of the few naturalness defects a machine can see.
+    issues += check_address_consistency(target, target_language, segment_index)
+    if is_translation:
+        issues += check_source_leakage(source, target, segment_index)
+    if submission_ready:
+        issues += check_commentary(target, segment_index)
+    return issues

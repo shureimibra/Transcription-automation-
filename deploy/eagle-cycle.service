@@ -1,0 +1,115 @@
+# The poller, as a service.
+#
+# WHAT IT DOES. Every 90 seconds it asks Eagle what is on offer, retires
+# tasks that have gone, and pre-processes a few so a tasker can claim work
+# that is already transcribed. Nothing else keeps the queue honest: without
+# this running, the numbers on screen freeze at whatever they were when the
+# last cycle ran, and a worker can claim a task somebody else took hours
+# ago. That is not a hypothetical -- it is the "dashboard says 74, Eagle
+# says 65" problem, and this is the fix for it.
+#
+# THE POLL IS ALSO THE KEEP-ALIVE. Laravel idles a session out after about
+# two hours. Running every 90 seconds means we are never idle for two
+# minutes, so the Eagle session survives the working day as a side effect of
+# doing the job.
+#
+# INSTALL
+#   sudo cp deploy/eagle-cycle.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now eagle-cycle
+#
+# WATCH IT
+#   systemctl status eagle-cycle
+#   journalctl -u eagle-cycle -f
+#   journalctl -u eagle-cycle | grep NETWORK     # public IP changes
+#   journalctl -u eagle-cycle | grep -E 'sync|warm'
+#
+# EDIT PATHS AND USER BELOW BEFORE INSTALLING.
+
+[Unit]
+Description=Eagle task poller and warm pool
+Documentation=file:///srv/transcription/RUNBOOK.md
+# The database has to be up first; a poller that starts before Postgres
+# spends its first cycles failing for a reason that has nothing to do with
+# Eagle.
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=transcription
+Group=transcription
+WorkingDirectory=/srv/transcription/backend
+
+# One place for configuration. Keep the real secrets here -- Gemini key,
+# database URL, Fernet key -- with 0600 permissions, and never in this unit
+# file, which lives in /etc and is world-readable.
+EnvironmentFile=/srv/transcription/backend/.env
+
+Environment=DJANGO_SETTINGS_MODULE=transcription_proj.settings
+Environment=PYTHONUNBUFFERED=1
+
+# Pacing. Below the provider's own per-minute ceiling, because being
+# refused costs a whole revision and warming has no deadline to justify
+# the risk.
+Environment=AI_MAX_REQUESTS_PER_MINUTE=15
+
+# Full detection, no automatic repair: roughly three requests per task
+# instead of thirteen. On a free-tier quota that is the difference between
+# fitting the day's work and stopping before lunch.
+# STALE, AND NOW A NO-OP. The verbatim standard pass reads
+# EAGLE_STANDARD_QUALITY_PROFILE and defaults to `eagle_standard` -- a
+# profile that omits the source-fidelity audit, because that audit reported
+# the pass's own required edits as defects and reverted them. Setting the
+# old variable here changes nothing; left commented so nobody reintroduces
+# it believing it still does something.
+# Environment=EAGLE_WARM_QUALITY_PROFILE=volume
+
+# EVERY ACCOUNT'S QUOTA, NOT JUST ONE. Comma-separated, and it goes in the
+# .env file with the other secrets -- never here, because /etc is
+# world-readable:
+#   GEMINI_API_KEYS=key_one,key_two,key_three
+
+# WARM WIDE, BECAUSE THE POOL EMPTIES FAST. Measured on a live day: a
+# 44-task drop was gone in about four hours and 75% of the translation work
+# went to other people's taskers. A pool of 3 is a pool that is permanently
+# behind. Warming spends no platform minutes, so the only cost of warming a
+# task somebody else takes is CPU that was otherwise idle.
+#
+# CONCURRENCY IS A MEMORY BUDGET, NOT A SPEED DIAL: roughly 750 MB per
+# model-bearing pipeline. 2 wants ~1.5 GB free and warms a task roughly
+# every 50 seconds. Raise it only if the box has the headroom.
+
+ExecStart=/srv/transcription/.venv/bin/python manage.py eagle_cycle \
+    --loop --interval 90 --pool-size 24 --concurrency 2
+
+# ALWAYS COME BACK. An expired cookie, a dropped connection, a provider
+# outage -- none of them should end the poller for good, because the
+# symptom is silent: the queue simply stops updating and looks fine.
+Restart=always
+RestartSec=30
+# ...but do not spin. Five failures in five minutes means something is
+# actually wrong, and a hot loop makes it harder to see in the log.
+StartLimitBurst=5
+StartLimitIntervalSec=300
+
+# Transcription is CPU-bound and shares this box with the web server. Being
+# nice keeps a warm cycle from making the site feel slow to a worker who is
+# mid-task.
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=6
+
+# Only the paths it needs.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/srv/transcription
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=eagle-cycle
+
+[Install]
+WantedBy=multi-user.target
