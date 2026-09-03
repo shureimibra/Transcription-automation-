@@ -86,6 +86,44 @@ except ModuleNotFoundError:
 logger = logging.getLogger("AIPipeline")
 
 
+def _in_own_connection(target):
+    """
+    Wrap a callable that will run in its OWN background thread so its
+    Django DB connection is guaranteed closed when the thread finishes --
+    the same fix apps.workforce.warmpool already applies via
+    `_warm_guarded`, extended here to the transcription pipeline's thread.
+
+    Django opens a connection per thread and never closes it on its own.
+    A view that spins up a thread per upload leaks one connection per
+    upload, and a long test run (or a long production day) accumulates
+    enough of them to exhaust what Postgres allows -- which is what a full
+    `apps.transcriptions` run was doing: 129 cascading "the connection is
+    closed" errors, all downstream of transcription-pipeline threads that
+    never closed the connection they opened.
+
+    APPLIED AT THE THREAD BOUNDARY, DELIBERATELY, NOT INSIDE THE PIPELINE
+    FUNCTION ITSELF. `run_transcription_pipeline` is also called directly
+    and synchronously on the MAIN thread by a large number of tests --
+    closing there would attack the wrong connection: Django's own `close()`
+    does not null the reference while `in_atomic_block` is True (every
+    TestCase test body), so it would leave that connection dangling rather
+    than reconnecting, reproducing the exact symptom this fixes, self
+    -inflicted, on every synchronous caller. The wrapper is applied only at
+    `threading.Thread(target=...)`, so only a genuine background thread's
+    own, never-shared connection is ever touched.
+    """
+    import functools
+    from django.db import connection
+
+    @functools.wraps(target)
+    def _wrapped(*args, **kwargs):
+        try:
+            return target(*args, **kwargs)
+        finally:
+            connection.close()
+    return _wrapped
+
+
 class SupportedLanguagesView(views.APIView):
     """
     Canonical language catalog for the frontend's language dropdown -- keeps
@@ -304,7 +342,7 @@ class TranscriptionJobViewSet(viewsets.ModelViewSet):
             # the callable directly.
             import threading
             target_fn = getattr(run_transcription_pipeline, 'run', run_transcription_pipeline)
-            thread = threading.Thread(target=target_fn, args=(job.id,))
+            thread = threading.Thread(target=_in_own_connection(target_fn), args=(job.id,))
             thread.daemon = True
             thread.start()
 
