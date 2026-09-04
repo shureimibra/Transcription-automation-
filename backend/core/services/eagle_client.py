@@ -118,6 +118,18 @@ class EagleSessionExpired(EagleHTTPError):
     """
 
 
+class EagleLoginRejected(EagleHTTPError):
+    """
+    A real username/password login attempt did not produce a session.
+
+    Its own category for the same reason EagleSessionExpired has one: the
+    caller (apps/workforce/eagle_impl.py) needs to tell "we tried to log in
+    and Eagle said no" apart from an ordinary transport failure, so it can
+    record the failure against the STORED CREDENTIAL (for the cooldown)
+    rather than merely against the session.
+    """
+
+
 @dataclass
 class EagleAccount:
     label: str = ''
@@ -368,6 +380,23 @@ def merge_set_cookies(cookie_header: str, set_cookies) -> str:
     return '; '.join(f'{k}={v}' for k, v in jar.items())
 
 
+#: Best-effort scrape of Laravel's flashed validation error off a re-rendered
+#: login page. NEVER the sole signal for success/failure -- the landing path
+#: is (see TranscriptionClient.login) -- this only makes a EagleLoginRejected
+#: say something more useful than "redirected back to /login" when Laravel
+#: does render one of these two common containers. Finding nothing is not an
+#: error; it just falls back to a generic message.
+def _scrape_login_error(html: str) -> str:
+    for pattern in (
+        r'<div[^>]*class="[^"]*invalid-feedback[^"]*"[^>]*>\s*([^<]+)',
+        r'<div[^>]*class="[^"]*alert-danger[^"]*"[^>]*>\s*([^<]+)',
+    ):
+        match = re.search(pattern, html)
+        if match:
+            return match.group(1).strip()
+    return ''
+
+
 # ===================================================================== #
 # Translation -- Vue SPA on a REST API
 # ===================================================================== #
@@ -471,6 +500,48 @@ class TranslationClient:
             minutes_balance=user.get('minutes_balance'),
             raw={k: user.get(k) for k in ('id', 'role', 'minutes_balance', 'wallet_balance')},
         )
+
+    def login(self, email: str, password: str) -> None:
+        """
+        Authenticate directly, replacing whatever cookie this client is
+        currently holding.
+
+        THE CONTRACT BELOW WAS READ OUT OF THE SHIPPED BUNDLE
+        (main-*.js), NOT GUESSED. Its own login() action does:
+
+            fetch("/api/auth/login", {method: "POST",
+                                       body: JSON.stringify({email, password})})
+
+        with headers built by the SAME helper (`Qa`/`zv`) every other
+        write in this SPA uses -- Accept/Content-Type: application/json
+        plus X-XSRF-TOKEN read off the XSRF-TOKEN cookie. No separate
+        CSRF-priming call exists anywhere in the bundle; a plain page load
+        already sets that cookie, which is why the GET below is enough.
+
+        SUCCESS IS A TRUTHY `user` IN THE BODY, NOT THE STATUS CODE ALONE
+        -- the same shape whoami() already trusts, because this platform
+        answers some failure shapes with a 200 too.
+        """
+        status, _, _, _ = self._req(f'{self.host}/login')
+        if status >= 400:
+            raise EagleLoginRejected(f'Could not load the login page ({status}).', status)
+
+        payload = json.dumps({'email': email, 'password': password}).encode('utf-8')
+        headers = {'Accept': 'application/json', 'Content-Type': 'application/json'}
+        headers.update(xsrf_header(self.cookie))
+        status, _, _, raw = self._req(
+            f'{self.host}/api/auth/login', method='POST', body=payload, headers=headers,
+        )
+        try:
+            data = json.loads(raw.decode('utf-8'))
+        except Exception:
+            data = {}
+
+        if status >= 400 or not data.get('user'):
+            message = data.get('message') or f'Eagle rejected these credentials ({status}).'
+            raise EagleLoginRejected(message, status)
+
+        logger.info('[EAGLE] %s login succeeded', self.product)
 
     def list_available(self, max_pages: int = 10) -> List[RawTask]:
         """Every page of `/api/user/tasks`, normalised."""
@@ -592,6 +663,60 @@ class TranscriptionClient:
         html = raw.decode('utf-8', 'replace')
         match = re.search(r'Your Balance:\s*([0-9:]+)', html)
         return EagleAccount(label='Eagle Transcribe', raw={'balance': match.group(1) if match else ''})
+
+    def login(self, email: str, password: str) -> None:
+        """
+        Authenticate directly, replacing whatever cookie this client is
+        currently holding.
+
+        THE CONTRACT BELOW WAS READ OFF THE LIVE FORM, NOT GUESSED: a GET
+        to /login hands out a fresh `_token` (Laravel CSRF) alongside the
+        XSRF-TOKEN/eagletranscribe_session cookies a plain page load always
+        sets; the POST that follows carries all three, form-encoded.
+
+        `remember` IS DELIBERATELY OMITTED. It is a plain, optional
+        checkbox on the live form -- nothing requires it, and this logs in
+        fresh each time rather than asking Eagle to extend anything.
+
+        THE `recaptcha` FIELD IS DELIBERATELY NOT SENT EITHER. It exists as
+        a hidden input in the markup, but no reCAPTCHA script loads
+        anywhere on the page or in custom.js -- it looks vestigial, not
+        wired to anything. Inventing a value for a security control would
+        be guessing at solving it; if Eagle's server genuinely enforces it
+        despite the missing widget, the POST below fails and says so
+        (see _scrape_login_error) rather than pretending to have solved it.
+
+        SUCCESS/FAILURE READS THE LANDING PATH, NOT THE STATUS CODE.
+        Laravel's AuthenticatesUsers trait redirects a rejected attempt
+        back to /login with flashed errors; a successful one redirects
+        anywhere else. That holds regardless of what the exact successful
+        destination is, so nothing here needs to know it in advance.
+        """
+        status, _, _, raw = self._req(f'{self.host}/login')
+        if status >= 400:
+            raise EagleLoginRejected(f'Could not load the login page ({status}).', status)
+        html = raw.decode('utf-8', 'replace')
+        match = re.search(r'name="_token"\s+value="([^"]+)"', html)
+        if not match:
+            raise EagleLoginRejected('No CSRF token on the transcription login page.', status)
+        token = match.group(1)
+
+        body = urllib.parse.urlencode({
+            'email': email, 'password': password, '_token': token,
+        }).encode('utf-8')
+        status, final_url, _, raw = self._req(
+            f'{self.host}/login', method='POST', body=body,
+            headers={'Content-Type': 'application/x-www-form-urlencoded'},
+        )
+        if status >= 500:
+            raise EagleLoginRejected(f'Login POST returned {status}.', status)
+
+        landed_path = urllib.parse.urlsplit(final_url).path.rstrip('/')
+        if landed_path == '/login':
+            detail = _scrape_login_error(raw.decode('utf-8', 'replace'))
+            raise EagleLoginRejected(detail or 'Eagle rejected these credentials.', status)
+
+        logger.info('[EAGLE] %s login succeeded, landed at %s', self.product, landed_path)
 
     def list_available(self, length: int = 100) -> List[RawTask]:
         """

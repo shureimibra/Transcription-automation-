@@ -22,13 +22,15 @@ import logging
 from typing import Dict, List, Optional
 
 from core.services.eagle_client import (
-    EagleHTTPError, EagleSessionExpired, TranscriptionClient, TranslationClient,
+    EagleHTTPError, EagleLoginRejected, EagleSessionExpired,
+    TranscriptionClient, TranslationClient,
 )
 
 from .credentials import TRANSCRIPTION, TRANSLATION, get_credential
 from .eagle import (
-    EagleAuthError, EagleIntegrationError, EagleMedia, EagleNotConfigured,
-    EagleSubmissionResult, EagleTask, EagleTaskNotFound, EagleIntegrationService,
+    EagleAuthError, EagleIntegrationError, EagleLoginFailed, EagleMedia,
+    EagleNotConfigured, EagleSubmissionResult, EagleTask, EagleTaskNotFound,
+    EagleIntegrationService,
 )
 
 logger = logging.getLogger('eagle')
@@ -65,42 +67,101 @@ class EagleService(EagleIntegrationService):
                 'That external platform is not configured.',
             )
         credential = get_credential(product)
-        if credential is None or not credential.is_usable:
-            raise EagleNotConfigured(
-                f'No usable credential stored for {product}.',
-            )
+        if credential is None:
+            raise EagleNotConfigured(f'No credential stored for {product}.')
+
+        # A credential marked EXPIRED with NO stored login is exactly what
+        # is_usable exists to stop: only a human re-pasting a cookie can
+        # recover it, so refusing here is correct and unchanged from before
+        # this feature existed.
+        #
+        # BUT one WITH a stored login must still get through, even while
+        # EXPIRED -- that status is exactly what a rejected attempt (or a
+        # cooldown) leaves it in, and _guard's retry-on-expiry branch is
+        # what is supposed to get the next chance to fix it. Refusing here
+        # would mean automatic re-login only ever works WITHIN the single
+        # call that first hit the expiry, never again on any later poller
+        # cycle -- which defeats the entire feature.
+        if not credential.is_usable and not credential.has_login:
+            raise EagleNotConfigured(f'No usable credential stored for {product}.')
+
         cookie = credential.get_cookie_header()
-        if not cookie:
+        if not cookie and not credential.has_login:
             raise EagleNotConfigured(f'Credential for {product} could not be read.')
 
         client_cls = TranscriptionClient if product == TRANSCRIPTION else TranslationClient
         return client_cls(cookie), credential
 
-    def _guard(self, credential, operation, client=None):
+    def _guard(self, credential, client, operation_factory, retry_on_expiry=False):
         """
         Run an Eagle call, translating transport failures into our error
         vocabulary and keeping the credential's health record current.
 
-        A session that has lapsed is recorded as EXPIRED so the operator sees
-        it on the dashboard rather than discovering it through a worker's
-        failed claim.
+        `operation_factory` takes the ACTIVE CLIENT and invokes the one
+        method this call cares about (`lambda c: c.whoami()`, etc.) rather
+        than closing over `client` directly. That is what lets a retry
+        after re-authentication run the SAME operation against a FRESH
+        client built from the new cookie, instead of replaying a closure
+        bound to a client whose session is already known to be dead.
 
-        IT ALSO PERSISTS A ROTATED SESSION. Eagle reissues a cookie on
-        essentially every request. The client adopts the new value for its
-        own lifetime, but without writing it back the rotation dies with the
-        process and the next one starts by replaying a session the server
-        has long since moved past. That is a session which "expires" while
-        nobody was away.
+        RETRY IS OPT-IN PER CALL SITE, AND BOUNDED TO EXACTLY ONE ATTEMPT.
+        `retry_on_expiry=True` is only ever passed for read operations
+        (whoami/list_available/list_mine/get_task) -- claim and submit
+        spend money and start deadlines, and this file's own module
+        docstring is explicit that nothing here should spend by accident.
+        Retrying one of those after a re-login risks the FIRST attempt
+        having actually landed on Eagle before the expiry signal was read;
+        a blind retry could double it. They stay on the original,
+        unconditional behaviour: one attempt, and a session that fails it
+        is reported, not retried.
+
+        A credential with no stored login (`has_login` False) is entirely
+        unaffected by any of this -- the retry branch never engages, so the
+        manual-cookie-only fallback keeps behaving exactly as it always
+        has, byte for byte.
         """
-        try:
-            result = operation()
-        except EagleSessionExpired as exc:
-            credential.mark_expired(exc.detail)
-            logger.error('[EAGLE] session expired for %s: %s', credential.product, exc.detail)
-            raise EagleAuthError(exc.detail) from exc
-        except EagleHTTPError as exc:
-            logger.warning('[EAGLE] %s call failed: %s', credential.product, exc.detail)
-            raise EagleIntegrationError(exc.detail) from exc
+        retries_remaining = 1 if (retry_on_expiry and credential.has_login) else 0
+
+        while True:
+            try:
+                result = operation_factory(client)
+                break
+            except EagleSessionExpired as exc:
+                if retries_remaining <= 0:
+                    credential.mark_expired(exc.detail)
+                    logger.error('[EAGLE] session expired for %s: %s',
+                                credential.product, exc.detail)
+                    raise EagleAuthError(exc.detail) from exc
+
+                if credential.login_on_cooldown():
+                    logger.warning(
+                        '[EAGLE] %s session expired and automatic re-login is '
+                        'on cooldown after a recent rejection; not retrying',
+                        credential.product)
+                    credential.mark_expired(exc.detail)
+                    raise EagleAuthError(exc.detail) from exc
+
+                # Consumed unconditionally, before the attempt: whatever
+                # happens next (login itself fails, or the retried
+                # operation fails again), this loop never runs a third time.
+                retries_remaining -= 1
+
+                try:
+                    client = self._login_client(credential)
+                except EagleLoginFailed as login_exc:
+                    credential.record_login_failure(str(login_exc))
+                    logger.error('[EAGLE] automatic re-login failed for %s: %s',
+                                credential.product, login_exc)
+                    raise
+
+                credential.record_login_success(client.cookie)
+                logger.info(
+                    '[EAGLE] re-authenticated %s after session expiry; '
+                    'retrying the read once', credential.product)
+                continue
+            except EagleHTTPError as exc:
+                logger.warning('[EAGLE] %s call failed: %s', credential.product, exc.detail)
+                raise EagleIntegrationError(exc.detail) from exc
 
         # After a successful call, not before: a cookie handed out by a
         # request that then failed is not one worth keeping.
@@ -114,6 +175,80 @@ class EagleService(EagleIntegrationService):
                 # Never let bookkeeping fail a call that worked.
                 logger.exception('[EAGLE] could not persist rotated session')
         return result
+
+    def _login_client(self, credential):
+        """
+        Perform a real login for `credential`'s product and return a fresh,
+        authenticated client. Raises EagleLoginFailed on any failure --
+        rejected credentials and transport failures alike -- since neither
+        recovers by looping (see _guard's docstring).
+
+        Deliberately does NOT touch the credential's cooldown/success state
+        itself; both callers (_guard's retry branch and the public `login`
+        below, used by --set-login) need that recorded with their own
+        framing (an automatic retry's rejection vs a manual verification's),
+        so it stays their responsibility, not this helper's.
+        """
+        username, password = credential.get_login()
+        if not username or not password:
+            raise EagleLoginFailed('No usable login credentials stored.')
+        client_cls = TranscriptionClient if credential.product == TRANSCRIPTION else TranslationClient
+        client = client_cls('')
+        try:
+            client.login(username, password)
+        except EagleHTTPError as exc:
+            # Covers EagleLoginRejected (a clear "no") and any other
+            # transport failure during login (timeout, 5xx, DNS) alike --
+            # from here, both mean "re-login did not produce a session".
+            raise EagleLoginFailed(exc.detail) from exc
+        return client
+
+    def login(self, source: str) -> Dict:
+        """
+        Perform and verify a real login for `source`, independent of the
+        automatic retry path above -- this is what `eagle_credential
+        --set-login` calls right after storing new credentials, so the
+        operator finds out immediately whether they work rather than
+        waiting for the next session expiry to discover it.
+
+        DELIBERATELY BYPASSES THE COOLDOWN. A fresh --set-login is a
+        deliberate new attempt by a human who just typed a (presumably
+        corrected) password, not the automatic retry loop the cooldown
+        exists to bound.
+        """
+        product = (source or '').strip().lower()
+        if product not in (TRANSCRIPTION, TRANSLATION):
+            raise EagleIntegrationError(
+                f'Unknown Eagle product {source!r}.',
+                'That external platform is not configured.',
+            )
+        credential = get_credential(product)
+        if credential is None or not credential.has_login:
+            raise EagleNotConfigured(f'No login credentials stored for {product}.')
+
+        try:
+            client = self._login_client(credential)
+        except EagleLoginFailed as exc:
+            credential.record_login_failure(str(exc))
+            raise
+        credential.record_login_success(client.cookie)
+
+        try:
+            account = client.whoami()
+        except EagleSessionExpired as exc:
+            # Logged in, but the very next call says otherwise -- worth
+            # surfacing as its own thing rather than a plain expiry.
+            raise EagleAuthError(
+                f'Login succeeded but the session did not verify: {exc.detail}') from exc
+        except EagleHTTPError as exc:
+            raise EagleIntegrationError(exc.detail) from exc
+
+        credential.mark_verified(account_label=account.label, minutes_balance=account.minutes_balance)
+        return {
+            'product': product,
+            'account': account.label,
+            'minutes_balance': account.minutes_balance,
+        }
 
     def is_configured(self) -> bool:
         return any(
@@ -132,7 +267,7 @@ class EagleService(EagleIntegrationService):
         idle that long.
         """
         client, credential = self._client(source)
-        account = self._guard(credential, client.whoami, client=client)
+        account = self._guard(credential, client, lambda c: c.whoami(), retry_on_expiry=True)
         credential.mark_verified(
             account_label=account.label, minutes_balance=account.minutes_balance,
         )
@@ -155,7 +290,7 @@ class EagleService(EagleIntegrationService):
 
     def list_available_tasks(self, source: str = '') -> List[EagleTask]:
         client, credential = self._client(source)
-        rows = self._guard(credential, client.list_available, client=client)
+        rows = self._guard(credential, client, lambda c: c.list_available(), retry_on_expiry=True)
         return [self._to_task(r) for r in rows if not r.claimed]
 
     def list_my_tasks(self, source: str = '') -> List[EagleTask]:
@@ -164,9 +299,9 @@ class EagleService(EagleIntegrationService):
             # Both products now have a verified awarded endpoint, so this is
             # a fallback for a client that does not: report what is knowable
             # from the main list rather than scraping blind.
-            rows = self._guard(credential, client.list_available, client=client)
+            rows = self._guard(credential, client, lambda c: c.list_available(), retry_on_expiry=True)
             return [self._to_task(r) for r in rows if r.claimed]
-        rows = self._guard(credential, client.list_mine)
+        rows = self._guard(credential, client, lambda c: c.list_mine(), retry_on_expiry=True)
         return [self._to_task(r) for r in rows]
 
     def get_task(self, external_id: str, source: str = '') -> EagleTask:
@@ -176,7 +311,8 @@ class EagleService(EagleIntegrationService):
                 if task.external_id == str(external_id):
                     return task
             raise EagleTaskNotFound(f'{source} task {external_id} not in the available list.')
-        return self._to_task(self._guard(credential, lambda: client.get_task(external_id)))
+        row = self._guard(credential, client, lambda c: c.get_task(external_id), retry_on_expiry=True)
+        return self._to_task(row)
 
     # -- media ------------------------------------------------------------ #
 
@@ -230,7 +366,9 @@ class EagleService(EagleIntegrationService):
         """
         client, credential = self._client(source)
         logger.info('[EAGLE] claiming %s task %s', source, external_id)
-        result = self._guard(credential, lambda: client.claim(external_id))
+        # retry_on_expiry stays False (the default): this spends minutes and
+        # starts a deadline, see the module docstring and _guard's own.
+        result = self._guard(credential, client, lambda c: c.claim(external_id))
 
         if isinstance(result, dict) and result.get('minutes_balance') is not None:
             credential.minutes_balance = result['minutes_balance']
@@ -251,14 +389,16 @@ class EagleService(EagleIntegrationService):
         logger.info('[EAGLE] submitting %s task %s (%d chars)',
                     product, external_id, len(content or ''))
 
+        # retry_on_expiry stays False (the default) on both branches below:
+        # submitting is graded work, see the module docstring and _guard's.
         if product == TRANSLATION:
-            raw = self._guard(credential, lambda: client.submit(external_id, content))
+            raw = self._guard(credential, client, lambda c: c.submit(external_id, content))
             return EagleSubmissionResult(
                 accepted=True, reference=str(external_id),
                 message='Submitted for review.', raw=raw or {},
             )
 
-        raw = self._guard(credential, lambda: client.submit(external_id, content))
+        raw = self._guard(credential, client, lambda c: c.submit(external_id, content))
         return EagleSubmissionResult(
             accepted=raw.get('status', 0) < 400,
             reference=str(external_id),

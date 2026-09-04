@@ -58,6 +58,17 @@ class EagleAuthError(EagleIntegrationError):
     SAFE_MESSAGE = 'The external platform rejected this server\'s session.'
 
 
+class EagleLoginFailed(EagleAuthError):
+    """
+    A real username/password login attempt was rejected or could not
+    complete. Its own subclass of EagleAuthError -- not just its own
+    message -- so a caller (the CLI, the retry cooldown bookkeeping) can
+    tell "the stored PASSWORD doesn't work" apart from "the stored SESSION
+    merely lapsed" without parsing text.
+    """
+    SAFE_MESSAGE = "The external platform rejected this server's login."
+
+
 class EagleTaskNotFound(EagleIntegrationError):
     SAFE_MESSAGE = 'That task was not found on the external platform.'
 
