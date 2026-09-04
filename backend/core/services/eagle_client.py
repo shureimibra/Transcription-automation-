@@ -331,6 +331,68 @@ def _request(url: str, cookie: str, method: str = 'GET', body: Optional[bytes] =
         raise EagleHTTPError(f'{type(exc).__name__}: {exc}') from exc
 
 
+def _request_first_hop(url: str, cookie: str, method: str = 'GET',
+                        body: Optional[bytes] = None,
+                        headers: Optional[Dict[str, str]] = None,
+                        timeout: int = DEFAULT_TIMEOUT):
+    """
+    Like `_request()`, but never follows a redirect and returns the FIRST
+    hop's own `Location` instead of collapsing the chain into a final URL.
+
+    WHY THIS EXISTS SEPARATELY, RATHER THAN `_request(..., allow_redirects=
+    False)`. That flag already suppresses following the redirect (confirmed
+    against the installed CPython `urllib.request.HTTPRedirectHandler`
+    source: a 302 with redirects disabled surfaces as `urllib.error.
+    HTTPError`, which `_request()` already catches) -- but `_request()`'s
+    4-tuple return (`status, final_url, set_cookies, body`) has nowhere to
+    put the `Location` header at all. In that branch `final_url` is just
+    the ORIGINAL request URL again, not the redirect target -- useless for
+    telling the two shapes below apart. Changing `_request()`'s signature
+    to add it would touch every one of this file's dozen call sites for
+    one caller's need. This is that one caller's own narrow tool instead.
+
+    Returns (status, location_header_or_empty_string, set_cookies, body).
+    `location` is the RAW header value (may carry a query string) --
+    callers that only need the path should extract it themselves, the way
+    TranscriptionClient.login() does, so nothing here decides what is safe
+    to log on a caller's behalf.
+    """
+    hdrs = {
+        'User-Agent': USER_AGENT,
+        'Accept': 'application/json, text/html;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+    }
+    if cookie:
+        hdrs['Cookie'] = cookie
+    if headers:
+        hdrs.update(headers)
+
+    request = urllib.request.Request(url, data=body, headers=hdrs, method=method)
+
+    class _NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *a, **kw):
+            return None
+    opener = urllib.request.build_opener(_NoRedirect())
+
+    def _cookies(message):
+        if message is None:
+            return []
+        try:
+            return list(message.get_all('Set-Cookie') or [])
+        except AttributeError:
+            return []
+
+    try:
+        with opener.open(request, timeout=timeout) as response:
+            return (response.status, response.headers.get('Location') or '',
+                    _cookies(response.headers), response.read())
+    except urllib.error.HTTPError as exc:
+        return (exc.code, exc.headers.get('Location') or '',
+                _cookies(exc.headers), exc.read())
+    except Exception as exc:
+        raise EagleHTTPError(f'{type(exc).__name__}: {exc}') from exc
+
+
 def merge_set_cookies(cookie_header: str, set_cookies) -> str:
     """
     Fold any reissued cookies back into the header we send next time.
@@ -686,11 +748,28 @@ class TranscriptionClient:
         despite the missing widget, the POST below fails and says so
         (see _scrape_login_error) rather than pretending to have solved it.
 
-        SUCCESS/FAILURE READS THE LANDING PATH, NOT THE STATUS CODE.
+        SUCCESS/FAILURE READS THE FIRST REDIRECT'S PATH, NOT ANY LATER HOP.
         Laravel's AuthenticatesUsers trait redirects a rejected attempt
         back to /login with flashed errors; a successful one redirects
-        anywhere else. That holds regardless of what the exact successful
-        destination is, so nothing here needs to know it in advance.
+        anywhere else. Nothing here needs to know the exact successful
+        destination in advance -- only that it is not /login.
+
+        THE POST DELIBERATELY DOES NOT LET urllib AUTO-FOLLOW THE
+        REDIRECT (see _request_first_hop). Laravel's Auth::login() calls
+        session()->regenerate() as standard session-fixation protection,
+        which typically issues the freshly-authenticated cookie ON THE
+        REDIRECT RESPONSE ITSELF -- not on whatever page it points at. A
+        client that lets urllib auto-follow (`_req`'s default) only ever
+        sees the FINAL response after the whole chain; the intermediate
+        redirect's own Set-Cookie is invisible to it, and the follow-up
+        request urllib makes on our behalf replays the OLD, pre-login
+        cookie rather than the new one -- so a login Eagle genuinely
+        accepted could still end up looking rejected if that stale cookie
+        then fails whatever the destination page checks. Reading the first
+        hop directly closes that gap: we see -- and adopt -- whatever
+        cookie Eagle actually issued at the moment it decided the
+        credentials were good, not whatever survives an unobserved second
+        hop.
         """
         status, _, _, raw = self._req(f'{self.host}/login')
         if status >= 400:
@@ -704,19 +783,59 @@ class TranscriptionClient:
         body = urllib.parse.urlencode({
             'email': email, 'password': password, '_token': token,
         }).encode('utf-8')
-        status, final_url, _, raw = self._req(
-            f'{self.host}/login', method='POST', body=body,
+        status, location, set_cookies, raw = _request_first_hop(
+            f'{self.host}/login', self.cookie, method='POST', body=body,
             headers={'Content-Type': 'application/x-www-form-urlencoded'},
         )
+
+        # Absorb whatever cookie THIS response reissued -- exactly the one
+        # `_req()` would have thrown away by auto-following the redirect.
+        # Never logs a value; _absorb()'s own log line ("reissued a
+        # session cookie; adopted it") already doesn't either.
+        previous_cookie = self.cookie
+        self._absorb(set_cookies)
+        cookie_changed = self.cookie != previous_cookie
+
+        redirect_path = ''
+        if location:
+            # Path only -- a query string on the Location could carry a
+            # token or other value that has no business in a log line.
+            redirect_path = urllib.parse.urlsplit(location).path.rstrip('/') or '/'
+
+        logger.info(
+            '[EAGLE] %s login POST: status=%s is_redirect=%s '
+            'redirect_path=%s cookie_reissued=%s cookie_changed=%s',
+            self.product, status, status in (301, 302, 303, 307, 308),
+            redirect_path or '(none)', bool(set_cookies), cookie_changed,
+        )
+
         if status >= 500:
             raise EagleLoginRejected(f'Login POST returned {status}.', status)
 
-        landed_path = urllib.parse.urlsplit(final_url).path.rstrip('/')
-        if landed_path == '/login':
-            detail = _scrape_login_error(raw.decode('utf-8', 'replace'))
-            raise EagleLoginRejected(detail or 'Eagle rejected these credentials.', status)
+        if status in (301, 302, 303, 307, 308):
+            if not location:
+                raise EagleLoginRejected(
+                    f'Login POST redirected ({status}) with no Location header.', status)
+            if redirect_path == '/login':
+                detail = _scrape_login_error(raw.decode('utf-8', 'replace'))
+                raise EagleLoginRejected(detail or 'Eagle rejected these credentials.', status)
+            logger.info('[EAGLE] %s login succeeded, redirected to %s',
+                       self.product, redirect_path)
+            return
 
-        logger.info('[EAGLE] %s login succeeded, landed at %s', self.product, landed_path)
+        # Laravel's login route always redirects, success or failure --
+        # confirmed on the live form (see the class docstring's research
+        # note). A non-redirect response here is a shape nothing has
+        # observed before; raising rather than guessing which way to read
+        # it matches this file's own rule everywhere else.
+        if status >= 400:
+            detail = _scrape_login_error(raw.decode('utf-8', 'replace'))
+            raise EagleLoginRejected(
+                detail or f'Login POST returned {status} with no redirect.', status)
+        raise EagleLoginRejected(
+            f'Unexpected login response: {status} with no redirect. '
+            'This shape has not been observed before and is not safe to '
+            'treat as success.', status)
 
     def list_available(self, length: int = 100) -> List[RawTask]:
         """

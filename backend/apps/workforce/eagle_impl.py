@@ -119,8 +119,23 @@ class EagleService(EagleIntegrationService):
         unaffected by any of this -- the retry branch never engages, so the
         manual-cookie-only fallback keeps behaving exactly as it always
         has, byte for byte.
+
+        `attempted_relogin` DISTINGUISHES TWO DIFFERENT SHAPES OF "still
+        expired" AT THE FINAL FAILURE POINT. The ordinary case -- no retry
+        configured, or none available -- reaches `retries_remaining <= 0`
+        having never touched login at all; that is a plain expiry and
+        `mark_expired` is exactly right. But if a re-login just happened
+        and the RETRIED operation fails again anyway, that is different
+        information: the login looked like it succeeded and evidently
+        didn't actually restore a working session. Recording that as an
+        ordinary expiry would leave the cooldown unset, and a stale
+        password would draw a fresh login attempt on every subsequent
+        request rather than being bounded by it -- so this case is
+        recorded as a login failure instead, the same way a login Eagle
+        rejects outright already is.
         """
         retries_remaining = 1 if (retry_on_expiry and credential.has_login) else 0
+        attempted_relogin = False
 
         while True:
             try:
@@ -128,9 +143,17 @@ class EagleService(EagleIntegrationService):
                 break
             except EagleSessionExpired as exc:
                 if retries_remaining <= 0:
-                    credential.mark_expired(exc.detail)
-                    logger.error('[EAGLE] session expired for %s: %s',
-                                credential.product, exc.detail)
+                    if attempted_relogin:
+                        detail = (f'Re-login appeared to succeed but the retried '
+                                 f'request failed again: {exc.detail}')
+                        credential.record_login_failure(detail)
+                        logger.error(
+                            '[EAGLE] %s re-login did not actually restore a '
+                            'working session: %s', credential.product, exc.detail)
+                    else:
+                        credential.mark_expired(exc.detail)
+                        logger.error('[EAGLE] session expired for %s: %s',
+                                    credential.product, exc.detail)
                     raise EagleAuthError(exc.detail) from exc
 
                 if credential.login_on_cooldown():
@@ -155,6 +178,7 @@ class EagleService(EagleIntegrationService):
                     raise
 
                 credential.record_login_success(client.cookie)
+                attempted_relogin = True
                 logger.info(
                     '[EAGLE] re-authenticated %s after session expiry; '
                     'retrying the read once', credential.product)
@@ -215,6 +239,17 @@ class EagleService(EagleIntegrationService):
         deliberate new attempt by a human who just typed a (presumably
         corrected) password, not the automatic retry loop the cooldown
         exists to bound.
+
+        record_login_success IS ONLY CALLED AFTER whoami() ALSO SUCCEEDS,
+        DELIBERATELY. `_login_client()` returning without raising only
+        means the login POST's own redirect looked like success -- it is
+        not, by itself, proof the resulting session actually works (see
+        TranscriptionClient.login's docstring on why that redirect alone
+        can be misleading). Persisting success before that second check
+        would leave the credential marked ACTIVE, with no cooldown, on an
+        attempt this method is about to report as a FAILURE to the
+        caller -- exactly backwards. Verifying first means the stored
+        state can never contradict what --set-login just told the operator.
         """
         product = (source or '').strip().lower()
         if product not in (TRANSCRIPTION, TRANSLATION):
@@ -231,18 +266,24 @@ class EagleService(EagleIntegrationService):
         except EagleLoginFailed as exc:
             credential.record_login_failure(str(exc))
             raise
-        credential.record_login_success(client.cookie)
 
         try:
             account = client.whoami()
         except EagleSessionExpired as exc:
             # Logged in, but the very next call says otherwise -- worth
-            # surfacing as its own thing rather than a plain expiry.
-            raise EagleAuthError(
-                f'Login succeeded but the session did not verify: {exc.detail}') from exc
+            # surfacing as its own thing rather than a plain expiry, and
+            # recorded the same way a rejected login is: this attempt did
+            # not produce a working session, whatever the redirect looked
+            # like.
+            detail = f'Login succeeded but the session did not verify: {exc.detail}'
+            credential.record_login_failure(detail)
+            raise EagleAuthError(detail) from exc
         except EagleHTTPError as exc:
+            credential.record_login_failure(
+                f'Login succeeded but verification failed: {exc.detail}')
             raise EagleIntegrationError(exc.detail) from exc
 
+        credential.record_login_success(client.cookie)
         credential.mark_verified(account_label=account.label, minutes_balance=account.minutes_balance)
         return {
             'product': product,

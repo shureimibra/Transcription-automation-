@@ -29,12 +29,14 @@ from django.utils import timezone
 from core.services.eagle_client import (
     merge_set_cookies,
     xsrf_header,
-    EagleAccount, EagleLoginRejected, EagleSessionExpired, RawTask,
-    TranscriptionClient, TranslationClient,
+    EagleAccount, EagleHTTPError, EagleLoginRejected, EagleSessionExpired,
+    RawTask, TranscriptionClient, TranslationClient,
 )
 
 from .credentials import EAGLE_LOGIN_COOLDOWN_SECONDS, TRANSCRIPTION, TRANSLATION, EagleCredential
-from .eagle import EagleAuthError, EagleLoginFailed, EagleNotConfigured
+from .eagle import (
+    EagleAuthError, EagleIntegrationError, EagleLoginFailed, EagleNotConfigured,
+)
 from .eagle_impl import EagleService
 
 COOKIE = 'translatepro_session=SUPERSECRET; cf_clearance=ALSOSECRET'
@@ -93,15 +95,25 @@ class NoNetworkMixin:
 
     def setUp(self):
         super().setUp()
-        patcher = mock.patch(
-            'core.services.eagle_client._request',
-            side_effect=AssertionError(
-                'This test tried to make a real HTTP request to Eagle. '
-                'Patch the client method instead.'
-            ),
-        )
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        # BOTH low-level transport functions, not just _request. Confirmed
+        # the hard way, in this same session: TranscriptionClient.login()'s
+        # POST goes through _request_first_hop (added so the login diagnostic
+        # can see a redirect's own Set-Cookie/Location without urllib
+        # collapsing the chain -- see its docstring), which this mixin did
+        # NOT cover until a test run exercising it made five real requests
+        # to Eagle's actual login endpoint, each answered with a genuine 419
+        # from a bogus test CSRF token. Never again, on either function.
+        for target in ('core.services.eagle_client._request',
+                       'core.services.eagle_client._request_first_hop'):
+            patcher = mock.patch(
+                target,
+                side_effect=AssertionError(
+                    'This test tried to make a real HTTP request to Eagle. '
+                    'Patch the client method instead.'
+                ),
+            )
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
 
 # ===================================================================== #
@@ -595,82 +607,203 @@ class TranscriptionLoginFlowTestCase(NoNetworkMixin, TestCase):
     Every field name and the success/failure signal here were read off the
     live form and Laravel's own well-documented AuthenticatesUsers
     behaviour -- see core/services/eagle_client.py's login() docstring.
+
+    THE GET AND THE POST ARE MOCKED SEPARATELY, AT DIFFERENT SEAMS. The GET
+    (fetching the page for a fresh `_token`) still goes through `_req()` /
+    `_request`, exactly as every other call in this file does. The POST
+    goes through `_request_first_hop` instead -- deliberately NOT through
+    `_request` -- so it can hand back a `Location` header the way a real,
+    unfollowed 302 would, which `_request`'s `(status, final_url, cookies,
+    body)` shape has no room for. Patching only `_request` here (the way
+    every other test in this file does) would silently let the POST fall
+    through to the real function -- confirmed the hard way: an earlier
+    version of this test file did exactly that and made five real requests
+    to Eagle's live login endpoint before `NoNetworkMixin` was extended to
+    also cover `_request_first_hop`.
     """
 
-    def _fake(self, post_status=200, post_final_url=None, post_body=b'',
-              get_body=b'<input type="hidden" name="_token" value="tok-123">'):
+    def _fake_get(self, status=200,
+                  body=b'<input type="hidden" name="_token" value="tok-123">'):
         calls = []
 
-        def fake(url, cookie, method='GET', body=None, headers=None, **kw):
-            calls.append({'url': url, 'method': method, 'body': body, 'headers': headers})
-            if method == 'GET':
-                return 200, url, [], get_body
-            return (post_status,
-                    post_final_url or 'https://transcribe.eaglewebcommerce.com/login',
-                    ['eagletranscribe_session=authed'], post_body)
+        def fake(url, cookie, method='GET', body_=None, headers=None, **kw):
+            calls.append({'url': url, 'method': method, 'headers': headers})
+            return status, url, [], body
         return fake, calls
 
-    def test_a_successful_login_adopts_the_new_cookie(self):
-        client = TranscriptionClient('')
-        fake, _ = self._fake(
-            post_final_url='https://transcribe.eaglewebcommerce.com/user/stt/tasks')
+    def _fake_post(self, status=302, location=None, set_cookies=(), response_body=b''):
+        # NOTE: the inner fake's `body` parameter must be named exactly
+        # `body` -- login() calls _request_first_hop(..., body=form_body,
+        # ...) as a KEYWORD, and a mismatched parameter name here silently
+        # swallows it into **kw instead of raising, which is how this test
+        # helper originally shipped broken: calls[0]['body'] was always
+        # None because the real POST body never reached it.
+        calls = []
 
-        with mock.patch('core.services.eagle_client._request', side_effect=fake):
+        def fake(url, cookie, method='POST', body=None, headers=None, **kw):
+            calls.append({'url': url, 'method': method, 'body': body, 'headers': headers})
+            return status, (location or ''), list(set_cookies), response_body
+        return fake, calls
+
+    def test_a_successful_redirect_adopts_the_new_cookie(self):
+        """Category 1: 302 -> /user/stt/tasks, with a fresh session cookie
+        on the redirect response ITSELF -- the exact shape _request would
+        have thrown away."""
+        client = TranscriptionClient('')
+        get_fake, _ = self._fake_get()
+        post_fake, _ = self._fake_post(
+            status=302,
+            location='https://transcribe.eaglewebcommerce.com/user/stt/tasks',
+            set_cookies=['eagletranscribe_session=freshly-authenticated-session'],
+        )
+
+        with mock.patch('core.services.eagle_client._request', side_effect=get_fake), \
+             mock.patch('core.services.eagle_client._request_first_hop', side_effect=post_fake):
             client.login(FAKE_USERNAME, FAKE_PASSWORD)
 
-        self.assertIn('eagletranscribe_session=authed', client.cookie)
+        self.assertIn('eagletranscribe_session=freshly-authenticated-session', client.cookie)
 
-    def test_a_rejected_login_stays_on_login_and_raises(self):
+    def test_a_rejected_redirect_back_to_login_raises(self):
+        """Category 2: 302 -> /login with a flashed validation error."""
         client = TranscriptionClient('')
-        fake, _ = self._fake(
-            post_final_url='https://transcribe.eaglewebcommerce.com/login',
-            post_body=b'<div class="invalid-feedback">'
-                      b'These credentials do not match our records.</div>')
+        get_fake, _ = self._fake_get()
+        post_fake, _ = self._fake_post(
+            status=302, location='https://transcribe.eaglewebcommerce.com/login',
+        )
 
-        with mock.patch('core.services.eagle_client._request', side_effect=fake):
+        with mock.patch('core.services.eagle_client._request', side_effect=get_fake), \
+             mock.patch('core.services.eagle_client._request_first_hop', side_effect=post_fake):
+            with self.assertRaises(EagleLoginRejected) as ctx:
+                client.login(FAKE_USERNAME, 'wrong-password')
+
+        self.assertIn('Eagle rejected these credentials', str(ctx.exception))
+
+    def test_a_scraped_validation_error_is_surfaced_when_present(self):
+        client = TranscriptionClient('')
+        get_fake, _ = self._fake_get()
+        post_fake, _ = self._fake_post(
+            status=302, location='https://transcribe.eaglewebcommerce.com/login',
+            response_body=b'<div class="invalid-feedback">'
+                          b'These credentials do not match our records.</div>',
+        )
+
+        with mock.patch('core.services.eagle_client._request', side_effect=get_fake), \
+             mock.patch('core.services.eagle_client._request_first_hop', side_effect=post_fake):
             with self.assertRaises(EagleLoginRejected) as ctx:
                 client.login(FAKE_USERNAME, 'wrong-password')
 
         self.assertIn('do not match', str(ctx.exception))
 
+    def test_a_non_redirect_error_is_rejected_not_treated_as_success(self):
+        """Category 3: a plain error status, no redirect at all -- the 419
+        (CSRF mismatch) shape Eagle's real server actually returned during
+        the incident that motivated this diagnostic."""
+        client = TranscriptionClient('')
+        get_fake, _ = self._fake_get()
+        post_fake, _ = self._fake_post(status=419, location='')
+
+        with mock.patch('core.services.eagle_client._request', side_effect=get_fake), \
+             mock.patch('core.services.eagle_client._request_first_hop', side_effect=post_fake):
+            with self.assertRaises(EagleLoginRejected) as ctx:
+                client.login(FAKE_USERNAME, FAKE_PASSWORD)
+
+        self.assertIn('419', str(ctx.exception))
+
+    def test_an_unexpected_200_with_no_redirect_is_never_assumed_successful(self):
+        """Laravel's login route always redirects, success or failure. A
+        200 straight back is a shape nothing has confirmed the meaning of
+        -- raise rather than guess it means success."""
+        client = TranscriptionClient('')
+        get_fake, _ = self._fake_get()
+        post_fake, _ = self._fake_post(status=200, location='')
+
+        with mock.patch('core.services.eagle_client._request', side_effect=get_fake), \
+             mock.patch('core.services.eagle_client._request_first_hop', side_effect=post_fake):
+            with self.assertRaises(EagleLoginRejected) as ctx:
+                client.login(FAKE_USERNAME, FAKE_PASSWORD)
+
+        self.assertIn('has not been observed before', str(ctx.exception))
+
+    def test_a_redirect_with_no_location_header_is_a_clean_failure(self):
+        client = TranscriptionClient('')
+        get_fake, _ = self._fake_get()
+        post_fake, _ = self._fake_post(status=302, location='')
+
+        with mock.patch('core.services.eagle_client._request', side_effect=get_fake), \
+             mock.patch('core.services.eagle_client._request_first_hop', side_effect=post_fake):
+            with self.assertRaises(EagleLoginRejected) as ctx:
+                client.login(FAKE_USERNAME, FAKE_PASSWORD)
+
+        self.assertIn('no Location header', str(ctx.exception))
+
     def test_the_password_never_appears_in_the_rejection_message(self):
         client = TranscriptionClient('')
-        fake, _ = self._fake(post_final_url='https://transcribe.eaglewebcommerce.com/login')
+        get_fake, _ = self._fake_get()
+        post_fake, _ = self._fake_post(
+            status=302, location='https://transcribe.eaglewebcommerce.com/login')
 
-        with mock.patch('core.services.eagle_client._request', side_effect=fake):
+        with mock.patch('core.services.eagle_client._request', side_effect=get_fake), \
+             mock.patch('core.services.eagle_client._request_first_hop', side_effect=post_fake):
             with self.assertRaises(EagleLoginRejected) as ctx:
                 client.login(FAKE_USERNAME, FAKE_PASSWORD)
 
         self.assertNotIn(FAKE_PASSWORD, str(ctx.exception))
 
+    def test_no_credential_cookie_or_token_value_appears_in_the_diagnostic_log(self):
+        """Category 5. The diagnostic log line added for this investigation
+        reports booleans/paths, never values -- confirm across both a
+        successful and a rejected attempt."""
+        client = TranscriptionClient('')
+        get_fake, _ = self._fake_get(
+            body=b'<input type="hidden" name="_token" value="super-secret-csrf-token">')
+        post_fake, _ = self._fake_post(
+            status=302,
+            location='https://transcribe.eaglewebcommerce.com/user/stt/tasks',
+            set_cookies=['eagletranscribe_session=super-secret-session-value'],
+        )
+
+        with self.assertLogs('eagle', level='INFO') as captured:
+            with mock.patch('core.services.eagle_client._request', side_effect=get_fake), \
+                 mock.patch('core.services.eagle_client._request_first_hop', side_effect=post_fake):
+                client.login(FAKE_USERNAME, FAKE_PASSWORD)
+
+        rendered = '\n'.join(captured.output)
+        for secret in (FAKE_PASSWORD, FAKE_USERNAME, 'super-secret-csrf-token',
+                       'super-secret-session-value'):
+            self.assertNotIn(secret, rendered)
+
     def test_remember_is_never_sent(self):
         client = TranscriptionClient('')
-        fake, calls = self._fake(
-            post_final_url='https://transcribe.eaglewebcommerce.com/user/stt/tasks')
+        get_fake, _ = self._fake_get()
+        post_fake, calls = self._fake_post(
+            status=302, location='https://transcribe.eaglewebcommerce.com/user/stt/tasks')
 
-        with mock.patch('core.services.eagle_client._request', side_effect=fake):
+        with mock.patch('core.services.eagle_client._request', side_effect=get_fake), \
+             mock.patch('core.services.eagle_client._request_first_hop', side_effect=post_fake):
             client.login(FAKE_USERNAME, FAKE_PASSWORD)
 
-        post_body = calls[1]['body'].decode()
+        post_body = calls[0]['body'].decode()
         self.assertNotIn('remember', post_body)
 
     def test_the_csrf_token_from_the_get_is_carried_into_the_post(self):
         client = TranscriptionClient('')
-        fake, calls = self._fake(
-            post_final_url='https://transcribe.eaglewebcommerce.com/user/stt/tasks',
-            get_body=b'<input type="hidden" name="_token" value="the-real-token">')
+        get_fake, _ = self._fake_get(
+            body=b'<input type="hidden" name="_token" value="the-real-token">')
+        post_fake, calls = self._fake_post(
+            status=302, location='https://transcribe.eaglewebcommerce.com/user/stt/tasks')
 
-        with mock.patch('core.services.eagle_client._request', side_effect=fake):
+        with mock.patch('core.services.eagle_client._request', side_effect=get_fake), \
+             mock.patch('core.services.eagle_client._request_first_hop', side_effect=post_fake):
             client.login(FAKE_USERNAME, FAKE_PASSWORD)
 
-        post_body = calls[1]['body'].decode()
+        post_body = calls[0]['body'].decode()
         self.assertIn('_token=the-real-token', post_body)
 
     def test_no_csrf_token_on_the_login_page_is_a_clean_failure_not_a_crash(self):
         client = TranscriptionClient('')
-        fake, _ = self._fake(get_body=b'<html>no token here</html>')
+        get_fake, _ = self._fake_get(body=b'<html>no token here</html>')
 
-        with mock.patch('core.services.eagle_client._request', side_effect=fake):
+        with mock.patch('core.services.eagle_client._request', side_effect=get_fake):
             with self.assertRaises(EagleLoginRejected):
                 client.login(FAKE_USERNAME, FAKE_PASSWORD)
 
@@ -682,14 +815,104 @@ class TranscriptionLoginFlowTestCase(NoNetworkMixin, TestCase):
         is ever part of the POST body.
         """
         client = TranscriptionClient('')
-        fake, calls = self._fake(
-            post_final_url='https://transcribe.eaglewebcommerce.com/user/stt/tasks')
+        get_fake, _ = self._fake_get()
+        post_fake, calls = self._fake_post(
+            status=302, location='https://transcribe.eaglewebcommerce.com/user/stt/tasks')
 
-        with mock.patch('core.services.eagle_client._request', side_effect=fake):
+        with mock.patch('core.services.eagle_client._request', side_effect=get_fake), \
+             mock.patch('core.services.eagle_client._request_first_hop', side_effect=post_fake):
             client.login(FAKE_USERNAME, FAKE_PASSWORD)
 
-        post_body = calls[1]['body'].decode()
+        post_body = calls[0]['body'].decode()
         self.assertNotIn('recaptcha', post_body)
+
+
+class RedirectCookieRealServerTestCase(TestCase):
+    """
+    Category 4, against a REAL local HTTP server -- never Eagle -- proving
+    _request_first_hop's actual urllib mechanics, not a mock's approximation
+    of them. Deliberately does NOT subclass NoNetworkMixin: that mixin
+    blocks the exact two functions this test exists to exercise for real.
+
+    THIS IS WHAT THE MOCKED TESTS ABOVE CANNOT PROVE. Every other login test
+    in this file replaces `_request`/`_request_first_hop` outright, so none
+    of them touch urllib's real redirect handling at all -- confirmed
+    against the installed CPython source during this investigation, not
+    assumed. This spins up a real (local, loopback-only) server that mimics
+    the one behaviour that matters: issuing a fresh Set-Cookie ON THE
+    REDIRECT RESPONSE ITSELF, the way Laravel's session()->regenerate()
+    typically does after Auth::login(). It proves two things at once: (a)
+    _request_first_hop captures that cookie instead of losing it, and (b)
+    plain _request (allow_redirects=True, auto-following) demonstrably does
+    NOT -- the exact gap this whole diagnostic exists to close.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+        class _RedirectFixtureHandler(BaseHTTPRequestHandler):
+            def log_message(self, *a, **kw):
+                pass  # keep test output quiet; nothing here is secret anyway
+
+            def do_POST(self):
+                # Absolute, matching what Laravel's redirect()/url() helpers
+                # actually emit -- Location is technically fine either way,
+                # but this keeps the test unambiguous about what a raw
+                # header looks like rather than exercising relative-URL
+                # resolution, which isn't what this test is proving.
+                self.send_response(302)
+                self.send_header('Location', f'http://{self.headers.get("Host")}/destination')
+                self.send_header('Set-Cookie', 'session=freshly-issued-on-redirect')
+                self.send_header('Content-Length', '0')
+                self.end_headers()
+
+            def do_GET(self):
+                # The hop a redirect lands on, if something DOES follow it.
+                self.send_response(200)
+                self.send_header('Content-Length', '2')
+                self.end_headers()
+                self.wfile.write(b'ok')
+
+        cls.server = ThreadingHTTPServer(('127.0.0.1', 0), _RedirectFixtureHandler)
+        cls.base = f'http://127.0.0.1:{cls.server.server_port}'
+        import threading
+        cls.server_thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.server_thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+        super().tearDownClass()
+
+    def test_request_first_hop_captures_the_redirects_own_set_cookie(self):
+        from core.services.eagle_client import _request_first_hop
+
+        status, location, set_cookies, _ = _request_first_hop(
+            f'{self.base}/login', '', method='POST', body=b'x=1',
+        )
+
+        self.assertEqual(status, 302)
+        self.assertEqual(location, f'{self.base}/destination')
+        self.assertTrue(any('freshly-issued-on-redirect' in c for c in set_cookies))
+
+    def test_plain_request_following_the_redirect_loses_that_same_cookie(self):
+        """The gap this diagnostic exists to close, demonstrated directly:
+        the SAME server, the SAME cookie, but through _request's default
+        auto-following -- the intermediate Set-Cookie never reaches the
+        caller at all."""
+        from core.services.eagle_client import _request
+
+        status, final_url, set_cookies, body = _request(
+            f'{self.base}/login', '', method='POST', body=b'x=1',
+        )
+
+        self.assertEqual(status, 200)  # landed on /destination, followed fully
+        self.assertEqual(body, b'ok')
+        self.assertFalse(any('freshly-issued-on-redirect' in c for c in set_cookies),
+                         'the redirect-hop cookie should NOT survive auto-following')
 
 
 # ===================================================================== #
@@ -870,6 +1093,32 @@ class ReloginRetryTestCase(NoNetworkMixin, TestCase):
         self.assertEqual(whoami_mock.call_count, 2)
         credential.refresh_from_db()
         self.assertEqual(credential.status, EagleCredential.EXPIRED)
+        # Recorded as a LOGIN failure, not a plain expiry: the re-login
+        # looked like it succeeded and the retried request failed again
+        # anyway, so a cooldown must now be active -- otherwise a stale
+        # password would draw a fresh login attempt on every subsequent
+        # request instead of being bounded.
+        self.assertIsNotNone(credential.last_login_failure_at)
+        self.assertTrue(credential.login_on_cooldown())
+
+    def test_an_ordinary_no_retry_expiry_never_touches_the_login_cooldown(self):
+        """Regression guard for the fix above: the common, everyday case
+        (no login stored, or retry_on_expiry=False) must still use plain
+        mark_expired and must NOT set last_login_failure_at -- that field
+        means specifically "a login attempt was made and didn't hold up",
+        not "a session merely lapsed"."""
+        credential = store(TRANSLATION)  # cookie only, no login
+        service = EagleService()
+
+        with mock.patch.object(
+            TranslationClient, 'whoami', side_effect=EagleSessionExpired('lapsed', 200),
+        ):
+            with self.assertRaises(EagleAuthError):
+                service.check_session(TRANSLATION)
+
+        credential.refresh_from_db()
+        self.assertEqual(credential.status, EagleCredential.EXPIRED)
+        self.assertIsNone(credential.last_login_failure_at)
 
     def test_no_stored_login_keeps_the_original_unconditional_expiry_behaviour(self):
         """Regression guard: a credential with only a cookie (today's only
@@ -973,6 +1222,49 @@ class LoginCooldownTestCase(NoNetworkMixin, TestCase):
             result = service.login(TRANSLATION)
 
         self.assertEqual(result['account'], 'Shurz')
+
+    def test_login_succeeding_then_whoami_failing_never_leaves_the_credential_active(self):
+        """Category D. `_login_client()` not raising only means the login
+        POST's own redirect/response looked like success -- it is not
+        proof the session actually works. EagleService.login() must not
+        report ACTIVE (or leave the row that way) on an attempt it is
+        about to raise an exception for."""
+        credential = store_login(TRANSLATION)  # login only, no pre-existing cookie
+        service = EagleService()
+
+        def fake_login(client_self, username, password):
+            client_self.cookie = 'translatepro_session=looked-fine-but-is-not'
+
+        with mock.patch.object(TranslationClient, 'login', fake_login), \
+             mock.patch.object(TranslationClient, 'whoami',
+                               side_effect=EagleSessionExpired('user: null', 200)):
+            with self.assertRaises(EagleAuthError):
+                service.login(TRANSLATION)
+
+        credential.refresh_from_db()
+        self.assertNotEqual(credential.status, EagleCredential.ACTIVE)
+        self.assertIsNotNone(credential.last_login_failure_at)
+        self.assertTrue(credential.login_on_cooldown())
+
+    def test_login_succeeding_then_whoami_transport_error_also_records_failure(self):
+        """Same as above, for the OTHER exception whoami() can raise --
+        the exact shape the real incident hit (transcription panel
+        returning a plain HTTP error, not a redirect-shaped expiry)."""
+        credential = store_login(TRANSLATION)
+        service = EagleService()
+
+        def fake_login(client_self, username, password):
+            client_self.cookie = 'translatepro_session=looked-fine-but-is-not'
+
+        with mock.patch.object(TranslationClient, 'login', fake_login), \
+             mock.patch.object(TranslationClient, 'whoami',
+                               side_effect=EagleHTTPError('panel returned 403', 403)):
+            with self.assertRaises(EagleIntegrationError):
+                service.login(TRANSLATION)
+
+        credential.refresh_from_db()
+        self.assertNotEqual(credential.status, EagleCredential.ACTIVE)
+        self.assertIsNotNone(credential.last_login_failure_at)
 
 
 # ===================================================================== #
@@ -1083,20 +1375,35 @@ class LoginSecretNeverLeaksTestCase(NoNetworkMixin, TestCase):
     """
 
     def test_never_appears_in_a_client_side_rejection_across_either_product(self):
-        for client, login_kwargs in (
-            (TranscriptionClient(''), {}),
-            (TranslationClient(''), {}),
-        ):
-            def fake(url, cookie, method='GET', body=None, headers=None, **kw):
-                if method == 'GET':
-                    return (200, url, [],
-                           b'<input type="hidden" name="_token" value="t">')
-                return 422, url, [], b'{"message": "no"}'
+        def fake_get(url, cookie, method='GET', body=None, headers=None, **kw):
+            return 200, url, [], b'<input type="hidden" name="_token" value="t">'
 
-            with mock.patch('core.services.eagle_client._request', side_effect=fake):
-                with self.assertRaises(EagleLoginRejected) as ctx:
-                    client.login(FAKE_USERNAME, FAKE_PASSWORD)
-            self.assertNotIn(FAKE_PASSWORD, str(ctx.exception))
+        # Translation: both legs go through _request.
+        def fake_translation_post(url, cookie, method='GET', body=None, headers=None, **kw):
+            if method == 'GET':
+                return fake_get(url, cookie, method=method)
+            return 422, url, [], b'{"message": "no"}'
+
+        with mock.patch('core.services.eagle_client._request',
+                        side_effect=fake_translation_post):
+            with self.assertRaises(EagleLoginRejected) as ctx:
+                TranslationClient('').login(FAKE_USERNAME, FAKE_PASSWORD)
+        self.assertNotIn(FAKE_PASSWORD, str(ctx.exception))
+
+        # Transcription: GET via _request, POST via _request_first_hop --
+        # both must be patched, or NoNetworkMixin's real-request guard
+        # correctly fires instead (as it did the first time this was
+        # written, before the POST leg's own mock was added here).
+        def fake_transcription_post(url, cookie, method='POST', body=None,
+                                    headers=None, **kw):
+            return 422, '', [], b'no'
+
+        with mock.patch('core.services.eagle_client._request', side_effect=fake_get), \
+             mock.patch('core.services.eagle_client._request_first_hop',
+                        side_effect=fake_transcription_post):
+            with self.assertRaises(EagleLoginRejected) as ctx:
+                TranscriptionClient('').login(FAKE_USERNAME, FAKE_PASSWORD)
+        self.assertNotIn(FAKE_PASSWORD, str(ctx.exception))
 
     def test_never_appears_on_the_stored_credentials_failure_detail(self):
         credential = store_with_login(TRANSLATION)
