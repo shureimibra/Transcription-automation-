@@ -69,6 +69,23 @@ class EagleLoginFailed(EagleAuthError):
     SAFE_MESSAGE = "The external platform rejected this server's login."
 
 
+class EagleBusy(EagleIntegrationError):
+    """
+    Another process (eagle-cycle, a worker's claim/submit, --set-login,
+    or a concurrent warm thread) is already using this Eagle PRODUCT's
+    session right now, and waiting for it timed out.
+
+    DELIBERATELY NOT an EagleAuthError. The credential and the session may
+    both be perfectly fine -- this says nothing about either, only that
+    this attempt lost a race for a lock. A caller that treated it like an
+    auth failure would mark a working credential EXPIRED or spend the
+    login-failure cooldown on contention that has nothing to do with the
+    password. Nothing that catches EagleAuthError should ever catch this
+    by accident, which is exactly what NOT subclassing it guarantees.
+    """
+    SAFE_MESSAGE = 'The external platform session is busy right now. Try again shortly.'
+
+
 class EagleTaskNotFound(EagleIntegrationError):
     SAFE_MESSAGE = 'That task was not found on the external platform.'
 

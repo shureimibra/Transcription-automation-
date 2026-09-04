@@ -17,13 +17,17 @@ No test here makes a network call. The HTTP layer is substituted, because the
 point is our logic, and because claiming a real task spends real money.
 """
 import io
+import threading
+import time
 from datetime import timedelta
 from unittest import mock
 
+import psycopg
 from django.contrib.auth.models import User
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.test import TestCase
+from django.db import connection
+from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
 
 from core.services.eagle_client import (
@@ -35,7 +39,8 @@ from core.services.eagle_client import (
 
 from .credentials import EAGLE_LOGIN_COOLDOWN_SECONDS, TRANSCRIPTION, TRANSLATION, EagleCredential
 from .eagle import (
-    EagleAuthError, EagleIntegrationError, EagleLoginFailed, EagleNotConfigured,
+    EagleAuthError, EagleBusy, EagleIntegrationError, EagleLoginFailed,
+    EagleNotConfigured,
 )
 from .eagle_impl import EagleService
 
@@ -1435,3 +1440,236 @@ class LoginSecretNeverLeaksTestCase(NoNetworkMixin, TestCase):
         self.assertNotIn(FAKE_PASSWORD, str(ctx.exception))
         credential.refresh_from_db()
         self.assertNotIn(FAKE_PASSWORD, credential.last_failure_detail)
+
+
+# ===================================================================== #
+# Cross-process session serialization -- the advisory lock
+# ===================================================================== #
+
+def _raw_connection():
+    """
+    A SECOND, independent connection to the exact test database Django is
+    using -- not the one the ORM/test transaction uses. This is what makes
+    the cross-connection tests below prove CROSS-PROCESS behaviour rather
+    than merely cross-thread: `pg_advisory_xact_lock` taken on this
+    connection is invisible to Django's own connection except through
+    Postgres itself, exactly like eagle-cycle and a Daphne worker today.
+    """
+    settings_dict = connection.settings_dict
+    return psycopg.connect(
+        dbname=settings_dict['NAME'],
+        user=settings_dict['USER'],
+        password=settings_dict['PASSWORD'],
+        host=settings_dict['HOST'] or 'localhost',
+        port=settings_dict['PORT'] or 5432,
+        autocommit=False,
+    )
+
+
+class RequestSerializationTestCase(NoNetworkMixin, TransactionTestCase):
+    """
+    Category 1 (temporal overlap) and category 4 (cookie-persistence
+    race), against REAL threads -- proving timing, not just final state.
+
+    TransactionTestCase, NOT TestCase, DELIBERATELY. A real background
+    thread's DB connection is its own, separate from the main test
+    thread's -- confirmed the hard way earlier this session with a
+    completely different feature, and the fix there was the same one
+    applied here: tests that spawn genuine threads touching the database
+    need TransactionTestCase, not TestCase's atomic wrapping, or the
+    thread's writes are invisible to (and not cleaned up by) the test's
+    own transaction.
+    """
+
+    def _timed_operation(self, sleep_for=0.05):
+        """A fake whoami() that records its own (start, end) wall-clock
+        window and sleeps long enough to make overlap detectable if it
+        happens -- real threads genuinely run concurrently during a
+        time.sleep(), CPython's GIL notwithstanding."""
+        intervals = []
+        ilock = threading.Lock()
+
+        def fake(client_self):
+            start = time.monotonic()
+            time.sleep(sleep_for)
+            end = time.monotonic()
+            with ilock:
+                intervals.append((start, end))
+            return EagleAccount(label='Shurz', minutes_balance=1)
+
+        return fake, intervals
+
+    @staticmethod
+    def _run_two(call):
+        threads = [threading.Thread(target=call) for _ in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10)
+
+    @staticmethod
+    def _overlaps(a, b):
+        (s1, e1), (s2, e2) = a, b
+        return s1 < e2 and s2 < e1
+
+    def test_raw_client_calls_can_overlap_without_synchronization(self):
+        """What the lock exists to prevent: two calls with NOTHING
+        serializing them genuinely run at the same time."""
+        fake, intervals = self._timed_operation()
+        with mock.patch.object(TranslationClient, 'whoami', fake):
+            self._run_two(lambda: TranslationClient(COOKIE).whoami())
+
+        self.assertEqual(len(intervals), 2)
+        self.assertTrue(self._overlaps(*intervals),
+                        'expected these two unsynchronized calls to overlap')
+
+    def test_guard_prevents_two_check_session_calls_from_overlapping(self):
+        """The production path: EagleService.check_session -> _guard ->
+        _locked must serialize two concurrent callers' critical sections."""
+        store(TRANSLATION)
+        service = EagleService()
+        fake, intervals = self._timed_operation()
+
+        with mock.patch.object(TranslationClient, 'whoami', fake):
+            self._run_two(lambda: service.check_session(TRANSLATION))
+
+        self.assertEqual(len(intervals), 2)
+        self.assertFalse(self._overlaps(*intervals),
+                         'the two critical sections overlapped -- the lock did '
+                         'not serialize them')
+
+    def test_serialized_calls_never_both_start_from_the_same_cookie(self):
+        """Category 4. Each call rotates to a DISTINCT new cookie; the
+        second call must observe the FIRST call's rotation, not the
+        original snapshot both would see if unsynchronized."""
+        store(TRANSLATION, cookie='translatepro_session=C1')
+        service = EagleService()
+        seen_cookies = []
+        counter = {'n': 1}
+        clock_lock = threading.Lock()
+
+        def fake(client_self):
+            with clock_lock:
+                seen_cookies.append(client_self.cookie)
+                counter['n'] += 1
+                next_value = counter['n']
+            time.sleep(0.05)
+            client_self.cookie = f'translatepro_session=C{next_value}'
+            client_self.cookie_rotated = True
+            return EagleAccount(label='Shurz', minutes_balance=1)
+
+        with mock.patch.object(TranslationClient, 'whoami', fake):
+            self._run_two(lambda: service.check_session(TRANSLATION))
+
+        self.assertEqual(len(seen_cookies), 2)
+        self.assertNotEqual(
+            seen_cookies[0], seen_cookies[1],
+            'both calls started from the same cookie -- serialization did '
+            'not stop the second from reading a stale snapshot')
+        credential = EagleCredential.objects.get(product=TRANSLATION)
+        # The persisted cookie is whichever call ran second's rotation --
+        # never a torn value, and never the untouched original.
+        self.assertIn(credential.get_cookie_header(), seen_cookies[::-1] + [
+            f'translatepro_session=C{counter["n"]}'])
+
+
+class AdvisoryLockCrossConnectionTestCase(NoNetworkMixin, TransactionTestCase):
+    """
+    Category 2 and 3. A SECOND, genuinely independent PostgreSQL connection
+    holds the lock; the production code, using Django's own (different)
+    connection, must be unable to acquire it until the holder releases --
+    proving this is a real cross-connection (and so cross-process) lock,
+    not merely a Python-level one that only happens to work within a
+    single process by coincidence.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.raw = _raw_connection()
+        self.addCleanup(self.raw.close)
+
+    def _hold_lock_on_raw_connection(self, product):
+        with self.raw.cursor() as cur:
+            cur.execute('SELECT pg_advisory_xact_lock(hashtext(%s))', [f'eagle:{product}'])
+        # BLOCKING form: returns only once acquired. self.raw's transaction
+        # is left open (no commit/rollback yet), so the lock is held until
+        # the test explicitly releases it.
+
+    def _release_raw_lock(self):
+        self.raw.rollback()  # pg_advisory_xact_lock releases at transaction end
+
+    def test_a_second_connection_cannot_acquire_the_held_lock(self):
+        store(TRANSCRIPTION)
+        self._hold_lock_on_raw_connection(TRANSCRIPTION)
+        service = EagleService()
+
+        with mock.patch('apps.workforce.eagle_impl.EAGLE_LOCK_TIMEOUT_SECONDS', 0.5), \
+             mock.patch('apps.workforce.eagle_impl.EAGLE_LOCK_POLL_INTERVAL_SECONDS', 0.05):
+            with self.assertRaises(EagleBusy):
+                service.check_session(TRANSCRIPTION)
+
+    def test_releasing_the_raw_lock_lets_the_production_code_proceed(self):
+        store(TRANSCRIPTION)
+        self._hold_lock_on_raw_connection(TRANSCRIPTION)
+        service = EagleService()
+
+        def fake(client_self):
+            return EagleAccount(label='Eagle Transcribe', raw={})
+
+        result_holder = {}
+
+        def attempt():
+            with mock.patch('apps.workforce.eagle_impl.EAGLE_LOCK_TIMEOUT_SECONDS', 3), \
+                 mock.patch('apps.workforce.eagle_impl.EAGLE_LOCK_POLL_INTERVAL_SECONDS', 0.05), \
+                 mock.patch.object(TranscriptionClient, 'whoami', fake):
+                result_holder['result'] = service.check_session(TRANSCRIPTION)
+
+        thread = threading.Thread(target=attempt)
+        thread.start()
+        time.sleep(0.3)  # let the thread block on the held lock for a moment
+        self._release_raw_lock()
+        thread.join(timeout=10)
+
+        self.assertEqual(result_holder.get('result', {}).get('account'), 'Eagle Transcribe')
+
+    def test_timeout_raises_eaglebusy_not_hang_and_touches_no_credential_state(self):
+        """Category 3, in full: fails after the configured timeout with the
+        dedicated typed error, and -- because the lock acquisition happens
+        BEFORE the credential is even read -- never marks it expired or
+        records a login failure."""
+        credential = store_with_login(TRANSCRIPTION)
+        original_status = credential.status
+        self._hold_lock_on_raw_connection(TRANSCRIPTION)
+        service = EagleService()
+
+        started = time.monotonic()
+        with mock.patch('apps.workforce.eagle_impl.EAGLE_LOCK_TIMEOUT_SECONDS', 0.4), \
+             mock.patch('apps.workforce.eagle_impl.EAGLE_LOCK_POLL_INTERVAL_SECONDS', 0.05):
+            with self.assertRaises(EagleBusy):
+                service.check_session(TRANSCRIPTION)
+        elapsed = time.monotonic() - started
+
+        # Bounded, not instant and not indefinite.
+        self.assertGreaterEqual(elapsed, 0.35)
+        self.assertLess(elapsed, 3.0)
+
+        credential.refresh_from_db()
+        self.assertEqual(credential.status, original_status)
+        self.assertIsNone(credential.last_login_failure_at)
+        self.assertEqual(credential.last_failure_detail, '')
+
+    def test_timeout_on_login_also_touches_no_credential_state(self):
+        """Same guarantee for EagleService.login() (--set-login's path),
+        not just the automatic _guard retry path."""
+        credential = store_login(TRANSCRIPTION)
+        self._hold_lock_on_raw_connection(TRANSCRIPTION)
+        service = EagleService()
+
+        with mock.patch('apps.workforce.eagle_impl.EAGLE_LOCK_TIMEOUT_SECONDS', 0.3), \
+             mock.patch('apps.workforce.eagle_impl.EAGLE_LOCK_POLL_INTERVAL_SECONDS', 0.05):
+            with self.assertRaises(EagleBusy):
+                service.login(TRANSCRIPTION)
+
+        credential.refresh_from_db()
+        self.assertIsNone(credential.last_login_failure_at)
+        self.assertEqual(credential.last_failure_detail, '')
