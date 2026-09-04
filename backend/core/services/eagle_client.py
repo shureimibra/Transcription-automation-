@@ -31,6 +31,12 @@ logger = logging.getLogger('eagle')
 TRANSCRIBE_HOST = 'https://transcribe.eaglewebcommerce.com'
 TRANSLATE_HOST = 'https://translation.eaglewebcommerce.com'
 
+#: The main Eagle site -- NOT a product. Translation's own /api/auth/login
+#: rejects this account with "Please sign in through the main Eagle
+#: system"; the real, browser-confirmed flow authenticates HERE first, then
+#: bridges across. See TranslationClient.login() for the full sequence.
+EAGLE_ROOT_HOST = 'https://eaglewebcommerce.com'
+
 #: cf_clearance is bound to the user-agent that earned it. A mismatch gets a
 #: Cloudflare challenge instead of JSON, so this must stay stable and must
 #: match whatever browser the operator captured the cookie from.
@@ -565,43 +571,150 @@ class TranslationClient:
 
     def login(self, email: str, password: str) -> None:
         """
-        Authenticate directly, replacing whatever cookie this client is
-        currently holding.
+        Authenticate via the main Eagle site's SSO bridge, replacing
+        whatever cookie this client is currently holding.
 
-        THE CONTRACT BELOW WAS READ OUT OF THE SHIPPED BUNDLE
-        (main-*.js), NOT GUESSED. Its own login() action does:
+        WHY NOT A DIRECT POST TO THIS HOST'S OWN /api/auth/login -- that
+        was the original, reasonable-looking implementation, read
+        verbatim out of the SPA bundle's own login() action. It is wrong
+        for this account: production confirmed it is rejected with
+        "Please sign in through the main Eagle system". A real browser
+        capture (DevTools, Network tab, Preserve log, through the actual
+        login) proved the legitimate sequence instead:
 
-            fetch("/api/auth/login", {method: "POST",
-                                       body: JSON.stringify({email, password})})
+            GET  https://eaglewebcommerce.com/login            (root, CSRF)
+            POST https://eaglewebcommerce.com/login             (root credentials)
+            GET  https://eaglewebcommerce.com/user/service/translation
+                 -> 302 Location: https://translation.eaglewebcommerce.com/?accessToken=...
+            GET  <that Location>                                (consumes the token)
+                 -> sets THIS host's own session cookie
+            GET  /api/auth/user                                 (must independently confirm)
 
-        with headers built by the SAME helper (`Qa`/`zv`) every other
-        write in this SPA uses -- Accept/Content-Type: application/json
-        plus X-XSRF-TOKEN read off the XSRF-TOKEN cookie. No separate
-        CSRF-priming call exists anywhere in the bundle; a plain page load
-        already sets that cookie, which is why the GET below is enough.
+        Nothing in this SPA's own bundle references `/user/service/translation`
+        at all -- it is a ROOT Eagle route, not a Translation one, which is
+        exactly why the earlier bundle-only reverse-engineering never found
+        it.
 
-        SUCCESS IS A TRUTHY `user` IN THE BODY, NOT THE STATUS CODE ALONE
-        -- the same shape whoami() already trusts, because this platform
-        answers some failure shapes with a 200 too.
+        THE ROOT SESSION IS LOCAL AND NEVER TOUCHES self.cookie. `root_cookie`
+        exists only for the three root-domain requests below and is folded
+        via `merge_set_cookies` (not overwritten) after each one, so a
+        Set-Cookie on ANY of the three -- not just the last -- survives, the
+        same discipline TranscriptionClient.login() already applies to its
+        own single host. It is discarded when this method returns; only a
+        confirmed-working Translation cookie is ever persisted by the
+        caller (EagleService.record_login_success), and that persistence
+        already happens inside the SAME advisory-locked critical section
+        this whole method runs in -- see EagleService._locked.
+
+        THE BRIDGE'S REDIRECT IS VALIDATED BEFORE BEING FOLLOWED, ON PURPOSE.
+        Blindly following any Location header this response happened to
+        carry would mean a compromised or misbehaving root endpoint could
+        redirect this server to fetch an arbitrary host with credentials-
+        adjacent context. The origin is checked with a real (scheme, host)
+        comparison, not a string-prefix check -- a prefix check would let
+        "https://translation.eaglewebcommerce.com.evil.example/" through,
+        since it starts with the right string without being the right host.
+
+        THE accessToken VALUE IS NEVER LOGGED, STORED, OR PUT IN AN
+        EXCEPTION. Only its PRESENCE is checked. The one place its value is
+        used is the single GET that consumes it, and even there only the
+        landing request's PATH (never its query string) is ever logged.
+
+        A 200 ON THE TOKEN-LANDING REQUEST IS NOT SUCCESS BY ITSELF. That
+        request returns the SPA shell (HTML), not a JSON body with a `user`
+        field the way the old direct-login response had -- there is nothing
+        in a 200 alone to trust. This method makes its own independent
+        `GET /api/auth/user` check before returning, rather than leaving
+        that entirely to whichever caller happens to verify afterwards (not
+        every _guard() retry does -- only check_session's does, today).
         """
-        status, _, _, _ = self._req(f'{self.host}/login')
+        root_cookie = ''
+
+        # -- 1: root GET /login -- fresh CSRF token + root session cookies -- #
+        status, _, set_cookies, raw = _request_first_hop(f'{EAGLE_ROOT_HOST}/login', root_cookie)
+        root_cookie = merge_set_cookies(root_cookie, set_cookies)
         if status >= 400:
-            raise EagleLoginRejected(f'Could not load the login page ({status}).', status)
+            raise EagleLoginRejected(
+                f'Could not load the main Eagle login page ({status}).', status)
+        html = raw.decode('utf-8', 'replace')
+        match = re.search(r'name="_token"\s+value="([^"]+)"', html)
+        if not match:
+            raise EagleLoginRejected('No CSRF token on the main Eagle login page.', status)
+        token = match.group(1)
 
-        payload = json.dumps({'email': email, 'password': password}).encode('utf-8')
-        headers = {'Accept': 'application/json', 'Content-Type': 'application/json'}
-        headers.update(xsrf_header(self.cookie))
-        status, _, _, raw = self._req(
-            f'{self.host}/api/auth/login', method='POST', body=payload, headers=headers,
+        # -- 2: root POST /login -- the actual credential check -- #
+        body = urllib.parse.urlencode({
+            'email': email, 'password': password, '_token': token,
+        }).encode('utf-8')
+        status, location, set_cookies, raw = _request_first_hop(
+            f'{EAGLE_ROOT_HOST}/login', root_cookie, method='POST', body=body,
+            headers={'Content-Type': 'application/x-www-form-urlencoded'},
         )
-        try:
-            data = json.loads(raw.decode('utf-8'))
-        except Exception:
-            data = {}
+        root_cookie = merge_set_cookies(root_cookie, set_cookies)
+        if status >= 500:
+            raise EagleLoginRejected(f'Main Eagle login POST returned {status}.', status)
+        if status not in (301, 302, 303, 307, 308) or not location:
+            detail = _scrape_login_error(raw.decode('utf-8', 'replace'))
+            raise EagleLoginRejected(
+                detail or f'Main Eagle login did not redirect ({status}).', status)
+        root_landing_path = urllib.parse.urlsplit(location).path.rstrip('/')
+        if root_landing_path == '/login':
+            detail = _scrape_login_error(raw.decode('utf-8', 'replace'))
+            raise EagleLoginRejected(detail or 'Eagle rejected these credentials.', status)
+        logger.info('[EAGLE] %s: main Eagle login succeeded, redirected to %s',
+                   self.product, root_landing_path)
 
-        if status >= 400 or not data.get('user'):
-            message = data.get('message') or f'Eagle rejected these credentials ({status}).'
-            raise EagleLoginRejected(message, status)
+        # -- 3: the SSO bridge -- authenticated root session, ask for a #
+        # -- Translation handoff -- #
+        status, bridge_location, set_cookies, _ = _request_first_hop(
+            f'{EAGLE_ROOT_HOST}/user/service/translation', root_cookie)
+        root_cookie = merge_set_cookies(root_cookie, set_cookies)
+        if status in (401, 403):
+            raise EagleLoginRejected(
+                f'Main Eagle rejected the Translation SSO bridge ({status}).', status)
+        if status not in (301, 302, 303, 307, 308) or not bridge_location:
+            raise EagleLoginRejected(
+                f'Translation SSO bridge did not redirect as expected ({status}).', status)
+
+        # -- Validate the bridge's redirect BEFORE following it. -- #
+        bridge_target = urllib.parse.urlsplit(bridge_location)
+        expected = urllib.parse.urlsplit(self.host)
+        if (bridge_target.scheme, bridge_target.netloc) != (expected.scheme, expected.netloc):
+            raise EagleLoginRejected(
+                'Translation SSO bridge redirected to an unexpected host.', status)
+        access_token = (urllib.parse.parse_qs(bridge_target.query).get('accessToken') or [''])[0]
+        if not access_token:
+            raise EagleLoginRejected(
+                'Translation SSO bridge redirect carried no accessToken.', status)
+
+        # -- 4: consume the token. self.cookie, not root_cookie -- this -- #
+        # -- request goes to a DIFFERENT host and must never carry the -- #
+        # -- root domain's session. -- #
+        status, _, set_cookies, _ = _request_first_hop(bridge_location, self.cookie)
+        if status >= 400:
+            raise EagleLoginRejected(
+                f'Translation did not accept the SSO handoff ({status}).', status)
+        self._absorb(set_cookies)
+        if not self.cookie_rotated:
+            raise EagleLoginRejected(
+                'The SSO handoff completed but Translation issued no session cookie.', status)
+        self.cookie_rotated = False
+        logger.info('[EAGLE] %s: SSO handoff landed at %s',
+                   self.product, bridge_target.path or '/')
+
+        # -- 5: independently confirm -- a 200 on the landing request is -- #
+        # -- not proof by itself; only a real, authenticated /api/auth/user -- #
+        # -- is. -- #
+        try:
+            self.whoami()
+        except EagleHTTPError as exc:
+            # Covers EagleSessionExpired (a subclass -- the 401/null-user
+            # shapes) and any other transport failure on the verification
+            # call alike: either way, the handoff did not produce a
+            # working session.
+            raise EagleLoginRejected(
+                f'SSO handoff completed but the session did not verify: {exc.detail}',
+                exc.status) from exc
 
         logger.info('[EAGLE] %s login succeeded', self.product)
 

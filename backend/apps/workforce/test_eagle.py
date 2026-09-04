@@ -35,6 +35,7 @@ from core.services.eagle_client import (
     xsrf_header,
     EagleAccount, EagleHTTPError, EagleLoginRejected, EagleSessionExpired,
     RawTask, TranscriptionClient, TranslationClient,
+    EAGLE_ROOT_HOST, TRANSLATE_HOST,
 )
 
 from .credentials import EAGLE_LOGIN_COOLDOWN_SECONDS, TRANSCRIPTION, TRANSLATION, EagleCredential
@@ -926,85 +927,284 @@ class RedirectCookieRealServerTestCase(TestCase):
 
 class TranslationLoginFlowTestCase(NoNetworkMixin, TestCase):
     """
-    The endpoint, encoding, header and success shape here were read
-    directly out of the SPA's own shipped bundle, not guessed -- see
-    login()'s docstring.
+    The SSO bridge sequence here was read off a REAL browser capture
+    (DevTools Network tab, through an actual login) -- not the SPA bundle.
+    /user/service/translation is a root-Eagle route the Translation SPA
+    never references at all, which is exactly why the earlier bundle-only
+    reverse-engineering (the original, now-replaced direct-POST
+    implementation) never found it. See TranslationClient.login()'s own
+    docstring for the full five-step sequence and the reasoning behind
+    each safeguard below.
     """
 
-    def _fake(self, login_status=200, login_body=b'{"user": null}',
-              get_cookies=('XSRF-TOKEN=abc123',)):
-        # Discriminate by METHOD, not URL suffix -- "/login" (the GET) and
-        # "/api/auth/login" (the POST) both end with "/login", so a suffix
-        # match routes both calls through the same branch.
+    #: A stand-in accessToken -- never a real one, only used to prove it
+    #: never leaks anywhere it shouldn't.
+    FAKE_TOKEN = 'sso-token-fixture-should-never-appear-in-any-log-or-exception'
+
+    def _fake_hops(self, root_get_status=200,
+                   root_get_body=b'<input type="hidden" name="_token" value="tok-123">',
+                   root_post_status=302, root_post_location=None, root_post_body=b'',
+                   bridge_status=302, bridge_location=None,
+                   landing_status=200, landing_cookies=('translatepro_session=freshly-authed',),
+                   whoami_status=200, whoami_body=b'{"user": {"id": 1, "name": "Shurz"}}'):
+        """
+        Returns (fake_first_hop, fake_request, calls). Two separate fakes
+        because the five real steps go through two different transport
+        functions: steps 1-4 (root GET/POST, the bridge, the token-landing
+        request) all use _request_first_hop -- never auto-following a
+        redirect, the same discipline TranscriptionClient.login() already
+        uses and for the identical reason. Step 5 (the independent
+        /api/auth/user verification) goes through whoami(), which -- like
+        every other read on this client -- uses plain _request.
+        """
         calls = []
+        if root_post_location is None:
+            root_post_location = f'{EAGLE_ROOT_HOST}/dashboard'
+        if bridge_location is None:
+            bridge_location = f'{TRANSLATE_HOST}/?accessToken={self.FAKE_TOKEN}'
 
-        def fake(url, cookie, method='GET', body=None, headers=None, **kw):
-            calls.append({'url': url, 'method': method, 'body': body, 'headers': headers})
-            if method == 'GET':
-                return 200, url, list(get_cookies), b''
-            return login_status, url, ['translatepro_session=authed'], login_body
-        return fake, calls
+        def fake_first_hop(url, cookie, method='GET', body=None, headers=None, **kw):
+            calls.append({'url': url, 'method': method, 'body': body, 'fn': 'first_hop'})
+            if url == f'{EAGLE_ROOT_HOST}/login' and method == 'GET':
+                return root_get_status, '', [], root_get_body
+            if url == f'{EAGLE_ROOT_HOST}/login' and method == 'POST':
+                return root_post_status, root_post_location, [], root_post_body
+            if url == f'{EAGLE_ROOT_HOST}/user/service/translation':
+                return bridge_status, bridge_location, [], b''
+            if url == bridge_location:
+                return landing_status, '', list(landing_cookies), b'<html>spa shell</html>'
+            raise AssertionError(f'unexpected _request_first_hop call: {method} {url}')
 
-    def test_a_successful_login_adopts_the_new_cookie(self):
+        def fake_request(url, cookie, method='GET', body=None, headers=None, **kw):
+            calls.append({'url': url, 'method': method, 'body': body, 'fn': 'request'})
+            if url.endswith('/api/auth/user'):
+                return whoami_status, url, [], whoami_body
+            raise AssertionError(f'unexpected _request call: {method} {url}')
+
+        return fake_first_hop, fake_request, calls
+
+    def _patched(self, fake_first_hop, fake_request):
+        return (
+            mock.patch('core.services.eagle_client._request_first_hop', side_effect=fake_first_hop),
+            mock.patch('core.services.eagle_client._request', side_effect=fake_request),
+        )
+
+    # -- 1. successful complete SSO flow ------------------------------- #
+
+    def test_a_successful_full_sso_flow_adopts_the_translation_cookie(self):
         client = TranslationClient('')
-        fake, _ = self._fake(login_body=b'{"user": {"id": 1, "name": "Shurz"}}')
+        fake_first_hop, fake_request, calls = self._fake_hops()
 
-        with mock.patch('core.services.eagle_client._request', side_effect=fake):
+        p1, p2 = self._patched(fake_first_hop, fake_request)
+        with p1, p2:
             client.login(FAKE_USERNAME, FAKE_PASSWORD)
 
-        self.assertIn('translatepro_session=authed', client.cookie)
+        self.assertIn('translatepro_session=freshly-authed', client.cookie)
+        # All five real steps happened, in order, once each.
+        self.assertEqual([c['url'] for c in calls], [
+            f'{EAGLE_ROOT_HOST}/login',
+            f'{EAGLE_ROOT_HOST}/login',
+            f'{EAGLE_ROOT_HOST}/user/service/translation',
+            f'{TRANSLATE_HOST}/?accessToken={self.FAKE_TOKEN}',
+            f'{TRANSLATE_HOST}/api/auth/user',
+        ])
 
-    def test_a_null_user_is_a_failure_even_with_200(self):
+    # -- 2. root login failure ------------------------------------------ #
+
+    def test_root_login_rejection_stops_the_whole_flow(self):
         client = TranslationClient('')
-        fake, _ = self._fake(login_status=200, login_body=b'{"user": null}')
+        fake_first_hop, fake_request, calls = self._fake_hops(
+            root_post_status=302, root_post_location=f'{EAGLE_ROOT_HOST}/login',
+            root_post_body=b'<div class="invalid-feedback">These credentials do not '
+                          b'match our records.</div>',
+        )
 
-        with mock.patch('core.services.eagle_client._request', side_effect=fake):
-            with self.assertRaises(EagleLoginRejected):
-                client.login(FAKE_USERNAME, 'wrong-password')
-
-    def test_a_4xx_with_a_message_surfaces_that_message(self):
-        client = TranslationClient('')
-        fake, _ = self._fake(login_status=422,
-                             login_body=b'{"message": "These credentials are invalid."}')
-
-        with mock.patch('core.services.eagle_client._request', side_effect=fake):
+        p1, p2 = self._patched(fake_first_hop, fake_request)
+        with p1, p2:
             with self.assertRaises(EagleLoginRejected) as ctx:
                 client.login(FAKE_USERNAME, 'wrong-password')
 
-        self.assertIn('These credentials are invalid.', str(ctx.exception))
+        self.assertIn('do not match', str(ctx.exception))
+        # Never reached the bridge, the landing request, or verification.
+        self.assertEqual(len(calls), 2)
 
-    def test_the_password_never_appears_in_the_rejection_message(self):
+    # -- 3. bridge 401/403 ----------------------------------------------- #
+
+    def test_bridge_401_is_rejected(self):
         client = TranslationClient('')
-        fake, _ = self._fake(login_status=422, login_body=b'{"message": "no"}')
-
-        with mock.patch('core.services.eagle_client._request', side_effect=fake):
+        fake_first_hop, fake_request, _ = self._fake_hops(bridge_status=401)
+        p1, p2 = self._patched(fake_first_hop, fake_request)
+        with p1, p2:
             with self.assertRaises(EagleLoginRejected) as ctx:
                 client.login(FAKE_USERNAME, FAKE_PASSWORD)
+        self.assertIn('401', str(ctx.exception))
 
-        self.assertNotIn(FAKE_PASSWORD, str(ctx.exception))
-
-    def test_the_xsrf_header_is_derived_from_the_gets_cookie_and_sent_on_the_post(self):
+    def test_bridge_403_is_rejected(self):
         client = TranslationClient('')
-        fake, calls = self._fake(
-            login_body=b'{"user": {"name": "Shurz"}}',
-            get_cookies=('XSRF-TOKEN=the-real-token',))
+        fake_first_hop, fake_request, _ = self._fake_hops(bridge_status=403)
+        p1, p2 = self._patched(fake_first_hop, fake_request)
+        with p1, p2:
+            with self.assertRaises(EagleLoginRejected) as ctx:
+                client.login(FAKE_USERNAME, FAKE_PASSWORD)
+        self.assertIn('403', str(ctx.exception))
 
-        with mock.patch('core.services.eagle_client._request', side_effect=fake):
+    # -- 4. bridge non-302 ------------------------------------------------ #
+
+    def test_bridge_returning_200_instead_of_a_redirect_is_rejected(self):
+        client = TranslationClient('')
+        fake_first_hop, fake_request, _ = self._fake_hops(bridge_status=200)
+        p1, p2 = self._patched(fake_first_hop, fake_request)
+        with p1, p2:
+            with self.assertRaises(EagleLoginRejected) as ctx:
+                client.login(FAKE_USERNAME, FAKE_PASSWORD)
+        self.assertIn('did not redirect', str(ctx.exception))
+
+    # -- 5. missing accessToken -------------------------------------------- #
+
+    def test_bridge_redirect_with_no_access_token_is_rejected(self):
+        client = TranslationClient('')
+        fake_first_hop, fake_request, _ = self._fake_hops(
+            bridge_location=f'{TRANSLATE_HOST}/')  # right host, no ?accessToken at all
+        p1, p2 = self._patched(fake_first_hop, fake_request)
+        with p1, p2:
+            with self.assertRaises(EagleLoginRejected) as ctx:
+                client.login(FAKE_USERNAME, FAKE_PASSWORD)
+        self.assertIn('accessToken', str(ctx.exception))
+
+    # -- 6. unexpected redirect host ---------------------------------------- #
+
+    def test_bridge_redirect_to_an_unexpected_host_is_refused(self):
+        """The origin check must be a REAL (scheme, host) comparison, not a
+        string-prefix match -- this host starts with the right string
+        without being the right host, which a naive check would miss."""
+        client = TranslationClient('')
+        fake_first_hop, fake_request, calls = self._fake_hops(
+            bridge_location=f'https://translation.eaglewebcommerce.com.evil.example/'
+                            f'?accessToken={self.FAKE_TOKEN}')
+        p1, p2 = self._patched(fake_first_hop, fake_request)
+        with p1, p2:
+            with self.assertRaises(EagleLoginRejected) as ctx:
+                client.login(FAKE_USERNAME, FAKE_PASSWORD)
+        self.assertIn('unexpected host', str(ctx.exception))
+        # And, critically, the malicious host was never actually requested.
+        self.assertNotIn('evil.example', ' '.join(c['url'] for c in calls))
+
+    # -- 7. Translation landing request failing ------------------------------ #
+
+    def test_the_landing_request_failing_is_rejected(self):
+        client = TranslationClient('')
+        fake_first_hop, fake_request, _ = self._fake_hops(landing_status=500)
+        p1, p2 = self._patched(fake_first_hop, fake_request)
+        with p1, p2:
+            with self.assertRaises(EagleLoginRejected) as ctx:
+                client.login(FAKE_USERNAME, FAKE_PASSWORD)
+        self.assertIn('500', str(ctx.exception))
+
+    # -- 8. landing 200 but no Translation session ---------------------------- #
+
+    def test_landing_200_with_no_cookie_issued_is_not_treated_as_success(self):
+        client = TranslationClient('')
+        fake_first_hop, fake_request, _ = self._fake_hops(
+            landing_status=200, landing_cookies=())  # no Set-Cookie at all
+        p1, p2 = self._patched(fake_first_hop, fake_request)
+        with p1, p2:
+            with self.assertRaises(EagleLoginRejected) as ctx:
+                client.login(FAKE_USERNAME, FAKE_PASSWORD)
+        self.assertIn('no session cookie', str(ctx.exception))
+
+    # -- 9. /api/auth/user verification failure ------------------------------- #
+
+    def test_verification_failure_after_a_successful_looking_handoff_is_rejected(self):
+        client = TranslationClient('')
+        fake_first_hop, fake_request, _ = self._fake_hops(
+            whoami_status=200, whoami_body=b'{"user": null}')
+        p1, p2 = self._patched(fake_first_hop, fake_request)
+        with p1, p2:
+            with self.assertRaises(EagleLoginRejected) as ctx:
+                client.login(FAKE_USERNAME, FAKE_PASSWORD)
+        self.assertIn('did not verify', str(ctx.exception))
+
+    # -- 10. accessToken never appears in logs, exceptions, or persisted data - #
+
+    def test_access_token_never_appears_in_any_raised_exception(self):
+        for kwargs in (
+            {'bridge_status': 401},
+            {'landing_status': 500},
+            {'landing_cookies': ()},
+            {'whoami_body': b'{"user": null}'},
+        ):
+            client = TranslationClient('')
+            fake_first_hop, fake_request, _ = self._fake_hops(**kwargs)
+            p1, p2 = self._patched(fake_first_hop, fake_request)
+            with p1, p2:
+                with self.assertRaises(EagleLoginRejected) as ctx:
+                    client.login(FAKE_USERNAME, FAKE_PASSWORD)
+            self.assertNotIn(self.FAKE_TOKEN, str(ctx.exception))
+
+    def test_access_token_never_appears_in_any_log_line(self):
+        client = TranslationClient('')
+        fake_first_hop, fake_request, _ = self._fake_hops()
+        p1, p2 = self._patched(fake_first_hop, fake_request)
+        with self.assertLogs('eagle', level='INFO') as captured:
+            with p1, p2:
+                client.login(FAKE_USERNAME, FAKE_PASSWORD)
+        self.assertNotIn(self.FAKE_TOKEN, '\n'.join(captured.output))
+
+    def test_access_token_is_never_persisted_on_the_credential(self):
+        """End to end, through EagleService.login() -- the actual path
+        --set-login uses -- confirms the persisted cookie is Translation's
+        real session only, never the bridge URL or the token."""
+        credential = store_login(TRANSLATION)
+        service = EagleService()
+        fake_first_hop, fake_request, _ = self._fake_hops()
+        p1, p2 = self._patched(fake_first_hop, fake_request)
+        with p1, p2:
+            service.login(TRANSLATION)
+
+        credential.refresh_from_db()
+        stored_cookie = credential.get_cookie_header()
+        self.assertNotIn(self.FAKE_TOKEN, stored_cookie)
+        self.assertNotIn('accessToken', stored_cookie)
+        self.assertIn('translatepro_session=freshly-authed', stored_cookie)
+
+    # -- root cookie state: multiple cookies must survive across hops -------- #
+
+    def test_root_session_cookies_from_every_hop_accumulate_not_overwrite(self):
+        """Safeguard: the root session must not assume a single cookie
+        string -- a Set-Cookie on the GET, a DIFFERENT one on the POST, and
+        a THIRD on the bridge call must all still be present (merged, not
+        replaced) by the time the bridge request is made."""
+        client = TranslationClient('')
+        seen_root_cookies_at_bridge = []
+
+        def fake_first_hop(url, cookie, method='GET', body=None, headers=None, **kw):
+            if url == f'{EAGLE_ROOT_HOST}/login' and method == 'GET':
+                return 200, '', ['XSRF-TOKEN=xsrf1', 'hyiprio_session=sess1'], \
+                    b'<input type="hidden" name="_token" value="tok-123">'
+            if url == f'{EAGLE_ROOT_HOST}/login' and method == 'POST':
+                return 302, f'{EAGLE_ROOT_HOST}/dashboard', ['hyiprio_session=sess2'], b''
+            if url == f'{EAGLE_ROOT_HOST}/user/service/translation':
+                seen_root_cookies_at_bridge.append(cookie)
+                return 302, f'{TRANSLATE_HOST}/?accessToken={self.FAKE_TOKEN}', [], b''
+            if url == f'{TRANSLATE_HOST}/?accessToken={self.FAKE_TOKEN}':
+                return 200, '', ['translatepro_session=authed'], b''
+            raise AssertionError(url)
+
+        def fake_request(url, cookie, method='GET', body=None, headers=None, **kw):
+            return 200, url, [], b'{"user": {"name": "Shurz"}}'
+
+        with mock.patch('core.services.eagle_client._request_first_hop', side_effect=fake_first_hop), \
+             mock.patch('core.services.eagle_client._request', side_effect=fake_request):
             client.login(FAKE_USERNAME, FAKE_PASSWORD)
 
-        login_call = calls[1]
-        self.assertEqual(login_call['headers']['X-XSRF-TOKEN'], 'the-real-token')
-
-    def test_the_body_is_json_with_email_and_password_only(self):
-        import json
-        client = TranslationClient('')
-        fake, calls = self._fake(login_body=b'{"user": {"name": "Shurz"}}')
-
-        with mock.patch('core.services.eagle_client._request', side_effect=fake):
-            client.login(FAKE_USERNAME, FAKE_PASSWORD)
-
-        payload = json.loads(calls[1]['body'])
-        self.assertEqual(payload, {'email': FAKE_USERNAME, 'password': FAKE_PASSWORD})
+        self.assertEqual(len(seen_root_cookies_at_bridge), 1)
+        bridge_cookie = seen_root_cookies_at_bridge[0]
+        # XSRF-TOKEN from the GET must still be present...
+        self.assertIn('XSRF-TOKEN=xsrf1', bridge_cookie)
+        # ...and hyiprio_session must be the POST's ROTATED value, not the
+        # GET's original one -- merged and updated, not just accumulated.
+        self.assertIn('hyiprio_session=sess2', bridge_cookie)
+        self.assertNotIn('sess1', bridge_cookie)
 
 
 # ===================================================================== #
@@ -1383,14 +1583,17 @@ class LoginSecretNeverLeaksTestCase(NoNetworkMixin, TestCase):
         def fake_get(url, cookie, method='GET', body=None, headers=None, **kw):
             return 200, url, [], b'<input type="hidden" name="_token" value="t">'
 
-        # Translation: both legs go through _request.
-        def fake_translation_post(url, cookie, method='GET', body=None, headers=None, **kw):
+        # Translation: the whole SSO dance goes through _request_first_hop;
+        # rejected at the root login POST (first leg), so nothing beyond it
+        # is ever reached.
+        def fake_translation_first_hop(url, cookie, method='GET', body=None,
+                                       headers=None, **kw):
             if method == 'GET':
-                return fake_get(url, cookie, method=method)
-            return 422, url, [], b'{"message": "no"}'
+                return 200, '', [], b'<input type="hidden" name="_token" value="t">'
+            return 302, f'{EAGLE_ROOT_HOST}/login', [], b'{"message": "no"}'
 
-        with mock.patch('core.services.eagle_client._request',
-                        side_effect=fake_translation_post):
+        with mock.patch('core.services.eagle_client._request_first_hop',
+                        side_effect=fake_translation_first_hop):
             with self.assertRaises(EagleLoginRejected) as ctx:
                 TranslationClient('').login(FAKE_USERNAME, FAKE_PASSWORD)
         self.assertNotIn(FAKE_PASSWORD, str(ctx.exception))
@@ -1571,6 +1774,41 @@ class RequestSerializationTestCase(NoNetworkMixin, TransactionTestCase):
         # never a torn value, and never the untouched original.
         self.assertIn(credential.get_cookie_header(), seen_cookies[::-1] + [
             f'translatepro_session=C{counter["n"]}'])
+
+    def test_two_concurrent_translation_sso_logins_are_serialized(self):
+        """Category 11. The advisory lock must cover the ENTIRE multi-hop
+        SSO sequence -- root login, bridge, token landing, verification,
+        persistence -- not just a single request. Exercises
+        EagleService.login() directly (the real --set-login / automatic
+        retry-login path, where the multi-hop dance actually lives) rather
+        than re-testing TranslationClient.login()'s own internals, which
+        the dedicated SSO tests above already cover: this proves the LOCK's
+        coverage, standing in for however long the real dance takes with
+        one sleep inside a mocked login()."""
+        store_login(TRANSLATION)
+        service = EagleService()
+        intervals = []
+        ilock = threading.Lock()
+
+        def fake_login(client_self, username, password):
+            start = time.monotonic()
+            time.sleep(0.05)
+            client_self.cookie = 'translatepro_session=authed'
+            end = time.monotonic()
+            with ilock:
+                intervals.append((start, end))
+
+        def fake_whoami(client_self):
+            return EagleAccount(label='Shurz', minutes_balance=1)
+
+        with mock.patch.object(TranslationClient, 'login', fake_login), \
+             mock.patch.object(TranslationClient, 'whoami', fake_whoami):
+            self._run_two(lambda: service.login(TRANSLATION))
+
+        self.assertEqual(len(intervals), 2)
+        self.assertFalse(self._overlaps(*intervals),
+                         'two concurrent SSO logins overlapped -- the lock did '
+                         'not serialize the full multi-hop sequence')
 
 
 class AdvisoryLockCrossConnectionTestCase(NoNetworkMixin, TransactionTestCase):
