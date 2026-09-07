@@ -2251,6 +2251,95 @@ class OrphanedJobRecoveryTestCase(TestCase):
         })
 
 
+class RecoveryRunsOnRealEntryPointsTestCase(TestCase):
+    """
+    TranscriptionsConfig.ready() decides whether to call
+    recover_orphaned_jobs() by inspecting sys.argv/RUN_MAIN -- this
+    exercises that decision directly, for every real production entry
+    point, rather than trusting it by re-reading the code.
+
+    WHY THIS MATTERS. The original gate was `runserver` only, which never
+    runs in production: production serves via a standalone `daphne`
+    process (its own systemd unit, `shurz-daphne`) and the warm pool via
+    `manage.py eagle_cycle --loop` (deploy/eagle-cycle.service) -- neither
+    is `runserver`. That meant this recovery had never actually run in
+    production on any restart, ever -- found only after 3 real jobs sat
+    orphaned in `transcribing` for 50+ minutes with nothing watching,
+    discovered by a manual DB query rather than anything automatic.
+    """
+
+    def call_ready_with(self, argv, run_main=None):
+        """
+        Calls the REAL TranscriptionsConfig singleton's ready() again,
+        against a controlled sys.argv/RUN_MAIN, with the two things it
+        could otherwise really do -- hit the database, and spawn a
+        diarization-model-loading thread -- neutralised. What's being
+        tested is the entry-point DECISION, not those side effects.
+        """
+        from django.apps import apps as django_apps
+        config = django_apps.get_app_config('transcriptions')
+        with patch('sys.argv', argv), \
+                patch.dict(os.environ, {}, clear=False), \
+                patch('threading.Thread'), \
+                patch('apps.transcriptions.job_cleanup.recover_orphaned_jobs') as recover:
+            os.environ.pop('RUN_MAIN', None)
+            if run_main is not None:
+                os.environ['RUN_MAIN'] = run_main
+            config.ready()
+        return recover
+
+    def test_eagle_cycle_triggers_recovery(self):
+        """The confirmed real production entry point for the warm pool --
+        deploy/eagle-cycle.service's own ExecStart."""
+        recover = self.call_ready_with(
+            ['manage.py', 'eagle_cycle', '--loop', '--interval', '90'])
+        recover.assert_called_once()
+
+    def test_eagle_cycle_is_not_blocked_by_a_run_main_check(self):
+        """The bug this whole change fixes, made explicit: eagle_cycle
+        never sets RUN_MAIN at all (that's runserver's autoreloader
+        artifact), so a RUN_MAIN check applied to every entry point --
+        not just runserver -- would always read false here and silently
+        skip recovery on every single eagle-cycle restart forever."""
+        recover = self.call_ready_with(['manage.py', 'eagle_cycle', '--loop'])
+        recover.assert_called_once()
+
+    def test_daphne_triggers_recovery(self):
+        """The standalone daphne console-script -- best-effort detection,
+        since no deploy/shurz-daphne.service is committed to confirm the
+        exact invocation against (see apps.py's own comment on this)."""
+        recover = self.call_ready_with([
+            '/opt/shurz/.venv/bin/daphne', '-b', '127.0.0.1', '-p', '8001',
+            'transcription_proj.asgi:application',
+        ])
+        recover.assert_called_once()
+
+    def test_runserver_with_run_main_set_triggers_recovery(self):
+        """The original, still-supported local-dev path -- unchanged."""
+        recover = self.call_ready_with(['manage.py', 'runserver'], run_main='true')
+        recover.assert_called_once()
+
+    def test_runserver_without_run_main_does_not_double_fire(self):
+        """The autoreloader's watcher process must not also run recovery
+        -- the spawned worker (RUN_MAIN=true) already will."""
+        recover = self.call_ready_with(['manage.py', 'runserver'])
+        recover.assert_not_called()
+
+    def test_test_command_never_triggers_it(self):
+        """The original safety guarantee, still intact: `manage.py test`
+        must never touch real rows as a side effect of loading apps."""
+        recover = self.call_ready_with(['manage.py', 'test'])
+        recover.assert_not_called()
+
+    def test_shell_never_triggers_it(self):
+        recover = self.call_ready_with(['manage.py', 'shell'])
+        recover.assert_not_called()
+
+    def test_migrate_never_triggers_it(self):
+        recover = self.call_ready_with(['manage.py', 'migrate'])
+        recover.assert_not_called()
+
+
 class SpeakerDiarizationMergeLogicTestCase(TestCase):
     """
     Tests the pure alignment logic (core.services.diarization) that maps
