@@ -526,6 +526,76 @@ class ApplyStandardTestCase(TestCase):
         self.assertEqual(self.segment.text, 'Um, we was going, you know, there.')
 
 
+class WarmTranslationQualityProfileTestCase(TestCase):
+    """
+    `_warm_translation` must resolve `AI_QUALITY_DEFAULT_PROFILE` the exact
+    same way `TranscriptionJobViewSet.ai_revisions` already does, rather
+    than creating the revision ungated -- which is what it did before this
+    was wired in, confirmed both in code and against 7 real days of
+    production `AIUsageRecord` rows where every translate-operation row
+    had exactly one request, zero exceptions.
+    """
+
+    def setUp(self):
+        super().setUp()
+        project = Project.objects.create(name='translation-gate')
+        self.job = TranscriptionJob.objects.create(
+            project=project, input_source='upload', status='completed')
+        TranscriptSegment.objects.create(
+            job=self.job, start_time=0.0, end_time=4.0,
+            speaker_label='Male_1', text='Hello there.')
+        self.task = make_task(
+            kind=Task.TRANSLATION, external_source='translation',
+            external_task_id='9001', job=self.job,
+            source_language='en', target_language='fr',
+        )
+
+    def warm_and_capture_profile(self):
+        """Runs _warm_translation with the pipeline faked, and returns the
+        `quality_profile` the created AIRevision actually got -- read from
+        the argument the (mocked) pipeline itself received, not guessed
+        at from outside."""
+        captured = {}
+
+        def fake_pipeline(revision_id):
+            revision = AIRevision.objects.get(pk=revision_id)
+            captured['quality_profile'] = revision.quality_profile
+            AIRevision.objects.filter(pk=revision_id).update(status='completed')
+
+        with mock.patch('apps.transcriptions.tasks.run_ai_revision_pipeline',
+                        side_effect=fake_pipeline):
+            applied = warmpool._warm_translation(self.task, self.job)
+
+        self.assertTrue(applied, 'the translation should complete under every profile here')
+        return captured['quality_profile']
+
+    def test_no_configured_default_leaves_it_ungated(self):
+        """The pre-existing behaviour, still available: an operator who has
+        not set AI_QUALITY_DEFAULT_PROFILE gets exactly what they had
+        before this change -- one ungated request, no surprise spend."""
+        with override_settings(AI_QUALITY_DEFAULT_PROFILE='none'):
+            self.assertEqual(self.warm_and_capture_profile(), '')
+
+    def test_auto_volume_gates_with_the_volume_profile(self):
+        """The production setting this was written for."""
+        with override_settings(AI_QUALITY_DEFAULT_PROFILE='auto:volume'):
+            self.assertEqual(self.warm_and_capture_profile(), 'volume')
+
+    def test_bare_auto_gates_with_the_translation_profile(self):
+        """'auto' with no suffix defaults to the 'translation' profile --
+        default_profile_for's own documented behaviour, exercised here
+        rather than assumed."""
+        with override_settings(AI_QUALITY_DEFAULT_PROFILE='auto'):
+            self.assertEqual(self.warm_and_capture_profile(), 'translation')
+
+    def test_an_explicit_named_profile_gates_every_operation_with_it(self):
+        """The third form: naming a real profile directly (not 'auto:...')
+        applies it unconditionally -- exercised so a future change to
+        default_profile_for's precedence is caught here too."""
+        with override_settings(AI_QUALITY_DEFAULT_PROFILE='eagle_web'):
+            self.assertEqual(self.warm_and_capture_profile(), 'eagle_web')
+
+
 class WarmMeansClaimableTestCase(TestCase):
     """
     THE DEADLOCK THIS PREVENTS.

@@ -751,12 +751,31 @@ def _warm_translation(task: Task, job) -> bool:
     wrong language -- a certain rejection and a wasted purchase -- so the
     transcript is left warm and the submission gate refuses it.
 
-    THIS SPENDS AI QUOTA, unlike the rest of warming. One translation is one
-    or two model requests, which is why the pool size is a budget as well as
-    a latency setting.
+    THIS SPENDS AI QUOTA, unlike the rest of warming. One ungated translation
+    is one model request; a gated one (see below) is three to five.
+
+    QUALITY-GATED, THE SAME WAY THE DASHBOARD ALREADY IS -- AND WAS NOT,
+    UNTIL NOW. `AI_QUALITY_DEFAULT_PROFILE` has been sitting in production
+    as `auto:volume` -- the documented, recommended setting for exactly this
+    -- while this function created the revision with no `quality_profile` at
+    all, so `run_ai_revision_pipeline`'s gate (`if revision.quality_profile:`)
+    never engaged for a single warmed translation. Confirmed empirically,
+    not just in code: every `translate`-operation usage row in the last 7
+    days of production data had `avg_requests_per_translate_run = 1.00`
+    -- zero exceptions. `default_profile_for` is the exact same resolver
+    `TranscriptionJobViewSet.ai_revisions` already uses, so this brings the
+    warm path in line with the dashboard rather than inventing a second
+    resolution rule.
+
+    THE COST WAS CHECKED AGAINST REAL USAGE BEFORE TURNING THIS ON. Busiest
+    day so far: 170/900 daily requests (19%), 2.06M/6M daily tokens (34%).
+    Even tripling that whole day -- a deliberately generous bound, since
+    only translate's cost actually multiplies -- stays under the request
+    cap with room to spare.
     """
     from apps.transcriptions.models import AIRevision
     from apps.transcriptions.tasks import run_ai_revision_pipeline
+    from core.services.ai_assist import config, default_profile_for
 
     target = (task.target_language or '').strip()
     if not target:
@@ -768,12 +787,22 @@ def _warm_translation(task: Task, job) -> bool:
         job=job, operation='translate', target_language=target, status='completed',
     ).first()
     if existing is None:
+        # 'translate' is the platform's one DELIVERABLE_OPERATIONS entry, so
+        # 'auto:volume' (or plain 'auto') always resolves to a real profile
+        # here, never 'none' -- that fallback only matters for operations
+        # that don't ship, which this one is not.
+        quality_profile = default_profile_for(
+            'translate', config('AI_QUALITY_DEFAULT_PROFILE', 'none'))
+        if quality_profile == 'none':
+            quality_profile = ''
+
         await_ai_capacity()
         revision = AIRevision.objects.create(
             job=job, operation='translate',
             label=f'Translation ({target})',
             source_language=task.source_language or '',
             target_language=target,
+            quality_profile=quality_profile,
             # THE CLEANUP THAT USED TO BE ITS OWN PASS, folded in here where
             # it costs nothing: the model is already reading every line.
             custom_instruction=(
@@ -783,6 +812,9 @@ def _warm_translation(task: Task, job) -> bool:
                 'prose. Do not summarize, omit or add content.'
             ),
         )
+        if quality_profile:
+            logger.info('[WARM] %s translating under quality profile %r',
+                        task.external_task_id, quality_profile)
         run_ai_revision_pipeline(revision.id)
         revision.refresh_from_db()
     else:
