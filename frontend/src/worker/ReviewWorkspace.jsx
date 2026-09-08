@@ -2,6 +2,7 @@ import React, { useCallback, useMemo, useRef, useState } from 'react';
 import AudioPlayer from './AudioPlayer.jsx';
 import DeadlineClock from './DeadlineClock.jsx';
 import { segments as segmentsApi, submission, taskMedia, transcript } from '../api/eagle.js';
+import { ANNOTATION_TAGS, insertTagAtPosition } from '../lib/annotations.js';
 import Verdict from '../components/Verdict.jsx';
 import DeliveredBanner, { isDelivered } from '../components/DeliveredBanner.jsx';
 import SubmittedPanel from '../components/SubmittedPanel.jsx';
@@ -100,6 +101,11 @@ export default function ReviewWorkspace({ task, onTaskChange }) {
   const [playhead, setPlayhead] = useState(0);
   const [editing, setEditing] = useState(null);
   const [draft, setDraft] = useState('');
+  // Only one row is ever in edit mode here (unlike the studio, where every
+  // segment has its own always-visible textarea), so one remembered cursor
+  // position is enough -- reset implicitly whenever `editing` changes, since
+  // nothing reads it until the annotate dropdown is used again.
+  const draftCursorRef = useRef(null);
   const [saving, setSaving] = useState(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -214,6 +220,25 @@ export default function ReviewWorkspace({ task, onTaskChange }) {
       setSaving(null);
       setEditing(null);
     }
+  };
+
+  /**
+   * Same tag vocabulary and the same fixed insertion behaviour as the
+   * studio (views/Dashboard.jsx / lib/annotations.js): lands at the last
+   * REMEMBERED cursor position, not wherever `document.activeElement`
+   * happens to be when this runs -- which is never the textarea, since
+   * clicking the dropdown itself already moved focus off it.
+   *
+   * Does not save on its own. It updates `draft` the same way typing
+   * would, so the existing Save/Cancel/Ctrl+Enter flow is exactly what
+   * commits it -- one save path, not two.
+   */
+  const handleInsertAnnotation = (tag) => {
+    const resolvedTag = tag === 'Custom tag...' ? window.prompt('Enter a custom tag (e.g. [whispering]):') : tag;
+    if (!resolvedTag) return;
+    const { text: newDraft, cursor } = insertTagAtPosition(draft, draftCursorRef.current, resolvedTag);
+    draftCursorRef.current = cursor;
+    setDraft(newDraft);
   };
 
   const renameSpeakerEverywhere = async (from, to) => {
@@ -394,6 +419,9 @@ export default function ReviewWorkspace({ task, onTaskChange }) {
                       rows={3}
                       value={draft}
                       onChange={(e) => setDraft(e.target.value)}
+                      onSelect={(e) => {
+                        draftCursorRef.current = { start: e.target.selectionStart, end: e.target.selectionEnd };
+                      }}
                       onKeyDown={(e) => {
                         if (e.key === 'Escape') setEditing(null);
                         if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
@@ -402,6 +430,18 @@ export default function ReviewWorkspace({ task, onTaskChange }) {
                       }}
                       className={`${inputClass} resize-y font-normal`}
                     />
+                    <div className="flex flex-wrap items-center gap-2">
+                      <select
+                        value=""
+                        onChange={(e) => { if (e.target.value) handleInsertAnnotation(e.target.value); e.target.value = ''; }}
+                        title="Insert an annotation at the cursor"
+                        className="shrink-0 rounded border border-edge bg-canvas px-1.5 py-0.5 text-2xs text-ink-mute"
+                      >
+                        <option value="">+ Annotate</option>
+                        {ANNOTATION_TAGS.map((tag) => <option key={tag} value={tag}>{tag}</option>)}
+                        <option value="Custom tag...">Custom tag...</option>
+                      </select>
+                    </div>
                     <div className="flex gap-2">
                       <Button size="sm" variant="primary" loading={saving === row.id}
                               onClick={() => patchSegment(row, { text: draft })}>

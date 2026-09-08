@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import SearchableLanguageSelect from '../components/SearchableLanguageSelect';
 import AIAssistPanel from '../components/AIAssistPanel';
 import DiffReview from '../components/DiffReview';
+import { ANNOTATION_TAGS, insertTagAtPosition } from '../lib/annotations';
 
 // Session recovery (persist across refresh/navigation/sleep-wake): the
 // backend (TranscriptionJob + its segments/translations) is always the
@@ -298,6 +299,12 @@ export default function Dashboard({ embedded = false }) {
   // never tried automatically -- see sequential_param_strategy.py.
   const [trySequential, setTrySequential] = useState(false);
   const [enableDiarization, setEnableDiarization] = useState(false);
+  // '' means automatic (the pre-existing, only behaviour before this
+  // control existed) -- never sent to the API at all in that case, so an
+  // untouched job is byte-for-byte what it always was. A string, not a
+  // number, because that's what a <select> naturally gives back; parsed
+  // to Number only right before it goes on the wire.
+  const [expectedSpeakers, setExpectedSpeakers] = useState('');
   const [enableWordSync, setEnableWordSync] = useState(true);
   const [jobStatus, setJobStatus] = useState('idle'); // idle, processing, completed, failed, cancelled
   // Mirrors jobStatus for code that reads it from inside a WebSocket event
@@ -1076,6 +1083,9 @@ export default function Dashboard({ embedded = false }) {
         body.append('source_url', '');
         body.append('language', selectedLanguage);
         body.append('enable_diarization', enableDiarization);
+        if (enableDiarization && expectedSpeakers) {
+          body.append('expected_speakers', expectedSpeakers);
+        }
 
         setStatusMessage(`Uploading ${file.name}...`);
         setUploadProgress(0);
@@ -1092,6 +1102,7 @@ export default function Dashboard({ embedded = false }) {
           file_path: '',
           language: selectedLanguage,
           enable_diarization: enableDiarization,
+          expected_speakers: (enableDiarization && expectedSpeakers) ? Number(expectedSpeakers) : null,
           ...siteAuthFields(),
         });
         const response = await fetch(`${API_BASE}/transcriptions/`, {
@@ -1669,6 +1680,22 @@ export default function Dashboard({ embedded = false }) {
   // in-progress edit would otherwise race with incoming updates.
   const segmentTextareaRefs = useRef({}); // { [segmentId]: HTMLTextAreaElement }
 
+  // LAST KNOWN CURSOR POSITION, PER SEGMENT -- captured continuously while
+  // the textarea has focus, not read at insert-time.
+  //
+  // The annotate dropdown is a native <select>; the instant it's clicked,
+  // focus moves OFF the textarea and onto the select, so by the time its
+  // onChange fires, `document.activeElement` is the select, never the
+  // textarea. Checking live focus at insert-time (the previous approach)
+  // was therefore true almost never, and the tag silently fell through to
+  // the "append at the end" fallback on essentially every real click --
+  // which is exactly the bug reported: tags always landing at the end
+  // regardless of where the cursor actually was.
+  const segmentCursorRef = useRef({}); // { [segmentId]: {start, end} }
+  const rememberCursor = (segmentId, el) => {
+    segmentCursorRef.current[segmentId] = { start: el.selectionStart, end: el.selectionEnd };
+  };
+
   const handleSegmentTextEdit = (segmentId, newText) => {
     setSegments(prev => prev.map(s => (s.id === segmentId ? { ...s, text: newText } : s)));
   };
@@ -1688,29 +1715,21 @@ export default function Dashboard({ embedded = false }) {
     }
   };
 
-  const ANNOTATION_TAGS = [
-    '[laughter]', '[music]', '[applause]', '[silence]', '[pause]',
-    '[background noise]', '[crosstalk]', '[inaudible]', '[phone ringing]', '[door closes]',
-  ];
-
-  // Inserts at the textarea's current cursor position when it's the
-  // focused element (the normal case: pick from the dropdown right after
-  // clicking/typing in a segment); falls back to appending at the end when
-  // no cursor position is known, rather than guessing at one.
+  // Inserts at the LAST REMEMBERED cursor position for this segment (see
+  // segmentCursorRef above -- live focus is gone by the time this runs,
+  // since the dropdown click already moved it). insertTagAtPosition
+  // (lib/annotations.js) falls back to appending at the end only when no
+  // position was ever recorded at all, e.g. a tag picked before the
+  // textarea was ever clicked into this session.
   const handleInsertAnnotation = (segmentId, tag) => {
     const resolvedTag = tag === 'Custom tag...' ? window.prompt('Enter a custom tag (e.g. [whispering]):') : tag;
     if (!resolvedTag) return;
     const currentSeg = segments.find(s => s.id === segmentId);
     if (!currentSeg) return;
-    const textarea = segmentTextareaRefs.current[segmentId];
-    let newText;
-    if (textarea && document.activeElement === textarea) {
-      const start = textarea.selectionStart;
-      const end = textarea.selectionEnd;
-      newText = currentSeg.text.slice(0, start) + resolvedTag + currentSeg.text.slice(end);
-    } else {
-      newText = `${currentSeg.text} ${resolvedTag}`.trim();
-    }
+    const { text: newText, cursor } = insertTagAtPosition(
+      currentSeg.text, segmentCursorRef.current[segmentId], resolvedTag,
+    );
+    segmentCursorRef.current[segmentId] = cursor;
     handleSegmentTextEdit(segmentId, newText);
     saveSegmentText(segmentId, newText);
   };
@@ -2429,6 +2448,25 @@ export default function Dashboard({ embedded = false }) {
               <span>Enable Speaker Diarization</span>
             </label>
 
+            {enableDiarization && (
+              <label
+                className="flex items-center space-x-3 text-sm pl-7"
+                title="Automatic detection can split one speaker into two or three on a tone shift alone. Naming the real count rules that out entirely for this job; it never affects any other job's automatic default."
+              >
+                <span className="text-zinc-400">Speakers</span>
+                <select
+                  value={expectedSpeakers}
+                  onChange={(e) => setExpectedSpeakers(e.target.value)}
+                  className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-zinc-300 text-sm"
+                >
+                  <option value="">Detect automatically</option>
+                  {Array.from({ length: 9 }, (_, i) => i + 1).map((n) => (
+                    <option key={n} value={n}>{n} speaker{n > 1 ? 's' : ''}</option>
+                  ))}
+                </select>
+              </label>
+            )}
+
             {jobStatus === 'processing' ? (
               <button
                 onClick={() => currentJobId && handleCancelJob(currentJobId, false)}
@@ -2936,7 +2974,8 @@ export default function Dashboard({ embedded = false }) {
                               ref={(el) => { if (el) segmentTextareaRefs.current[seg.id] = el; }}
                               value={seg.text}
                               onChange={(e) => handleSegmentTextEdit(seg.id, e.target.value)}
-                              onBlur={(e) => saveSegmentText(seg.id, e.target.value)}
+                              onSelect={(e) => rememberCursor(seg.id, e.target)}
+                              onBlur={(e) => { rememberCursor(seg.id, e.target); saveSegmentText(seg.id, e.target.value); }}
                               rows={Math.max(1, Math.ceil(seg.text.length / 80))}
                               className="w-full px-2 py-1 bg-transparent border border-transparent hover:border-zinc-800 focus:border-blue-500 rounded text-zinc-300 focus:outline-none resize-y transition-colors"
                             />

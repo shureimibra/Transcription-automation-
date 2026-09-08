@@ -95,6 +95,29 @@ class TranscriptionJob(models.Model):
     # existed -- this flag being True never causes a job to fail.
     enable_diarization = models.BooleanField(default=False)
 
+    # Optional hint for HOW MANY speakers diarization should look for.
+    # NULL (the default) means fully automatic -- clustering decides the
+    # count itself via DIARIZATION_CLUSTER_THRESHOLD, exactly as before
+    # this field existed. When set, it's passed straight to
+    # AgglomerativeClustering as n_clusters, which overrides the
+    # distance-threshold auto-detection entirely for that job.
+    #
+    # WHY THIS EXISTS. Automatic clustering can split one speaker into two
+    # or three on a tone shift alone -- DIARIZATION_MIN_SPEAKER_SECONDS
+    # already guards the worst of this (see diarization.py), but that
+    # guard is duration-based and cannot rescue a split that persists long
+    # enough to look like a real speaker. A human who already knows the
+    # true count (a 1-on-1 interview, a known panel size) can rule that
+    # class of error out entirely for their own job, the same tradeoff
+    # TurboScribe's own "specify speakers" option makes -- automatic
+    # detection stays the default and is never removed, this only adds an
+    # opt-in override on top of it.
+    #
+    # PositiveSmallIntegerField, not a plain int: a value must be >= 1 if
+    # given at all (0 or negative speakers is meaningless), enforced at
+    # the serializer layer where the user-facing error belongs.
+    expected_speakers = models.PositiveSmallIntegerField(null=True, blank=True)
+
     # User-editable display names for this job's speaker labels, e.g.
     # {"Speaker 0": "Interviewer", "Speaker 1": "Doctor"}. Deliberately a
     # flat dict keyed by the underlying speaker_label stored on every

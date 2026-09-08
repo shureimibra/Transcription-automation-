@@ -198,6 +198,27 @@ class TranscriptionJobSerializer(serializers.ModelSerializer):
         except UnsafeURL as exc:
             raise serializers.ValidationError(str(exc))
 
+    def validate_expected_speakers(self, value):
+        """
+        PositiveSmallIntegerField accepts 0 by Django convention; a
+        recording with zero speakers is meaningless, so 0 is refused here
+        specifically rather than silently accepted and handed to
+        AgglomerativeClustering as n_clusters=0.
+
+        No upper bound enforced here beyond a sanity ceiling -- the
+        dashboard's own control only ever offers 1-9, this just refuses to
+        pass through something the diarizer could never usefully cluster
+        against (a whole file's turn count is normally in the low tens at
+        most).
+        """
+        if value is None:
+            return value
+        if value < 1:
+            raise serializers.ValidationError('expected_speakers must be at least 1.')
+        if value > 50:
+            raise serializers.ValidationError('expected_speakers must be 50 or fewer.')
+        return value
+
     class Meta:
         model = TranscriptionJob
         fields = [
@@ -206,7 +227,7 @@ class TranscriptionJobSerializer(serializers.ModelSerializer):
             'language_confidence', 'error_message', 'created_at',
             'completed_at', 'segments', 'translations', 'academic_format',
             'series_id', 'series_index', 'series_title', 'cancel_requested',
-            'enable_diarization', 'speaker_aliases', 'ai_revisions',
+            'enable_diarization', 'expected_speakers', 'speaker_aliases', 'ai_revisions',
             'document_metadata',
         ]
         # file_path is deliberately read-only from the API's perspective: it

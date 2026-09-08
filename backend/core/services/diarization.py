@@ -601,13 +601,34 @@ class SpeakerDiarizer:
     last_uncertain_speakers: List[Dict] = []
 
     @classmethod
-    def diarize_segments(cls, audio_path: str, segments: List[Dict]) -> List[Dict]:
+    def diarize_segments(
+        cls, audio_path: str, segments: List[Dict],
+        expected_speakers: Optional[int] = None,
+    ) -> List[Dict]:
         """
         High-Accuracy Turn-Aggregated Speaker Diarization:
         Aggregates fine-grained Whisper speech segments into coherent conversational turns,
         extracts speaker embeddings in-memory with WeSpeaker ResNet34, clusters them,
         and assigns stable speaker identities ('Speaker 1', 'Speaker 2', etc.).
         Runs in ~15-20s for a 20-minute audio file with zero speaker over-fragmentation.
+
+        `expected_speakers`, when given, is a known-correct speaker COUNT
+        that overrides automatic cluster-count detection entirely (passed
+        as AgglomerativeClustering's n_clusters instead of
+        DIARIZATION_CLUSTER_THRESHOLD's distance_threshold). None (the
+        default) is fully automatic, byte-for-byte the behaviour this
+        method had before the parameter existed.
+
+        WHY THIS IS SAFE TO OFFER. DIARIZATION_MIN_SPEAKER_SECONDS already
+        guards against a tone shift fracturing one speaker into a phantom
+        second one, but only when the fracture stays short -- a split that
+        persists long enough to look like a real speaker survives that
+        guard, and no threshold retune closes that gap without a
+        different failure in the other direction (see that constant's own
+        comment). A human who already knows the true count -- a 1-on-1
+        interview, a known panel size -- can rule that class of error out
+        entirely for their own job without touching the tuned defaults
+        every other job still relies on.
         """
         if not segments:
             return segments
@@ -615,7 +636,7 @@ class SpeakerDiarizer:
         inference = cls._load_embedding_model()
         if inference is None:
             # Fallback to whole-file diarize if available
-            turns = cls.diarize(audio_path)
+            turns = cls.diarize(audio_path, num_speakers=expected_speakers)
             if turns:
                 labels = build_stable_speaker_labels(turns)
                 for seg in segments:
@@ -678,8 +699,22 @@ class SpeakerDiarizer:
                 return segments
 
             turn_embeddings = np.array(turn_embeddings)
+            # A REQUESTED COUNT SKIPS THE THRESHOLD ENTIRELY, IT DOESN'T
+            # JUST SEED IT. n_clusters and distance_threshold are mutually
+            # exclusive on AgglomerativeClustering -- passing a count is
+            # what actually rules out the tone-shift-splits-one-speaker
+            # failure this parameter exists for, rather than merely
+            # nudging the automatic result.
+            want_clusters = expected_speakers if expected_speakers else None
             if len(turn_embeddings) == 1:
                 cluster_labels = [0]
+            elif want_clusters is not None:
+                clustering = AgglomerativeClustering(
+                    metric='cosine',
+                    linkage='average',
+                    n_clusters=min(want_clusters, len(turn_embeddings)),
+                )
+                cluster_labels = clustering.fit_predict(turn_embeddings)
             else:
                 clustering = AgglomerativeClustering(
                     metric='cosine',
@@ -689,7 +724,7 @@ class SpeakerDiarizer:
                 )
                 cluster_labels = clustering.fit_predict(turn_embeddings)
 
-            # 3b. Fold away phantom speakers.
+            # 3b. Fold away phantom speakers -- AUTOMATIC MODE ONLY.
             #
             # A cough, a door, or a one-word overlap can form its own tight
             # cluster. Left alone it becomes a participant who said two
@@ -700,6 +735,14 @@ class SpeakerDiarizer:
             # distance between centroids, which is the same measure the
             # clustering used, so a fold can never contradict the geometry
             # that produced the clusters in the first place.
+            #
+            # SKIPPED WHEN expected_speakers WAS GIVEN. This guard exists
+            # to resolve an ambiguity about the true speaker count -- an
+            # ambiguity that doesn't exist once a human has stated the
+            # count directly. Folding afterward could only ever REDUCE the
+            # count below what was explicitly requested, which is exactly
+            # backwards: it would silently override the one signal more
+            # trustworthy than the heuristic it's second-guessing.
             cluster_labels = list(cluster_labels)
             speech_seconds = {}
             for t_idx, c_id in zip(valid_turn_indices, cluster_labels):
@@ -714,7 +757,7 @@ class SpeakerDiarizer:
 
             # Never fold everything away: if no cluster clears the bar the
             # recording is simply short, and the largest is the speaker.
-            if phantom and real:
+            if want_clusters is None and phantom and real:
                 centroids = {}
                 for c_id in speech_seconds:
                     members = [
@@ -812,7 +855,7 @@ class SpeakerDiarizer:
 
         except Exception as e:
             logger.warning(f"Fast segment diarization failed: {e}; falling back to whole-file diarize.")
-            turns = cls.diarize(audio_path)
+            turns = cls.diarize(audio_path, num_speakers=expected_speakers)
             if turns:
                 labels = build_stable_speaker_labels(turns)
                 for seg in segments:
@@ -821,7 +864,7 @@ class SpeakerDiarizer:
             return segments
 
     @classmethod
-    def diarize(cls, audio_path: str) -> Optional[List[Dict]]:
+    def diarize(cls, audio_path: str, num_speakers: Optional[int] = None) -> Optional[List[Dict]]:
         """
         Returns a list of {'start': float, 'end': float, 'speaker': str}
         turns covering the whole file, sorted by start time -- 'speaker' is
@@ -832,6 +875,16 @@ class SpeakerDiarizer:
         existing placeholder behavior" -- never as a reason to fail the job,
         since diarization is always an optional enhancement on top of a
         transcription that already succeeded (or is about to).
+
+        `num_speakers`, when given, is passed straight through to
+        pyannote's own pipeline call -- it accepts this natively -- and
+        overrides its internal automatic speaker-count detection for this
+        one call. None (the default) is the pre-existing automatic
+        behaviour, unchanged. This is the fallback path (used only when
+        the primary WeSpeaker embedding model in diarize_segments isn't
+        available), so it exists mainly for parity: a job's expected
+        speaker count should mean the same thing regardless of which
+        underlying method actually ends up serving it.
         """
         pipeline = cls._load()
         if pipeline is None:
@@ -842,7 +895,10 @@ class SpeakerDiarizer:
             torch.set_num_threads(num_threads)
             logger.info(f"Running speaker diarization on '{audio_path}' with {num_threads} CPU threads...")
             with torch.inference_mode():
-                result = pipeline(audio_path)
+                result = (
+                    pipeline(audio_path, num_speakers=num_speakers)
+                    if num_speakers else pipeline(audio_path)
+                )
             turns = [
                 {'start': float(turn.start), 'end': float(turn.end), 'speaker': str(speaker)}
                 for turn, _, speaker in result.itertracks(yield_label=True)

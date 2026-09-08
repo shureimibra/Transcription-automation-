@@ -281,7 +281,9 @@ def run_transcription_pipeline(job_id):
                     {'id': seg.id, 'start': seg.start_time, 'end': seg.end_time, 'text': seg.text}
                     for seg in saved_segments
                 ]
-                diarized_dicts = SpeakerDiarizer.diarize_segments(temp_wav_path, input_dicts)
+                diarized_dicts = SpeakerDiarizer.diarize_segments(
+                    temp_wav_path, input_dicts, expected_speakers=job.expected_speakers,
+                )
                 updated_payload = []
                 for d in diarized_dicts:
                     spk = d.get('speaker_label', '')

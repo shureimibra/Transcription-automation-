@@ -4,7 +4,7 @@ from django.urls import reverse
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase, APITransactionTestCase
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from .models import (
     Project, TranscriptionJob, TranscriptSegment, DiscoveryTask, Translation, TranslatedSegment,
     AcademicFormat, AcademicSegment, AIRevision, AIRevisionSegment, AIUsageRecord,
@@ -2476,6 +2476,230 @@ class DiarizationCompatShimsTestCase(TestCase):
             os.environ['PATH'] = original_path
             import shutil
             shutil.rmtree(tmp_root, ignore_errors=True)
+
+
+class ExpectedSpeakersOverrideTestCase(TestCase):
+    """
+    diarize_segments's expected_speakers parameter: which clustering call
+    it makes, and whether the phantom-speaker fold runs.
+
+    WHY torch/soundfile/sklearn ARE FAKED, NOT SKIPPED. None of the three
+    is installed in this environment, and diarize_segments imports all
+    three lazily inside its own try block -- deliberately: a machine
+    without the diarization stack must still transcribe (see is_configured
+    /_load()'s own fallback design), so they were never made hard project
+    dependencies just to make this test importable elsewhere. Faking them
+    here is the alternative to either skipping this coverage entirely or
+    adding a dependency the project doesn't otherwise need.
+
+    WHAT'S REAL VS FAKED. numpy IS installed and runs for real -- vector
+    norms, the centroid-fold arithmetic, the actual thing that decides
+    whether a short cluster gets reassigned. torch is faked as a
+    passthrough (from_numpy().unsqueeze().float() is a no-op wrapper,
+    inference_mode() a no-op context manager) since nothing here does
+    real tensor math, only needs the calls not to raise. soundfile.read
+    is faked to return a fixed silent array long enough to cover every
+    segment. sklearn's AgglomerativeClustering is replaced with a
+    MagicMock whose constructor call is inspected directly and whose
+    fit_predict() returns a fixed, chosen-by-the-test cluster assignment
+    -- because the actual thing under test is which constructor argument
+    this code passes (n_clusters vs distance_threshold) and what happens
+    to that assignment afterward, not whether cosine clustering itself is
+    correct (that's sklearn's own concern, not this codebase's).
+    """
+
+    def _install_fakes(self, fit_predict_return):
+        import contextlib
+        import types
+        import numpy as np
+
+        class _FakeTensor:
+            def __init__(self, arr):
+                self.arr = arr
+            def unsqueeze(self, dim):
+                return self
+            def float(self):
+                return self
+
+        @contextlib.contextmanager
+        def _noop_ctx():
+            yield
+
+        fake_torch = types.SimpleNamespace(
+            from_numpy=lambda arr: _FakeTensor(arr),
+            set_num_threads=lambda n: None,
+            inference_mode=_noop_ctx,
+        )
+        # 40s of silence at 16kHz -- long enough to cover every segment's
+        # time range regardless of which scenario below is running.
+        fake_sf = types.SimpleNamespace(read=lambda path: (np.zeros(16000 * 40), 16000))
+
+        clustering_instance = MagicMock()
+        clustering_instance.fit_predict.return_value = np.array(fit_predict_return)
+        clustering_cls = MagicMock(return_value=clustering_instance)
+        fake_cluster_module = types.SimpleNamespace(AgglomerativeClustering=clustering_cls)
+        fake_sklearn = types.SimpleNamespace(cluster=fake_cluster_module)
+
+        patcher = patch.dict(sys.modules, {
+            'torch': fake_torch,
+            'soundfile': fake_sf,
+            'sklearn': fake_sklearn,
+            'sklearn.cluster': fake_cluster_module,
+        })
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return clustering_cls
+
+    def _segments(self):
+        """
+        Three turns (>0.4s gaps, so they stay separate -- see the 0.4s/8s
+        turn-aggregation rule in diarize_segments itself): two "real"
+        12s turns and one short 1s turn -- short enough to be a phantom
+        under DIARIZATION_MIN_SPEAKER_SECONDS (10.0) if anything is ever
+        given the chance to fold it away.
+        """
+        return [
+            {'id': 'a', 'start': 0.0, 'end': 12.0, 'text': 'first speaker talking for a while'},
+            {'id': 'b', 'start': 13.0, 'end': 25.0, 'text': 'second speaker talking for a while'},
+            {'id': 'c', 'start': 26.0, 'end': 27.0, 'text': 'brief interjection'},
+        ]
+
+    def test_automatic_mode_uses_the_tuned_distance_threshold(self):
+        """Unchanged default: no expected_speakers means the exact same
+        constructor call this method has always made."""
+        from core.services.diarization import DIARIZATION_CLUSTER_THRESHOLD, SpeakerDiarizer
+
+        clustering_cls = self._install_fakes(fit_predict_return=[0, 1, 2])
+        with patch.object(SpeakerDiarizer, '_load_embedding_model',
+                          return_value=MagicMock(side_effect=[
+                              [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.9, 0.1, 0.0],
+                          ])):
+            SpeakerDiarizer.diarize_segments('/fake/audio.wav', self._segments())
+
+        _, kwargs = clustering_cls.call_args
+        self.assertEqual(kwargs.get('distance_threshold'), DIARIZATION_CLUSTER_THRESHOLD)
+        self.assertIsNone(kwargs.get('n_clusters'))
+
+    def test_expected_speakers_requests_that_exact_cluster_count(self):
+        """The override: a count, not a threshold, and the count asked
+        for is the count given -- not seeded, not merely nudged."""
+        from core.services.diarization import SpeakerDiarizer
+
+        clustering_cls = self._install_fakes(fit_predict_return=[0, 1, 2])
+        with patch.object(SpeakerDiarizer, '_load_embedding_model',
+                          return_value=MagicMock(side_effect=[
+                              [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.9, 0.1, 0.0],
+                          ])):
+            SpeakerDiarizer.diarize_segments(
+                '/fake/audio.wav', self._segments(), expected_speakers=3,
+            )
+
+        _, kwargs = clustering_cls.call_args
+        self.assertEqual(kwargs.get('n_clusters'), 3)
+        self.assertNotIn('distance_threshold', kwargs)
+
+    def test_automatic_mode_folds_a_short_cluster_into_its_nearest_neighbour(self):
+        """The pre-existing behaviour, unchanged: a short third cluster
+        (1s, acoustically closer to A than B) does not survive as its own
+        speaker when nothing overrides the automatic decision."""
+        from core.services.diarization import SpeakerDiarizer
+
+        self._install_fakes(fit_predict_return=[0, 1, 2])  # 3 raw clusters
+        with patch.object(SpeakerDiarizer, '_load_embedding_model',
+                          return_value=MagicMock(side_effect=[
+                              [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.9, 0.1, 0.0],
+                          ])):
+            result = SpeakerDiarizer.diarize_segments('/fake/audio.wav', self._segments())
+
+        labels = {seg['speaker_label'] for seg in result}
+        self.assertEqual(len(labels), 2, f'expected the short turn folded away, got {labels}')
+
+    def test_expected_speakers_skips_the_fold_entirely(self):
+        """The correctness property this whole feature exists for: an
+        explicit count is not second-guessed afterward. Folding here
+        could only ever reduce the count below what was asked for, which
+        would silently override the one signal more trustworthy than the
+        heuristic it's second-guessing."""
+        from core.services.diarization import SpeakerDiarizer
+
+        self._install_fakes(fit_predict_return=[0, 1, 2])
+        with patch.object(SpeakerDiarizer, '_load_embedding_model',
+                          return_value=MagicMock(side_effect=[
+                              [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.9, 0.1, 0.0],
+                          ])):
+            result = SpeakerDiarizer.diarize_segments(
+                '/fake/audio.wav', self._segments(), expected_speakers=3,
+            )
+
+        labels = {seg['speaker_label'] for seg in result}
+        self.assertEqual(len(labels), 3, f'expected all 3 to survive unfolded, got {labels}')
+
+    def test_diarize_passes_num_speakers_through_to_the_pipeline_call(self):
+        """The whole-file fallback path (used only when the embedding
+        model itself isn't available) gets the same override, for parity
+        -- a job's expected count should mean the same thing regardless
+        of which underlying method actually serves it."""
+        from core.services.diarization import SpeakerDiarizer
+
+        self._install_fakes(fit_predict_return=[])  # torch is the only one this path needs
+        fake_pipeline = MagicMock(return_value=MagicMock(itertracks=MagicMock(return_value=iter([]))))
+        with patch.object(SpeakerDiarizer, '_load', return_value=fake_pipeline):
+            SpeakerDiarizer.diarize('/fake/audio.wav', num_speakers=2)
+        fake_pipeline.assert_called_once_with('/fake/audio.wav', num_speakers=2)
+
+    def test_diarize_omits_num_speakers_when_none(self):
+        """None must not become a literal `num_speakers=None` kwarg on the
+        real pipeline call -- pyannote's own API treats an explicitly
+        passed None differently from the argument being absent in some
+        versions, so this is the exact byte-for-byte call the pipeline
+        received before this parameter existed at all."""
+        from core.services.diarization import SpeakerDiarizer
+
+        self._install_fakes(fit_predict_return=[])
+        fake_pipeline = MagicMock(return_value=MagicMock(itertracks=MagicMock(return_value=iter([]))))
+        with patch.object(SpeakerDiarizer, '_load', return_value=fake_pipeline):
+            SpeakerDiarizer.diarize('/fake/audio.wav')
+        fake_pipeline.assert_called_once_with('/fake/audio.wav')
+
+
+class ExpectedSpeakersValidationTestCase(TestCase):
+    """
+    TranscriptionJobSerializer.validate_expected_speakers -- the
+    user-facing half of the same feature ExpectedSpeakersOverrideTestCase
+    covers on the diarization side.
+    """
+
+    def _errors_for(self, value):
+        from .serializers import TranscriptionJobSerializer
+        project = Project.objects.create(name='validation-test')
+        serializer = TranscriptionJobSerializer(data={
+            'project': project.id, 'input_source': 'url',
+            'source_url': 'https://example.com/a.mp3',
+            'expected_speakers': value,
+        })
+        serializer.is_valid()
+        return serializer.errors.get('expected_speakers')
+
+    def test_none_is_accepted_as_fully_automatic(self):
+        self.assertIsNone(self._errors_for(None))
+
+    def test_a_normal_value_is_accepted(self):
+        self.assertIsNone(self._errors_for(3))
+
+    def test_zero_is_refused(self):
+        """PositiveSmallIntegerField accepts 0 by Django convention; a
+        recording with zero speakers is meaningless, so this must be an
+        explicit refusal, not a silent pass-through to n_clusters=0."""
+        self.assertIsNotNone(self._errors_for(0))
+
+    def test_a_negative_value_is_refused(self):
+        self.assertIsNotNone(self._errors_for(-1))
+
+    def test_an_unreasonably_large_value_is_refused(self):
+        self.assertIsNotNone(self._errors_for(500))
+
+    def test_the_top_of_the_sane_range_is_accepted(self):
+        self.assertIsNone(self._errors_for(50))
 
 
 class DiarizationPipelineIntegrationTestCase(AuthenticatedAPITransactionTestCase):

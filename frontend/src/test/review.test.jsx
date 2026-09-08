@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor, within, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import ReviewWorkspace from '../worker/ReviewWorkspace.jsx';
 import DeadlineClock from '../worker/DeadlineClock.jsx';
@@ -226,6 +226,41 @@ describe('the transcript', () => {
       expect(update).toHaveBeenCalledWith('job-1', 's1', { text: 'corrected' })
     );
   });
+
+  it('inserts an annotation tag at the remembered cursor position, not just at the end', async () => {
+    // The bug this pins down: the dropdown used to check live focus at
+    // insert time, which is never the textarea once the dropdown itself
+    // has been clicked -- so every tag silently landed at the end
+    // regardless of where the cursor actually was.
+    const update = vi.spyOn(segmentsApi, 'update').mockResolvedValue({
+      ...JOB.segments[0], text: 'first[pause] turn',
+    });
+    render(<ReviewWorkspace task={TASK} />);
+
+    await userEvent.click(await screen.findByText('first turn'));
+    const box = screen.getByRole('textbox');
+    // "first turn" -- place the cursor right after "first" (index 5), not
+    // at the end, and remember it the same way onSelect does in real use.
+    box.setSelectionRange(5, 5);
+    fireEvent.select(box);
+
+    await userEvent.selectOptions(screen.getByTitle('Insert an annotation at the cursor'), '[pause]');
+
+    expect(box.value).toBe('first[pause] turn');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledWith('job-1', 's1', { text: 'first[pause] turn' })
+    );
+  });
+
+  // The "no cursor ever recorded" fallback (append at the end) is already
+  // covered directly against the pure function in annotations.test.js.
+  // Not re-tested here: this textarea is `autoFocus`, and focusing it
+  // establishes a real (0, 0) selection immediately in the test
+  // environment, so asserting "no position known" would really be
+  // asserting cross-browser autofocus-cursor placement semantics rather
+  // than anything this component's own code controls.
 
   it('renames a speaker everywhere through the alias endpoint', async () => {
     const alias = vi.spyOn(transcript, 'setSpeakerAliases').mockResolvedValue({});
