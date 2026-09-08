@@ -241,6 +241,22 @@ class WarmCycleTestCase(TempCacheMixin, TransactionTestCase):
 
         self.assertEqual(picked[0].external_task_id, 'short')
 
+    def test_kind_narrows_and_exclude_ids_removes(self):
+        translation = make_task(
+            kind=Task.TRANSLATION, external_source='translation',
+            external_task_id='tr', status=states.NEW,
+            duration_seconds=60, target_language='fr')
+        transcription = make_task(
+            kind=Task.TRANSCRIPTION, external_source='transcription',
+            external_task_id='ts', status=states.NEW, duration_seconds=1200)
+
+        only_transcription = warmpool.select_candidates(10, kind=Task.TRANSCRIPTION)
+        self.assertEqual([t.id for t in only_transcription], [transcription.id])
+
+        without_it = warmpool.select_candidates(
+            10, exclude_ids=[transcription.id])
+        self.assertEqual([t.id for t in without_it], [translation.id])
+
     def test_a_full_pool_does_no_work(self):
         for i in range(3):
             job = TranscriptionJob.objects.create(
@@ -337,6 +353,81 @@ class WarmCycleTestCase(TempCacheMixin, TransactionTestCase):
             warmpool.run_cycle(pool_size=6, concurrency=2, service=FakeEagle())
 
         self.assertLessEqual(peak[0], 2, f'{peak[0]} pipelines ran at once')
+
+    def test_transcription_gets_a_reserved_share_of_every_cycle(self):
+        """
+        Regression test for a real production incident: translation posts
+        up to twice a day and transcription about once every two, so
+        translation's backlog regularly outnumbers pool_size several times
+        over. The combined, kind-blind selection let it win every slot,
+        every cycle, indefinitely -- confirmed live: 22 transcription
+        tasks sat completely untouched (job=None on every one) for over
+        22 hours while translation, with 64 unclaimed tasks against a
+        pool_size of 24, kept the pool constantly full. Raising pool_size
+        alone would not have fixed this -- translation's backlog exceeds
+        even a much larger pool -- so TRANSCRIPTION_RESERVE guarantees a
+        floor regardless of how lopsided supply or duration gets.
+        """
+        for i in range(10):
+            make_task(kind=Task.TRANSLATION, external_source='translation',
+                     external_task_id=f't{i}', status=states.NEW,
+                     duration_seconds=60, target_language='fr')
+        for i in range(2):
+            make_task(kind=Task.TRANSCRIPTION, external_source='transcription',
+                     external_task_id=f's{i}', status=states.NEW,
+                     duration_seconds=1200)
+
+        processed_kinds = []
+
+        def record(task, service=None, allow_ai=True):
+            processed_kinds.append(task.kind)
+            return True
+
+        with mock.patch.object(warmpool, 'warm_task', side_effect=record):
+            report = warmpool.run_cycle(pool_size=5, concurrency=2, service=FakeEagle())
+
+        self.assertEqual(
+            processed_kinds.count(Task.TRANSCRIPTION), 2,
+            'both waiting transcription tasks should have been reserved a '
+            'slot despite being far longer than every translation candidate',
+        )
+        self.assertEqual(
+            processed_kinds.count(Task.TRANSLATION), 3,
+            'the remaining shortfall (5 - 2 reserved) should still go to '
+            'translation -- the reserve is a floor, not a monopoly',
+        )
+        self.assertEqual(report.considered, 5)
+
+    def test_the_reserve_never_exceeds_the_shortfall(self):
+        """A pool with only one slot open must not reserve three for
+        transcription and overshoot pool_size."""
+        for i in range(5):
+            make_task(kind=Task.TRANSCRIPTION, external_source='transcription',
+                     external_task_id=f's{i}', status=states.NEW,
+                     duration_seconds=120)
+
+        processed = []
+        with mock.patch.object(warmpool, 'warm_task',
+                               side_effect=lambda t, service=None, allow_ai=True:
+                               processed.append(t.id) or True):
+            report = warmpool.run_cycle(pool_size=1, concurrency=1, service=FakeEagle())
+
+        self.assertEqual(len(processed), 1)
+        self.assertEqual(report.considered, 1)
+
+    def test_the_reserve_does_not_starve_translation_when_nothing_is_waiting(self):
+        """No transcription candidates means the full shortfall still goes
+        to whatever else needs it -- the reserve must not sit idle and
+        withhold slots nobody is there to fill."""
+        for i in range(4):
+            make_task(kind=Task.TRANSLATION, external_source='translation',
+                     external_task_id=f't{i}', status=states.NEW,
+                     duration_seconds=60, target_language='fr')
+
+        with mock.patch.object(warmpool, 'warm_task', return_value=True):
+            report = warmpool.run_cycle(pool_size=4, concurrency=2, service=FakeEagle())
+
+        self.assertEqual(report.considered, 4)
 
 
 class RetentionTestCase(TempCacheMixin, TestCase):

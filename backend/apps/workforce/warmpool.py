@@ -33,7 +33,7 @@ import time
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Iterable, List, Optional
 
 from django.conf import settings
 from django.db import transaction
@@ -71,6 +71,28 @@ DEFAULT_CONCURRENCY = int(os.environ.get('EAGLE_WARM_CONCURRENCY', '2'))
 #: part: a tasker who claims a long file still finds a transcript waiting,
 #: which is what warming exists to provide.
 DEFAULT_AI_LIMIT = int(os.environ.get('EAGLE_WARM_AI_LIMIT', '12'))
+
+#: Slots reserved for transcription every cycle, off the top of whatever
+#: shortfall exists, before the rest falls back to shortest-duration-first
+#: across both kinds.
+#:
+#: THE COMBINED POOL STARVES THE SMALLER KIND, NOT JUST HIDES IT. Both
+#: `warm_now` and `select_candidates` treat translation and transcription as
+#: one pool with one ranking. That is fine while supply is comparable, but
+#: translation is posted up to twice a day against transcription's once
+#: every two -- so translation's backlog can sit at 2-3x pool_size
+#: indefinitely. Confirmed live: transcription last got a job warmed at
+#: 2026-09-07 13:32 UTC; over 22 hours and hundreds of warm cycles later, 22
+#: transcription tasks sat completely untouched (job=None on every one)
+#: while translation, with 64 unclaimed tasks against a pool_size of 24,
+#: filled every single slot every cycle. Raising pool_size alone does not
+#: fix this: translation's backlog regularly exceeds even a much larger
+#: pool, so it can still win every slot on its own.
+#:
+#: A small reserve is enough. Transcription's posting rate is low, so a
+#: guaranteed few slots per ~90s cycle clears any realistic backlog quickly
+#: without meaningfully denting translation's throughput.
+TRANSCRIPTION_RESERVE = int(os.environ.get('EAGLE_WARM_TRANSCRIPTION_RESERVE', '3'))
 
 #: How long cached audio outlives the task that needed it.
 AUDIO_RETENTION_DAYS = int(os.environ.get('EAGLE_AUDIO_RETENTION_DAYS', '4'))
@@ -229,7 +251,9 @@ def is_warm(task: Task) -> bool:
     return True
 
 
-def select_candidates(limit: int, product: Optional[str] = None) -> List[Task]:
+def select_candidates(limit: int, product: Optional[str] = None,
+                       kind: Optional[str] = None,
+                       exclude_ids: Optional[Iterable] = None) -> List[Task]:
     """
     Which unclaimed tasks to warm next.
 
@@ -237,6 +261,17 @@ def select_candidates(limit: int, product: Optional[str] = None) -> List[Task]:
     a 25-minute one, clears the deadline trivially, and turns a worker-hour
     into more completed tasks -- so when the pool has room, short work is
     strictly better to have ready.
+
+    `kind` narrows to one kind of task -- used by run_cycle to fill the
+    transcription reserve from transcription candidates specifically,
+    without also affecting the unfiltered call that follows it.
+
+    `exclude_ids` keeps that same follow-up call from re-selecting whatever
+    the reserve already picked. Both queries hit the database independently
+    (the reserve's picks are still NEW/unclaimed when the second query
+    runs), so without this a task reserved for transcription could also
+    land in the general pool's plan and get warmed twice concurrently by
+    two threads racing the same audio download.
     """
     # NOT-YET-WARM, WHICH IS NOT THE SAME AS NEVER-STARTED.
     #
@@ -268,6 +303,10 @@ def select_candidates(limit: int, product: Optional[str] = None) -> List[Task]:
     )
     if product:
         queryset = queryset.filter(external_source=product)
+    if kind:
+        queryset = queryset.filter(kind=kind)
+    if exclude_ids:
+        queryset = queryset.exclude(id__in=list(exclude_ids))
 
     # RETRIES GO BEHIND FRESH WORK. There is no attempt counter, so a task
     # that fails for a reason we cannot fix -- a corrupt file rather than a
@@ -870,7 +909,28 @@ def run_cycle(pool_size: int = None, concurrency: int = None,
     if not shortfall:
         return report
 
-    candidates = select_candidates(shortfall, product=product)
+    # RESERVE TRANSCRIPTION'S SLICE BEFORE THE COMBINED POOL SEES IT.
+    #
+    # See TRANSCRIPTION_RESERVE's docstring for the production evidence:
+    # translation's backlog runs 2-3x pool_size often enough that the
+    # combined shortest-first selection below can starve transcription
+    # completely, indefinitely, however large pool_size is. Picking
+    # transcription's reserve from a kind-filtered query FIRST -- before
+    # the general query even runs -- guarantees it a minimum regardless of
+    # how the two kinds compare on duration or supply.
+    reserved_slots = min(TRANSCRIPTION_RESERVE, shortfall)
+    reserved = (
+        select_candidates(reserved_slots, product=product, kind=Task.TRANSCRIPTION)
+        if reserved_slots else []
+    )
+
+    remaining = shortfall - len(reserved)
+    rest = (
+        select_candidates(remaining, product=product,
+                           exclude_ids=[t.id for t in reserved])
+        if remaining else []
+    )
+    candidates = reserved + rest
 
     # STAGE B IS RATIONED; STAGE A IS NOT.
     #
