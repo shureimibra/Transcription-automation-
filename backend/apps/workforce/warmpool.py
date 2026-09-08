@@ -845,9 +845,24 @@ def run_cycle(pool_size: int = None, concurrency: int = None,
     concurrency = concurrency or DEFAULT_CONCURRENCY
     report = WarmReport()
 
+    # MUST AGREE WITH is_warm(), NOT REIMPLEMENT IT LOOSELY. is_warm()'s own
+    # docstring already names this exact failure mode: for a translation, a
+    # completed TRANSCRIPT is not a completed TRANSLATION, and counting the
+    # former as "warm" here believes the pool is full of finished work when
+    # some of it is actually stranded half-done -- shortfall drops to 0,
+    # no new candidates get pulled, and the half-finished translations are
+    # never revisited. Confirmed live: production sat at a constant
+    # `[warm] ready=24` for 5 hours (the loose count this query used to
+    # produce) while the dashboard's real is_warm()-based "ready now"
+    # badge showed 18, and only 4 real translations completed in that
+    # entire window despite 76 unclaimed tasks sitting available -- the
+    # other 6 of the 24 were transcript-done-translation-not-done tasks
+    # this query was silently counting as finished.
     warm_now = Task.objects.filter(
         status=states.NEW, claimed_by__isnull=True, job__isnull=False,
         job__status='completed',
+    ).exclude(
+        kind=Task.TRANSLATION, deliverable_revision__isnull=True, polished_text='',
     ).count()
     report.already_warm = warm_now
 

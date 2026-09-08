@@ -257,6 +257,38 @@ class WarmCycleTestCase(TempCacheMixin, TransactionTestCase):
         self.assertEqual(report.already_warm, 3)
         self.assertEqual(report.considered, 0)
 
+    def test_a_transcript_only_translation_does_not_count_as_warm(self):
+        """
+        Regression test for a real production incident: run_cycle's own
+        warm_now query used a looser check than is_warm() (job.status ==
+        'completed' alone), so a translation task with a finished
+        transcript but no actual translation yet was miscounted as warm.
+        Confirmed live: production sat at a constant `[warm] ready=24`
+        for 5 hours while the dashboard's real is_warm()-based count
+        showed 18, and only 4 real translations completed in that window
+        despite 76 unclaimed tasks available -- shortfall was computing
+        as 0 against the inflated count, so no new candidates, including
+        the stranded half-done ones, were ever pulled.
+        """
+        job = TranscriptionJob.objects.create(
+            project=Project.objects.create(name='half-done'),
+            input_source='upload', status='completed',
+        )
+        # Transcript is done; nothing has translated it yet -- exactly
+        # the state select_candidates' own TRANSLATION branch is built to
+        # pick back up (job__status='completed', deliverable_revision
+        # __isnull=True), which only happens if shortfall > 0.
+        make_task(kind=Task.TRANSLATION, external_source='translation',
+                 external_task_id='half', status=states.NEW,
+                 duration_seconds=120, job=job, target_language='fr')
+
+        report = warmpool.run_cycle(pool_size=1, concurrency=1, service=FakeEagle())
+
+        self.assertEqual(report.already_warm, 0,
+                         'a transcript-only translation must not count as warm')
+        self.assertEqual(report.considered, 1,
+                         'shortfall must stay open so the half-done task gets revisited')
+
     def test_one_failure_does_not_stop_the_cycle(self):
         make_task(external_source='transcription', external_task_id='bad',
                   status=states.NEW, duration_seconds=120)
