@@ -802,6 +802,96 @@ class TaskWorkflowAPITestCase(APITestCase):
         self.assertIn('workers', response.data)
 
 
+class QueueOrderingAgreesWithIsReadyTestCase(APITestCase):
+    """
+    The queue's "ready work first" ordering used to treat a completed
+    transcript job as "ready" on its own -- the same looser definition the
+    warm pool's `run_cycle` count used before that was fixed. For a
+    translation task that is wrong: `TaskSerializer.get_is_ready` (and
+    `warmpool.is_warm`) also require a deliverable_revision.
+
+    A transcript-only translation sorted into the front-page "ready" group
+    pushes a genuinely ready task onto a later page. A tasker (or the
+    dashboard's per-page ready count) never sees the disagreement directly --
+    it just reads as "ready now" undercounting the site-wide ready total.
+    """
+
+    def setUp(self):
+        self.admin_user, self.admin = make_worker('admin', 'ADM', is_admin=True)
+        self.worker_user, self.worker = make_worker('carol', 'W004')
+        self.client.force_authenticate(user=self.worker_user)
+
+    def _translation_task(self, external_id, *, translated):
+        from apps.transcriptions.models import AIRevision, Project, TranscriptionJob
+
+        project = Project.objects.create(name=f'queue-order-{external_id}')
+        job = TranscriptionJob.objects.create(
+            project=project, input_source='upload', status='completed')
+        task = make_task(
+            kind=Task.TRANSLATION, external_source='translation',
+            external_task_id=external_id, status=states.NEW,
+            duration_seconds=600,
+        )
+        Task.objects.filter(pk=task.pk).update(job=job)
+        if translated:
+            revision = AIRevision.objects.create(
+                job=job, operation='translate', target_language='fr',
+                status='completed')
+            Task.objects.filter(pk=task.pk).update(deliverable_revision=revision)
+        task.refresh_from_db()
+        return task
+
+    def test_a_transcript_only_translation_does_not_outrank_a_translated_one(self):
+        # Created first (and shorter), so the old ordering -- which only
+        # looked at job__status -- would have sorted this one first.
+        stuck = self._translation_task('q-stuck', translated=False)
+        stuck.duration_seconds = 60
+        stuck.save(update_fields=['duration_seconds'])
+
+        ready = self._translation_task('q-ready', translated=True)
+
+        response = self.client.get(
+            '/api/v1/workforce/tasks/?kind=translation&available=true')
+        self.assertEqual(response.status_code, 200)
+        ids_in_order = [row['id'] for row in response.data]
+        self.assertLess(
+            ids_in_order.index(str(ready.id)), ids_in_order.index(str(stuck.id)),
+            'a genuinely ready translation must sort ahead of a '
+            'transcript-only one, regardless of duration',
+        )
+        by_id = {row['id']: row for row in response.data}
+        self.assertTrue(by_id[str(ready.id)]['is_ready'])
+        self.assertFalse(by_id[str(stuck.id)]['is_ready'])
+
+    def test_ready_count_on_a_short_page_matches_is_ready_not_job_status(self):
+        """
+        The regression as it actually appeared: with several transcript-only
+        translations mixed in, a short first page should still show every
+        readied translation as ready -- not just the ones whose transcript
+        happened to finish first.
+        """
+        stuck_tasks = [
+            self._translation_task(f'q-stuck-{i}', translated=False)
+            for i in range(3)
+        ]
+        for t in stuck_tasks:
+            t.duration_seconds = 30
+            t.save(update_fields=['duration_seconds'])
+        ready = self._translation_task('q-ready-2', translated=True)
+
+        response = self.client.get(
+            '/api/v1/workforce/tasks/'
+            '?kind=translation&available=true&page=1&page_size=2')
+        self.assertEqual(response.status_code, 200)
+        page_ids = [row['id'] for row in response.data['results']]
+        self.assertIn(
+            str(ready.id), page_ids,
+            'the one truly ready task must not be crowded off the first '
+            'page by transcript-only tasks the old ordering treated as '
+            'equally ready',
+        )
+
+
 # ===================================================================== #
 # Engine boundary
 # ===================================================================== #

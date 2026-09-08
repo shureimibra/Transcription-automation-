@@ -245,10 +245,23 @@ class TaskViewSet(viewsets.ModelViewSet):
         # starts the external clock on work the machine has not begun.
         # Shortest first within each group, because a short task clears the
         # deadline more easily and turns an hour into more completed work.
-        from django.db.models import Case, IntegerField, Value, When
+        #
+        # "Ready" here MUST agree with TaskSerializer.get_is_ready (and with
+        # warmpool.is_warm): a completed transcript job is not enough for a
+        # translation task, which also needs deliverable_revision set. Using
+        # job__status='completed' alone sorted transcript-only translations
+        # into the front-page "ready" group, pushing genuinely ready tasks
+        # onto later pages and making the on-page ready count read low even
+        # though the site-wide ready total was correct.
+        from django.db.models import Case, IntegerField, Q, Value, When
         return queryset.annotate(
             _readiness=Case(
-                When(job__status='completed', then=Value(0)),
+                When(
+                    Q(job__status='completed') & (
+                        ~Q(kind=Task.TRANSLATION) | Q(deliverable_revision__isnull=False)
+                    ),
+                    then=Value(0),
+                ),
                 default=Value(1), output_field=IntegerField(),
             ),
         ).order_by('_readiness', 'duration_seconds', '-priority', 'created_at')
