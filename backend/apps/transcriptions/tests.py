@@ -4037,11 +4037,51 @@ class AIAssistPromptTestCase(TestCase):
             prompts.task_description('translate')
         self.assertIn('Swahili', prompts.task_description('translate', 'Swahili'))
 
+    def test_translate_instructs_notation_for_complex_technical_content(self):
+        """
+        Not math-specific: a source can be chemistry, physics, computer
+        science or any other technical field spoken out loud, and the rule
+        must say so rather than reading as a mathematics-only instruction.
+        """
+        from core.services.ai_assist import prompts
+        task = prompts.task_description('translate', 'French')
+        self.assertIn('mathematics, chemistry, physics', task)
+        self.assertIn('x²', task)
+        self.assertIn('Unicode superscripts, subscripts', task)
+        self.assertIn('never LaTeX', task)
+
     def test_custom_requires_an_instruction(self):
         from core.services.ai_assist import prompts
         payload = prompts.build_payload(self._segments('hello'))
         with self.assertRaises(ValueError):
             prompts.build_prompt('custom', payload, custom_instruction='   ')
+
+    def test_a_non_custom_operation_still_carries_its_own_instruction(self):
+        """
+        Regression test: build_prompt only ever inserted custom_instruction
+        for the 'custom' operation. warmpool._warm_translation builds a
+        real disfluency-handling instruction and stores it on the revision
+        with operation='translate' -- which reached this function and was
+        silently dropped, every time, for every warmed translation.
+        """
+        from core.services.ai_assist import prompts
+        payload = prompts.build_payload(self._segments('hello'))
+        prompt = prompts.build_prompt(
+            'translate', payload, target_language='French',
+            custom_instruction='The source is a raw speech-recognition transcript.',
+        )
+        self.assertIn('The source is a raw speech-recognition transcript.', prompt)
+        self.assertIn(prompts.USER_INSTRUCTION_OPEN, prompt)
+        self.assertIn(prompts.USER_INSTRUCTION_CLOSE, prompt)
+
+    def test_a_non_custom_operation_without_one_is_unaffected(self):
+        """The overwhelmingly common case -- no custom_instruction at all --
+        must produce byte-identical output to before this fix, for every
+        existing caller that never touches this parameter."""
+        from core.services.ai_assist import prompts
+        payload = prompts.build_payload(self._segments('hello'))
+        prompt = prompts.build_prompt('correct', payload)
+        self.assertNotIn(prompts.USER_INSTRUCTION_OPEN, prompt)
 
     def test_unknown_operation_is_rejected(self):
         from core.services.ai_assist import prompts
@@ -5511,16 +5551,35 @@ class AIAssistBudgetTestCase(TestCase):
 
     @override_settings(AI_MAX_TOKENS_PER_REQUEST=10 ** 9, AI_DAILY_TOKEN_BUDGET=10 ** 9)
     def test_preflight_reports_the_batch_count_it_priced(self):
-        """The estimate's per-batch overhead is only honest if the count is
+        """
+        The estimate's per-batch overhead is only honest if the count is
         the one the run will really send, so preflight derives it rather than
-        trusting a caller."""
+        trusting a caller.
+
+        THE BATCH SIZE IS PINNED HERE, DELIBERATELY. build_batches() reads
+        AI_ASSIST_MAX_ITEMS_PER_BATCH / AI_ASSIST_MAX_CHARS_PER_BATCH from
+        the environment, and .env.example itself ships TWO different values
+        for good reason: the code's bare default (60 items / 9000 chars) and
+        a larger, deliberately-tuned production preset (300 / 40000) sized to
+        keep a 20-minute transcript inside one provider call. Either is
+        correct to run with. What is NOT correct is a test whose assertion
+        (">1 batch for 60 segments") is secretly a bet on which of those is
+        active in the process running it -- that bet was lost on a server
+        whose .env carried the production preset, for no reason connected to
+        a code defect. Pinned inputs make this a fact about the batching
+        algorithm, not about ambient configuration.
+        """
         from types import SimpleNamespace
         from core.services.ai_assist import build_batches
         from . import ai_budget
         segments = [SimpleNamespace(text='word ' * 40) for _ in range(60)]
-        result = ai_budget.preflight(segments)
-        self.assertEqual(result['batch_count'], len(build_batches(segments)))
-        self.assertGreater(result['batch_count'], 1)
+        with patch.dict(os.environ, {
+            'AI_ASSIST_MAX_ITEMS_PER_BATCH': '60',
+            'AI_ASSIST_MAX_CHARS_PER_BATCH': '9000',
+        }):
+            result = ai_budget.preflight(segments)
+            self.assertEqual(result['batch_count'], len(build_batches(segments)))
+            self.assertGreater(result['batch_count'], 1)
         self.assertGreater(result['estimated_tokens'], 0)
 
     # ------------------------------------------------------------------ #

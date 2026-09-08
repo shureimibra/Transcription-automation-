@@ -154,7 +154,20 @@ Fidelity rules, which apply to every subject equally:
    failed review: "no contest" became "indiscutable" where the sense was
    unanimity, and "better luck next time" became "plus de chance la
    prochaine fois" instead of the ordinary "bonne chance". If a phrase is
-   figurative, give the equivalent expression, not a word-for-word copy.""",
+   figurative, give the equivalent expression, not a word-for-word copy.
+12. TECHNICAL SUBJECTS -- mathematics, chemistry, physics, and the like --
+   were SPOKEN, so the source says "x squared" and "H two O", never "x²"
+   or "H₂O". A simple, one-off quantity is fine spelled out ("x au
+   carré"). Anything structurally complex, general, or repeated is not:
+   spelling out "a-naught plus a-one z plus a-two z-squared, and so on,
+   plus a-n z to the n" produces an unreadable wall of French words where
+   "a₀ + a₁z + a₂z² + ... + aₙzⁿ" is immediately legible, and a term used
+   this way many times compounds the cost of spelling it out every
+   occurrence. An accepted translation on this platform used exactly this
+   judgment: "x au carré" for one simple mention, but "x³", "z²", "zⁿ",
+   and subscripted variables like "γ₁" and "aₙ" for the general
+   polynomial. Use standard Unicode superscripts, subscripts and symbols
+   for the field actually being discussed -- never LaTeX or markup.""",
 
     CUSTOM: """\
 Task: apply the user's instruction below to each segment's text.
@@ -230,6 +243,18 @@ def build_prompt(
         # Sanitized and delimited like any other user-supplied text: it is
         # allowed to instruct, but not to forge a transcript block boundary.
         instruction = sanitize_segment_text(instruction[:MAX_CUSTOM_INSTRUCTION_CHARS])
+        parts += [USER_INSTRUCTION_OPEN, instruction, USER_INSTRUCTION_CLOSE]
+    elif custom_instruction and custom_instruction.strip():
+        # A non-custom operation may still carry supplementary guidance --
+        # e.g. warmpool._warm_translation's note that the source is raw ASR
+        # and disfluency should be ignored. This used to be silently
+        # dropped: the gate above only ever fired for CUSTOM, so a caller
+        # that built a real instruction and stored it on the revision got
+        # nothing back for it -- the parameter reached here and stopped.
+        # Same sanitizing and delimiting as the 'custom' case, just not
+        # required the way CUSTOM's is.
+        instruction = sanitize_segment_text(
+            custom_instruction.strip()[:MAX_CUSTOM_INSTRUCTION_CHARS])
         parts += [USER_INSTRUCTION_OPEN, instruction, USER_INSTRUCTION_CLOSE]
 
     # Restated last so it outranks anything a custom instruction asked for.

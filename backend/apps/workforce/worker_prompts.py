@@ -135,7 +135,15 @@ WHAT TO FIX:
 5. Cohesion. The source is a spoken transcript, so it may contain false
    starts, repetitions, and filler that survived translation. Remove them
    and join the sentences so the result reads as clean written {target}.
-   Preserve meaning; remove only the disfluency."""
+   Preserve meaning; remove only the disfluency.
+6. Technical notation. If the document is mathematics, chemistry, physics
+   or a similar field, it was spoken, so the source says "x squared", not
+   "x²". A simple one-off quantity may stay spelled out ("x au carré"),
+   but anything structurally complex, general or repeated should use
+   standard Unicode notation instead of spelling it out every time:
+   "a-naught plus a-one z plus a-two z-squared, and so on" becomes
+   "a₀ + a₁z + a₂z² + ...", not a wall of {target} words. Use superscripts,
+   subscripts and symbols like "x²" and "H₂O"; never LaTeX or markup."""
 
 #: French typography is spelled out because every line of it is a check the
 #: gate runs. Other languages get the general instruction: inventing a rule
@@ -239,7 +247,11 @@ that cost a submission:
 
   1. Numbers. Check that every number in the source appears in the
      translation, in the same form and the same precision, and that the
-     translation contains no number the source does not state.
+     translation contains no number the source does not state. EXCEPTION:
+     a digit that is part of Unicode notation standing in for spoken
+     technical language (rule 6 -- "x squared" rendered as "x²") is not an
+     invented number. Flag it only if the underlying quantity changed, not
+     because the digit itself is not literally spoken in the source.
   2. Untranslated {source}. Any word or passage left in {source} that is
      not a proper noun, brand, acronym or conventional title.
   3. Inventions. Any website, citation, title or reference in the

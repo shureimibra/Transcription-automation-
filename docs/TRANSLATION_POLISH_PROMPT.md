@@ -87,6 +87,14 @@ WHAT TO FIX:
    starts, repetitions, and filler that survived translation. Remove them
    and join the sentences so the result reads as clean written French.
    Preserve meaning; remove only the disfluency.
+6. Technical notation. If the document is mathematics, chemistry, physics
+   or a similar field, it was spoken, so the source says "x squared", not
+   "x²". A simple one-off quantity may stay spelled out ("x au carré"),
+   but anything structurally complex, general or repeated should use
+   standard Unicode notation instead of spelling it out every time:
+   "a-naught plus a-one z plus a-two z-squared, and so on" becomes
+   "a₀ + a₁z + a₂z² + ...", not a wall of French words. Use superscripts,
+   subscripts and symbols like "x²" and "H₂O"; never LaTeX or markup.
 
 FRENCH TYPOGRAPHY — apply all of these:
 - Narrow non-breaking space before ; : ! and ?
@@ -137,6 +145,7 @@ None of it is stylistic preference.
 | Guillemets | `typography.fr.guillemets` |
 | Space before `%` | `typography.fr.percent-spacing` |
 | NBSP before `; : ! ?` | `typography.fr.nbsp-before-high-punctuation` |
+| Technical notation for complex/repeated expressions | Not automatically checkable — see below |
 
 The number rule is the one to take most seriously. It is the only
 **CRITICAL** check in this list and it blocks submission with no override.
@@ -145,6 +154,29 @@ One thing it no longer does: converting a spelled-out number to a figure
 ("one" → "1") is **not** flagged, because the value is unchanged and nothing
 was invented. That used to block perfectly good work. Changing a value, or
 introducing a figure the speaker never gave, still blocks.
+
+## Technical notation is a judgment call, not a fixed conversion
+
+Rule 6 was added after an accepted document (a mathematics lecture) showed
+what real accepted work actually does: the translator spelled out one
+simple, one-off mention ("x au carré") but used real Unicode notation —
+`x³`, `z²`, `zⁿ`, subscripted variables like `γ₁` and `aₙ` — for a general
+polynomial written out with many terms. Neither pure spelling-out nor
+converting everything to notation matches what got accepted; the working
+rule is "simple stays spelled out, complex or repeated becomes notation."
+
+This is not math-only. Chemistry, physics, and any other technical field
+spoken aloud can call for the same judgment (`H₂O`, unit superscripts,
+etc.) — rule 6 names mathematics, chemistry and physics only as examples of
+"a similar field," not as an exhaustive list, the same way rule 4 refuses a
+fixed list of domains.
+
+**This interacts with rule 1's number check, and the review prompt says so
+explicitly.** A digit that only exists because rule 6 converted spoken
+words into notation — the "2" in "x²" — is not a number the source failed
+to state; the source said "squared" out loud. The review prompt's numbers
+check carries an explicit exception for exactly this, so a worker's own
+check pass does not fight its own polish pass.
 
 ## Why it covers every Eagle niche
 

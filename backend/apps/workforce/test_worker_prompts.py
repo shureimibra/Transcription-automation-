@@ -65,6 +65,36 @@ class WorkerPromptTestCase(TestCase):
                 self.assertIn('square brackets', text)
                 self.assertIn('No asterisks', text)
 
+    def test_every_prompt_covers_technical_notation(self):
+        """
+        Not math-only: mathematics, chemistry, physics and similar fields
+        are named explicitly, and the rule sits beside the number-form rule
+        it must not contradict (rule 1 protects VALUE; this one is about
+        NOTATION for a value or expression that was spoken out in words).
+        """
+        for name, text in self.prompts.items():
+            with self.subTest(prompt=name):
+                self.assertIn('Technical notation', text)
+                self.assertIn('mathematics, chemistry, physics', text)
+                self.assertIn('x²', text)
+                self.assertIn('never LaTeX', text)
+
+    def test_the_review_prompt_does_not_flag_notation_as_an_invented_number(self):
+        """
+        Regression guard for the same false-positive class a real Eagle
+        rejection surfaced: a digit-shaped token that is not a spoken
+        quantity (there, an ASR mishearing; here, deliberately-introduced
+        notation) must not trip the strict number-preservation check the
+        review prompt itself asks for.
+        """
+        review = self.prompts['review']
+        self.assertIn('EXCEPTION', review)
+        # Split across the checks the source text's own line-wrap breaks
+        # on, rather than asserting one unbroken phrase that spans it.
+        self.assertIn('Unicode notation standing in for spoken', review)
+        self.assertIn('technical language', review)
+        self.assertIn('x²', review)
+
     def test_the_prompts_ask_for_the_right_domain_vocabulary(self):
         """
         NO HARDCODED LIST OF DOMAINS. Eagle sends legal, medical, academic,
