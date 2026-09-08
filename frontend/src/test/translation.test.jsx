@@ -99,7 +99,7 @@ describe('the two documents', () => {
     render(<TranslationWorkspace task={TASK} />);
     await screen.findByText('Several times a second');
 
-    await userEvent.click(screen.getAllByRole('button', { name: 'edit' })[0]);
+    await userEvent.click(screen.getAllByRole('button', { name: 'Edit' })[0]);
     const box = screen.getByDisplayValue('Several times a second');
     await userEvent.clear(box);
     await userEvent.type(box, 'Several times per second');
@@ -228,7 +228,7 @@ describe('retranslating a single line', () => {
     render(<TranslationWorkspace task={TASK} />);
     await screen.findByText('Plusieurs fois par seconde');
 
-    await userEvent.click(screen.getAllByRole('button', { name: 'retranslate this line' })[0]);
+    await userEvent.click(screen.getAllByRole('button', { name: 'Retranslate this line' })[0]);
 
     await waitFor(() => expect(aiRevisions.request).toHaveBeenCalledWith('job-1', {
       operation: 'translate',
@@ -239,7 +239,10 @@ describe('retranslating a single line', () => {
     }));
   });
 
-  it('shows the fresh translation once the request completes immediately', async () => {
+  it('replaces the row with the fresh translation, not a copy sitting beside it', async () => {
+    // A SEPARATE BOX READS AS "NOTHING HAPPENED". The row itself must show
+    // the corrected text, marked as updated, rather than leaving the stale
+    // original in place next to a box the worker has to notice and judge.
     vi.spyOn(aiRevisions, 'request').mockResolvedValue({
       id: 'rev-1', status: 'completed',
       segments: [{ effective_text: 'Plusieurs fois par seconde, corrigé' }],
@@ -247,10 +250,11 @@ describe('retranslating a single line', () => {
     render(<TranslationWorkspace task={TASK} />);
     await screen.findByText('Plusieurs fois par seconde');
 
-    await userEvent.click(screen.getAllByRole('button', { name: 'retranslate this line' })[0]);
+    await userEvent.click(screen.getAllByRole('button', { name: 'Retranslate this line' })[0]);
 
-    expect(await screen.findByText('Fresh translation')).toBeInTheDocument();
-    expect(screen.getByText('Plusieurs fois par seconde, corrigé')).toBeInTheDocument();
+    expect(await screen.findByText('Plusieurs fois par seconde, corrigé')).toBeInTheDocument();
+    expect(screen.getByText('updated')).toBeInTheDocument();
+    expect(screen.queryByText('Plusieurs fois par seconde')).not.toBeInTheDocument();
   });
 
   it('polls until the background pipeline finishes', async () => {
@@ -263,7 +267,7 @@ describe('retranslating a single line', () => {
     render(<TranslationWorkspace task={TASK} />);
     await screen.findByText('Plusieurs fois par seconde');
 
-    await userEvent.click(screen.getAllByRole('button', { name: 'retranslate this line' })[0]);
+    await userEvent.click(screen.getAllByRole('button', { name: 'Retranslate this line' })[0]);
     await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
 
     expect(await screen.findByText('Plusieurs fois par seconde, corrigé')).toBeInTheDocument();
@@ -278,7 +282,7 @@ describe('retranslating a single line', () => {
     render(<TranslationWorkspace task={TASK} />);
     await screen.findByText('Plusieurs fois par seconde');
 
-    await userEvent.click(screen.getAllByRole('button', { name: 'retranslate this line' })[0]);
+    await userEvent.click(screen.getAllByRole('button', { name: 'Retranslate this line' })[0]);
 
     expect(await screen.findByText(/already running for this task/)).toBeInTheDocument();
   });
@@ -292,8 +296,8 @@ describe('retranslating a single line', () => {
     });
     render(<TranslationWorkspace task={TASK} />);
     await screen.findByText('Plusieurs fois par seconde');
-    await userEvent.click(screen.getAllByRole('button', { name: 'retranslate this line' })[0]);
-    await screen.findByText('Fresh translation');
+    await userEvent.click(screen.getAllByRole('button', { name: 'Retranslate this line' })[0]);
+    await screen.findByText('Plusieurs fois par seconde, corrigé');
 
     await userEvent.click(screen.getByRole('button', { name: 'Copy' }));
 
@@ -308,7 +312,7 @@ describe('retranslating a single line', () => {
     render(<TranslationWorkspace task={TASK} />);
     await screen.findByText('Several times a second');
 
-    expect(screen.queryByRole('button', { name: 'retranslate this line' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Retranslate this line' })).not.toBeInTheDocument();
   });
 });
 

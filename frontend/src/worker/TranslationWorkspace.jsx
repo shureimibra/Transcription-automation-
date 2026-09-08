@@ -517,57 +517,74 @@ export default function TranslationWorkspace({ task, onTaskChange }) {
                     </div>
                   </div>
                 ) : (
-                  <p className={`group/en text-xs ${active ? 'text-accent-ink' : 'text-ink-dim'}`}>
-                    {row.english}
+                  <div className={`text-xs ${active ? 'text-accent-ink' : 'text-ink-dim'}`}>
+                    <p>{row.english}</p>
+                    {/* ALWAYS VISIBLE, NOT REVEALED ON HOVER. A hover-only
+                        link was invisible on a touch device and easy to
+                        miss even with a mouse -- a worker scanning a long
+                        transcript for a mishearing has no reason to hover
+                        every line on the chance a control is hiding there. */}
                     {row.id && (
-                      <button
+                      <Button
+                        size="sm" variant="ghost" className="mt-1"
                         onClick={(e) => {
                           e.stopPropagation();
                           setDraftText(row.english);
                           setEditing(row.id);
                         }}
-                        className={`ml-2 rounded px-1 text-2xs font-medium text-accent
-                                    opacity-0 transition-opacity hover:underline
-                                    focus:opacity-100 group-hover/en:opacity-100 ${FOCUS}`}
                       >
-                        edit
-                      </button>
+                        Edit
+                      </Button>
+                    )}
+                  </div>
+                )}
+                <div className={`text-xs ${active ? 'text-accent-ink' : 'text-ink'}`}>
+                  {/* THE ROW SHOWS THE CORRECT TEXT, NOT A COPY OF IT
+                      SITTING NEXT TO THE STALE ONE. A separate "fresh
+                      translation" box below the original reads as though
+                      nothing happened -- the worker has to notice a new box
+                      appeared and manually judge which text is now true.
+                      Once a retranslate finishes, its result IS this row's
+                      French from then on. */}
+                  <p className="flex items-start gap-1.5">
+                    <span>{retranslated[row.key] || row.french || '—'}</span>
+                    {retranslated[row.key] && (
+                      <span
+                        title="This line was retranslated after the English was corrected"
+                        className="mt-0.5 shrink-0 rounded-full bg-accent/15 px-1.5 py-0.5
+                                   text-2xs font-medium uppercase tracking-wide text-accent"
+                      >
+                        updated
+                      </span>
                     )}
                   </p>
-                )}
-                <div className={`group/fr text-xs ${active ? 'text-accent-ink' : 'text-ink'}`}>
-                  <p>
-                    {row.french || '—'}
-                    {!notTranslatedYet && (
-                      <button
+                  {!notTranslatedYet && (
+                    <div className="mt-1 flex items-center gap-2">
+                      <Button
+                        size="sm" variant="ghost"
+                        loading={retranslating === row.key}
                         onClick={(e) => {
                           e.stopPropagation();
                           retranslateLine(row);
                         }}
-                        disabled={retranslating === row.key}
-                        className={`ml-2 rounded px-1 text-2xs font-medium text-accent
-                                    opacity-0 transition-opacity hover:underline
-                                    focus:opacity-100 group-hover/fr:opacity-100
-                                    disabled:opacity-100 disabled:no-underline ${FOCUS}`}
                       >
-                        {retranslating === row.key ? 'translating…' : 'retranslate this line'}
-                      </button>
-                    )}
-                  </p>
-                  {retranslated[row.key] && (
-                    <div
-                      onClick={(e) => e.stopPropagation()}
-                      className="mt-1 rounded-lg border border-accent/30 bg-accent-soft px-2 py-1.5"
-                    >
-                      <p className="text-2xs font-medium text-ink-mute">Fresh translation</p>
-                      <p className="mt-0.5">{retranslated[row.key]}</p>
-                      <button
-                        onClick={() => copyRetranslated(row)}
-                        className={`mt-1 rounded px-1 text-2xs font-medium text-accent
-                                    hover:underline ${FOCUS}`}
-                      >
-                        Copy
-                      </button>
+                        Retranslate this line
+                      </Button>
+                      {/* Still needed: this table is a preview, not the
+                          document. The polish textarea below is what gets
+                          submitted, and it is free prose the worker may
+                          have already reworded -- splicing a fresh sentence
+                          into it by position would be a guess, not a fix.
+                          Copy hands the worker exactly what changed so they
+                          can place it themselves. */}
+                      {retranslated[row.key] && (
+                        <Button
+                          size="sm" variant="ghost"
+                          onClick={(e) => { e.stopPropagation(); copyRetranslated(row); }}
+                        >
+                          Copy
+                        </Button>
+                      )}
                     </div>
                   )}
                   {retranslateError[row.key] && (
