@@ -1,9 +1,12 @@
 import React from 'react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import TranslationWorkspace from '../worker/TranslationWorkspace.jsx';
-import { segments as segmentsApi, submission, translation } from '../api/eagle.js';
+import {
+  aiRevisions, segments as segmentsApi, submission, translation,
+} from '../api/eagle.js';
+import { ApiError } from '../api/client.js';
 
 /**
  * The translation surface.
@@ -203,6 +206,109 @@ describe('the polish round trip', () => {
     await screen.findByText('Plusieurs fois par seconde');
 
     expect(screen.getByRole('button', { name: 'Save polished version' })).toBeDisabled();
+  });
+});
+
+describe('retranslating a single line', () => {
+  // WHY THIS EXISTS. Editing the English used to leave the worker with only
+  // the whole-document, copy-into-your-own-assistant path to catch it back
+  // up -- expensive in worker time for a one-word fix. This is the cheap,
+  // one-click alternative: a real request, scoped to exactly one segment,
+  // through our own AI instead of an external one.
+
+  it('requests exactly one segment, ungated, in the target language', async () => {
+    // UNGATED IS LOAD-BEARING. Leaving quality_profile unset would let the
+    // server fall back to the production default (the 'volume' profile --
+    // three requests instead of one), which is priced for unsupervised
+    // warming, not a worker-triggered, worker-reviewed single line.
+    vi.spyOn(aiRevisions, 'request').mockResolvedValue({
+      id: 'rev-1', status: 'completed',
+      segments: [{ effective_text: 'Plusieurs fois par seconde, corrigé' }],
+    });
+    render(<TranslationWorkspace task={TASK} />);
+    await screen.findByText('Plusieurs fois par seconde');
+
+    await userEvent.click(screen.getAllByRole('button', { name: 'retranslate this line' })[0]);
+
+    await waitFor(() => expect(aiRevisions.request).toHaveBeenCalledWith('job-1', {
+      operation: 'translate',
+      target_language: 'fr',
+      segment_start_index: 0,
+      segment_end_index: 1,
+      quality_profile: 'none',
+    }));
+  });
+
+  it('shows the fresh translation once the request completes immediately', async () => {
+    vi.spyOn(aiRevisions, 'request').mockResolvedValue({
+      id: 'rev-1', status: 'completed',
+      segments: [{ effective_text: 'Plusieurs fois par seconde, corrigé' }],
+    });
+    render(<TranslationWorkspace task={TASK} />);
+    await screen.findByText('Plusieurs fois par seconde');
+
+    await userEvent.click(screen.getAllByRole('button', { name: 'retranslate this line' })[0]);
+
+    expect(await screen.findByText('Fresh translation')).toBeInTheDocument();
+    expect(screen.getByText('Plusieurs fois par seconde, corrigé')).toBeInTheDocument();
+  });
+
+  it('polls until the background pipeline finishes', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.spyOn(aiRevisions, 'request').mockResolvedValue({ id: 'rev-1', status: 'processing' });
+    vi.spyOn(aiRevisions, 'get').mockResolvedValue({
+      id: 'rev-1', status: 'completed',
+      segments: [{ effective_text: 'Plusieurs fois par seconde, corrigé' }],
+    });
+    render(<TranslationWorkspace task={TASK} />);
+    await screen.findByText('Plusieurs fois par seconde');
+
+    await userEvent.click(screen.getAllByRole('button', { name: 'retranslate this line' })[0]);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+
+    expect(await screen.findByText('Plusieurs fois par seconde, corrigé')).toBeInTheDocument();
+    expect(aiRevisions.get).toHaveBeenCalledWith('rev-1');
+    vi.useRealTimers();
+  });
+
+  it('explains a 409 as another job already running, not a generic failure', async () => {
+    vi.spyOn(aiRevisions, 'request').mockRejectedValue(
+      new ApiError('conflict', { status: 409 })
+    );
+    render(<TranslationWorkspace task={TASK} />);
+    await screen.findByText('Plusieurs fois par seconde');
+
+    await userEvent.click(screen.getAllByRole('button', { name: 'retranslate this line' })[0]);
+
+    expect(await screen.findByText(/already running for this task/)).toBeInTheDocument();
+  });
+
+  it('copies just that line, not the whole document', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    vi.spyOn(aiRevisions, 'request').mockResolvedValue({
+      id: 'rev-1', status: 'completed',
+      segments: [{ effective_text: 'Plusieurs fois par seconde, corrigé' }],
+    });
+    render(<TranslationWorkspace task={TASK} />);
+    await screen.findByText('Plusieurs fois par seconde');
+    await userEvent.click(screen.getAllByRole('button', { name: 'retranslate this line' })[0]);
+    await screen.findByText('Fresh translation');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Copy' }));
+
+    expect(writeText).toHaveBeenCalledWith('Plusieurs fois par seconde, corrigé');
+  });
+
+  it('does not offer it when there is no machine draft yet', async () => {
+    // A range-scoped fix only makes sense once there is a document with
+    // lines in it. The whole-document path (Copy prompt + English) is the
+    // right tool for a translation that does not exist yet.
+    vi.spyOn(translation, 'get').mockResolvedValue({ ...DRAFT, draft: [], draft_text: '' });
+    render(<TranslationWorkspace task={TASK} />);
+    await screen.findByText('Several times a second');
+
+    expect(screen.queryByRole('button', { name: 'retranslate this line' })).not.toBeInTheDocument();
   });
 });
 

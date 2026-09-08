@@ -67,6 +67,23 @@ export const translation = {
     api.post(`/workforce/tasks/${taskId}/translation/`, { text }),
 };
 
+/**
+ * Retranslating a single line, in place, after the English was corrected.
+ *
+ * NOT THE BULK PATH. `translation` above is the whole-document copy-paste
+ * workflow through the worker's own assistant -- deliberately kept off our
+ * own Gemini quota (see warmpool._warm_translation's own cost accounting).
+ * This one is a real request, scoped to a few segments, and it must stay
+ * that way: the caller is responsible for passing quality_profile: 'none'
+ * so a one-line fix does not silently inherit the multi-request quality
+ * gate meant for unsupervised warming.
+ */
+export const aiRevisions = {
+  request: (jobId, options) =>
+    api.post(`/transcriptions/${jobId}/ai_revisions/`, options),
+  get: (revisionId) => api.get(`/ai-revisions/${revisionId}/`),
+};
+
 export const transcript = {
   /** The job with its segments — what the review screen renders. */
   get: (jobId) => api.get(`/transcriptions/${jobId}/`),

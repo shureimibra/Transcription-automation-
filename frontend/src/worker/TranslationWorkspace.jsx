@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { segments as segmentsApi, submission, taskMedia, translation } from '../api/eagle.js';
+import {
+  aiRevisions, segments as segmentsApi, submission, taskMedia, translation,
+} from '../api/eagle.js';
 import { useAsync } from '../hooks/useAsync.js';
 import AudioPlayer from './AudioPlayer.jsx';
 import Verdict from '../components/Verdict.jsx';
@@ -51,6 +53,14 @@ export default function TranslationWorkspace({ task, onTaskChange }) {
   const [playhead, setPlayhead] = useState(0);
   const [editing, setEditing] = useState(null);   // segment id being edited
   const [draftText, setDraftText] = useState('');
+  // Keyed by row.key. `retranslating` is the one in flight (there can only
+  // ever be one -- the server refuses a second AI revision on the same job
+  // while one is running), `retranslated` holds finished results so they
+  // survive switching to a different row, `retranslateError` is per-row so
+  // one failure does not blank out an unrelated result sitting above it.
+  const [retranslating, setRetranslating] = useState(null);
+  const [retranslated, setRetranslated] = useState({});
+  const [retranslateError, setRetranslateError] = useState({});
 
   const rows = useMemo(() => {
     const source = data?.source || [];
@@ -180,6 +190,87 @@ export default function TranslationWorkspace({ task, onTaskChange }) {
       setNotice(`Could not save that line: ${err.message}`);
     } finally {
       setEditing(null);
+    }
+  };
+
+  /**
+   * Retranslate ONE line through our own AI, instead of the whole document
+   * through the worker's own assistant.
+   *
+   * SCOPED TO EXACTLY ONE SEGMENT, ON PURPOSE. `ai_revisions` accepts a
+   * range; this always passes a range of one. A wider range costs more per
+   * click for no benefit here -- the worker already knows which line is
+   * wrong, this is not a "revalidate the whole document" action.
+   *
+   * quality_profile: 'none' IS LOAD-BEARING, NOT A DEFAULT LEFT OFF. Leaving
+   * it unset lets the server fall back to AI_QUALITY_DEFAULT_PROFILE, which
+   * in production resolves 'translate' to the 'volume' profile -- three
+   * requests instead of one, meant for unsupervised warming. This action is
+   * the opposite: a worker triggers it and reads the result before doing
+   * anything with it, so paying for an audit pass nobody needed defeats the
+   * reason this was built as a single-request action in the first place.
+   *
+   * DOES NOT TOUCH THE POLISH TEXTAREA. `body` is free prose the worker may
+   * already have reworded and merged; splicing a fresh sentence into it
+   * programmatically would be a guess about where it belongs. The result is
+   * shown for the worker to read and copy in by hand -- the same "worker
+   * decides" shape as everything else on this screen.
+   */
+  const retranslateLine = async (row) => {
+    if (retranslating) return;
+    setRetranslating(row.key);
+    setRetranslateError((prev) => ({ ...prev, [row.key]: '' }));
+    try {
+      let revision = await aiRevisions.request(task.job, {
+        operation: 'translate',
+        target_language: data?.target_language || '',
+        segment_start_index: row.key,
+        segment_end_index: row.key + 1,
+        quality_profile: 'none',
+      });
+
+      // Small ranges usually finish inside the request, but the pipeline
+      // always dispatches to a background thread -- so 'queued'/'processing'
+      // is a real, expected outcome here, not just the bulk-document case.
+      let attempts = 0;
+      while (['queued', 'processing'].includes(revision.status) && attempts < 40) {
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        revision = await aiRevisions.get(revision.id);
+        attempts += 1;
+      }
+
+      if (revision.status === 'completed') {
+        const text = revision.segments?.[0]?.effective_text || '';
+        setRetranslated((prev) => ({ ...prev, [row.key]: text }));
+      } else if (['queued', 'processing'].includes(revision.status)) {
+        setRetranslateError((prev) => ({
+          ...prev,
+          [row.key]: 'Still working after a minute — check back in a moment.',
+        }));
+      } else {
+        setRetranslateError((prev) => ({
+          ...prev,
+          [row.key]: revision.error_message || `Did not finish (${revision.status}).`,
+        }));
+      }
+    } catch (err) {
+      setRetranslateError((prev) => ({
+        ...prev,
+        [row.key]: err.isConflict
+          ? 'An AI job is already running for this task — wait for it to finish and try again.'
+          : err.message,
+      }));
+    } finally {
+      setRetranslating(null);
+    }
+  };
+
+  const copyRetranslated = async (row) => {
+    try {
+      await navigator.clipboard.writeText(retranslated[row.key] || '');
+      setNotice('Copied. Paste it into the polished French below where it belongs.');
+    } catch {
+      setNotice('Could not copy automatically — select the text and copy it.');
     }
   };
 
@@ -444,9 +535,51 @@ export default function TranslationWorkspace({ task, onTaskChange }) {
                     )}
                   </p>
                 )}
-                <p className={`text-xs ${active ? 'text-accent-ink' : 'text-ink'}`}>
-                  {row.french || '—'}
-                </p>
+                <div className={`group/fr text-xs ${active ? 'text-accent-ink' : 'text-ink'}`}>
+                  <p>
+                    {row.french || '—'}
+                    {!notTranslatedYet && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          retranslateLine(row);
+                        }}
+                        disabled={retranslating === row.key}
+                        className={`ml-2 rounded px-1 text-2xs font-medium text-accent
+                                    opacity-0 transition-opacity hover:underline
+                                    focus:opacity-100 group-hover/fr:opacity-100
+                                    disabled:opacity-100 disabled:no-underline ${FOCUS}`}
+                      >
+                        {retranslating === row.key ? 'translating…' : 'retranslate this line'}
+                      </button>
+                    )}
+                  </p>
+                  {retranslated[row.key] && (
+                    <div
+                      onClick={(e) => e.stopPropagation()}
+                      className="mt-1 rounded-lg border border-accent/30 bg-accent-soft px-2 py-1.5"
+                    >
+                      <p className="text-2xs font-medium text-ink-mute">Fresh translation</p>
+                      <p className="mt-0.5">{retranslated[row.key]}</p>
+                      <button
+                        onClick={() => copyRetranslated(row)}
+                        className={`mt-1 rounded px-1 text-2xs font-medium text-accent
+                                    hover:underline ${FOCUS}`}
+                      >
+                        Copy
+                      </button>
+                    </div>
+                  )}
+                  {retranslateError[row.key] && (
+                    <p
+                      onClick={(e) => e.stopPropagation()}
+                      role="alert"
+                      className="mt-1 text-2xs text-status-rejected"
+                    >
+                      {retranslateError[row.key]}
+                    </p>
+                  )}
+                </div>
               </li>
             );
           })}
