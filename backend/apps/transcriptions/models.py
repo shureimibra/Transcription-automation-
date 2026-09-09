@@ -196,6 +196,13 @@ class TranscriptSegment(models.Model):
     start_time = models.FloatField()  # seconds
     end_time = models.FloatField()    # seconds
     text = models.TextField()
+    # Null means "never edited -- `text` IS the original ASR output."
+    # Populated once, on the FIRST edit (see EditSegmentView), and never
+    # overwritten by a later edit: a worker who corrects a line twice can
+    # still get back to the true original, not just their previous edit.
+    # Cleared back to null by reverting, so "has this ever been touched" and
+    # "is there something to revert to" stay the same question.
+    original_text = models.TextField(blank=True, null=True)
     confidence = models.FloatField(blank=True, null=True)
     words = models.JSONField(blank=True, null=True)  # Detailed word timings
     created_at = models.DateTimeField(auto_now_add=True)

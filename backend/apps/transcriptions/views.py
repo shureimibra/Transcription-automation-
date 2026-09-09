@@ -1102,6 +1102,14 @@ class EditSegmentView(views.APIView):
             if submitted['text'] is None:
                 return Response({'error': 'text cannot be null.'},
                                 status=status.HTTP_400_BAD_REQUEST)
+            # SNAPSHOT ON THE FIRST EDIT ONLY. A second correction to an
+            # already-edited line must not overwrite this with the previous
+            # edit -- that would make "revert" only ever undo the last
+            # change, not recover the true ASR original a worker might want
+            # back after two attempts.
+            if segment.original_text is None and submitted['text'] != segment.text:
+                segment.original_text = segment.text
+                changed.append('original_text')
             segment.text = submitted['text']
             changed.append('text')
         if 'speaker_label' in submitted:
@@ -1110,6 +1118,34 @@ class EditSegmentView(views.APIView):
             changed.append('speaker_label')
 
         segment.save(update_fields=changed)
+        return Response(TranscriptSegmentSerializer(segment).data, status=status.HTTP_200_OK)
+
+
+class RevertSegmentView(views.APIView):
+    """
+    Undo every edit made to one segment's text, back to the ASR original.
+
+    Only text has a backup (see TranscriptSegment.original_text) --
+    speaker_label was never given one, so there is nothing to revert there.
+    Reverting clears original_text back to null: a segment that is back to
+    its original wording is, correctly, no longer "an edited segment" for
+    any future edit to snapshot against.
+    """
+    authentication_classes = API_AUTH
+    permission_classes = [IsAuthenticatedUser]
+
+    def post(self, request, job_id, segment_id):
+        segment = get_object_or_404(TranscriptSegment, id=segment_id, job_id=job_id)
+        if not may_access_job(request.user, segment.job):
+            raise Http404
+        if segment.original_text is None:
+            return Response(
+                {'error': 'This line has not been edited -- there is nothing to revert.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        segment.text = segment.original_text
+        segment.original_text = None
+        segment.save(update_fields=['text', 'original_text'])
         return Response(TranscriptSegmentSerializer(segment).data, status=status.HTTP_200_OK)
 
 

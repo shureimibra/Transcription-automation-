@@ -5,9 +5,18 @@ from .models import (
 )
 
 class TranscriptSegmentSerializer(serializers.ModelSerializer):
+    # Whether there is something to revert to. `original_text` itself is not
+    # exposed here -- callers that need it (the revert action) read it
+    # server-side; a client only needs to know whether the button applies.
+    is_edited = serializers.SerializerMethodField()
+
+    def get_is_edited(self, obj):
+        return obj.original_text is not None
+
     class Meta:
         model = TranscriptSegment
-        fields = ['id', 'speaker_label', 'start_time', 'end_time', 'text', 'confidence', 'words']
+        fields = ['id', 'speaker_label', 'start_time', 'end_time', 'text',
+                  'confidence', 'words', 'is_edited']
 
 class TranslatedSegmentSerializer(serializers.ModelSerializer):
     class Meta:

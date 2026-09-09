@@ -50,6 +50,10 @@ export const segments = {
    */
   update: (jobId, segmentId, changes) =>
     api.patch(`/transcriptions/${jobId}/segments/${segmentId}/`, changes),
+
+  /** Undo every edit made to one line's text, back to the ASR original. */
+  revert: (jobId, segmentId) =>
+    api.post(`/transcriptions/${jobId}/segments/${segmentId}/revert/`),
 };
 
 /**

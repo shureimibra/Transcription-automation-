@@ -4,7 +4,7 @@ from rest_framework.routers import DefaultRouter
 from apps.transcriptions.views import (
     ProjectViewSet, TranscriptionJobViewSet, ExportTranscriptView, ExportSeriesView,
     SupportedLanguagesView, SupportedTranslationLanguagesView, DiscoverSeriesView,
-    DiscoverySeriesStatusView, EditSegmentView,
+    DiscoverySeriesStatusView, EditSegmentView, RevertSegmentView,
     AICapabilitiesView, AIRevisionDetailView, AIRevisionReviewView,
     AIRevisionSegmentReviewView, AIRevisionQualityReportsView,
 )
@@ -23,6 +23,7 @@ urlpatterns = [
     path('api/v1/workforce/', include('apps.workforce.urls')),
     path('api/v1/transcriptions/<uuid:job_id>/export/<str:format_type>/', ExportTranscriptView.as_view(), name='export-transcript'),
     path('api/v1/transcriptions/<uuid:job_id>/segments/<uuid:segment_id>/', EditSegmentView.as_view(), name='edit-segment'),
+    path('api/v1/transcriptions/<uuid:job_id>/segments/<uuid:segment_id>/revert/', RevertSegmentView.as_view(), name='revert-segment'),
     path('api/v1/series/<uuid:series_id>/export/<str:format_type>/', ExportSeriesView.as_view(), name='export-series'),
     path('api/v1/languages/', SupportedLanguagesView.as_view(), name='supported-languages'),
     path('api/v1/translation-languages/', SupportedTranslationLanguagesView.as_view(), name='supported-translation-languages'),

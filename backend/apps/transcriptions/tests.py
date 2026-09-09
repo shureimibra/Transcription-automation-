@@ -3198,6 +3198,91 @@ class SegmentEditTestCase(AuthenticatedAPITransactionTestCase):
         response = self.client.patch(url, {'text': 'nope'}, format='json')
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
+    def test_an_edit_is_not_a_backup_until_it_actually_changes_the_text(self):
+        """Saving the same text back (a no-op edit) must not snapshot it --
+        there is nothing to revert to yet, only the one true value."""
+        url = reverse('edit-segment', kwargs={'job_id': self.job.id, 'segment_id': self.segment.id})
+        self.client.patch(url, {'text': 'hello there'}, format='json')
+        self.segment.refresh_from_db()
+        self.assertIsNone(self.segment.original_text)
+
+    def test_a_real_edit_snapshots_the_original(self):
+        url = reverse('edit-segment', kwargs={'job_id': self.job.id, 'segment_id': self.segment.id})
+        response = self.client.patch(url, {'text': 'hello [laughter] there'}, format='json')
+        self.assertTrue(response.data['is_edited'])
+
+        self.segment.refresh_from_db()
+        self.assertEqual(self.segment.original_text, 'hello there')
+        self.assertEqual(self.segment.text, 'hello [laughter] there')
+
+
+class RevertSegmentTestCase(AuthenticatedAPITransactionTestCase):
+    """
+    Undoing a text edit -- the repair for a worker who corrected the wrong
+    word, or an edit that turns out to have been unnecessary.
+    """
+    def setUp(self):
+        self.project = Project.objects.create(name="Revert Segment Test Project")
+        self.job = TranscriptionJob.objects.create(
+            project=self.project, input_source='url', source_url='https://example.com/a.mp3', status='completed',
+        )
+        self.segment = TranscriptSegment.objects.create(
+            job=self.job, speaker_label='Speaker 0', start_time=0.0, end_time=2.0, text='hello there',
+        )
+
+    def test_reverts_to_the_true_original_across_two_edits(self):
+        """
+        THE CASE A NAIVE "UNDO LAST CHANGE" WOULD GET WRONG. A worker edits
+        a line, then edits it again -- a plain "restore the previous value"
+        would only recover the FIRST edit, not the ASR original. The
+        snapshot is taken once, on the first edit, specifically so a second
+        edit does not clobber it.
+        """
+        edit_url = reverse('edit-segment', kwargs={'job_id': self.job.id, 'segment_id': self.segment.id})
+        self.client.patch(edit_url, {'text': 'first edit'}, format='json')
+        self.client.patch(edit_url, {'text': 'second edit'}, format='json')
+
+        revert_url = reverse('revert-segment', kwargs={'job_id': self.job.id, 'segment_id': self.segment.id})
+        response = self.client.post(revert_url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['text'], 'hello there')
+        self.assertFalse(response.data['is_edited'])
+        self.segment.refresh_from_db()
+        self.assertEqual(self.segment.text, 'hello there')
+        self.assertIsNone(self.segment.original_text)
+
+    def test_refuses_to_revert_a_line_that_was_never_edited(self):
+        url = reverse('revert-segment', kwargs={'job_id': self.job.id, 'segment_id': self.segment.id})
+        response = self.client.post(url)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.segment.refresh_from_db()
+        self.assertEqual(self.segment.text, 'hello there')
+
+    def test_editing_again_after_a_revert_snapshots_fresh(self):
+        """A revert clears the backup, correctly -- the segment is back to
+        being unedited, so its NEXT edit must snapshot again rather than
+        silently having no backup at all."""
+        edit_url = reverse('edit-segment', kwargs={'job_id': self.job.id, 'segment_id': self.segment.id})
+        revert_url = reverse('revert-segment', kwargs={'job_id': self.job.id, 'segment_id': self.segment.id})
+        self.client.patch(edit_url, {'text': 'first edit'}, format='json')
+        self.client.post(revert_url)
+
+        self.client.patch(edit_url, {'text': 'second edit'}, format='json')
+        self.segment.refresh_from_db()
+        self.assertEqual(self.segment.original_text, 'hello there')
+
+    def test_404_for_a_segment_belonging_to_a_different_job(self):
+        other_job = TranscriptionJob.objects.create(
+            project=self.project, input_source='url', source_url='https://example.com/b.mp3',
+        )
+        self.segment.original_text = 'hello there'
+        self.segment.text = 'edited'
+        self.segment.save(update_fields=['text', 'original_text'])
+        url = reverse('revert-segment', kwargs={'job_id': other_job.id, 'segment_id': self.segment.id})
+        response = self.client.post(url)
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
 
 class AcademicSubjectDetectorTestCase(TestCase):
     """

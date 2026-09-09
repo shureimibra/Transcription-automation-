@@ -61,6 +61,7 @@ export default function TranslationWorkspace({ task, onTaskChange }) {
   const [retranslating, setRetranslating] = useState(null);
   const [retranslated, setRetranslated] = useState({});
   const [retranslateError, setRetranslateError] = useState({});
+  const [reverting, setReverting] = useState(null);   // segment id being reverted
 
   const rows = useMemo(() => {
     const source = data?.source || [];
@@ -73,6 +74,7 @@ export default function TranslationWorkspace({ task, onTaskChange }) {
       start: s.start_time,
       end: s.end_time,
       english: s.text,
+      isEdited: Boolean(s.is_edited),
       french: draft[i]?.text || '',
     }));
   }, [data]);
@@ -190,6 +192,30 @@ export default function TranslationWorkspace({ task, onTaskChange }) {
       setNotice(`Could not save that line: ${err.message}`);
     } finally {
       setEditing(null);
+    }
+  };
+
+  /**
+   * Undo every edit made to one English line, back to the ASR original.
+   *
+   * ONLY AVAILABLE ONCE SOMETHING IS ACTUALLY THERE TO REVERT TO --
+   * `row.isEdited` gates the button in the render below, and the server
+   * refuses the request anyway if a line was never edited, so this can
+   * never silently do nothing.
+   */
+  const revertEnglish = async (row) => {
+    setReverting(row.id);
+    try {
+      await segmentsApi.revert(task.job, row.id);
+      await refresh({ silent: true });
+      setNotice(
+        'Reverted to the original English. If the French was already '
+        + 'retranslated from the edit, retranslate this line again.'
+      );
+    } catch (err) {
+      setNotice(`Could not revert that line: ${err.message}`);
+    } finally {
+      setReverting(null);
     }
   };
 
@@ -517,24 +543,51 @@ export default function TranslationWorkspace({ task, onTaskChange }) {
                     </div>
                   </div>
                 ) : (
-                  <div className={`text-xs ${active ? 'text-accent-ink' : 'text-ink-dim'}`}>
-                    <p>{row.english}</p>
-                    {/* ALWAYS VISIBLE, NOT REVEALED ON HOVER. A hover-only
-                        link was invisible on a touch device and easy to
-                        miss even with a mouse -- a worker scanning a long
-                        transcript for a mishearing has no reason to hover
-                        every line on the chance a control is hiding there. */}
+                  <div className={`flex items-start justify-between gap-2 text-xs ${active ? 'text-accent-ink' : 'text-ink-dim'}`}>
+                    <p className="flex-1">
+                      {row.english}
+                      {row.isEdited && (
+                        <span
+                          title="This line has been edited from what the machine originally heard"
+                          className="ml-1.5 rounded-full bg-status-rejected/15 px-1.5 py-0.5
+                                     text-2xs font-medium uppercase tracking-wide text-status-rejected"
+                        >
+                          edited
+                        </span>
+                      )}
+                    </p>
+                    {/* ALWAYS VISIBLE AND AT THE FAR END, NOT REVEALED ON
+                        HOVER MID-SENTENCE. A hover-only link was invisible
+                        on a touch device and easy to miss even with a
+                        mouse -- a worker scanning a long transcript for a
+                        mishearing has no reason to hover every line on the
+                        chance a control is hiding there. Edit is styled as
+                        a warning deliberately: correcting the SOURCE is
+                        the rare, consequential action on this screen (see
+                        saveEnglish's own docstring on why it exists at
+                        all), and it should not read as casual as Cancel. */}
                     {row.id && (
-                      <Button
-                        size="sm" variant="ghost" className="mt-1"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setDraftText(row.english);
-                          setEditing(row.id);
-                        }}
-                      >
-                        Edit
-                      </Button>
+                      <div className="flex shrink-0 gap-1.5">
+                        {row.isEdited && (
+                          <Button
+                            size="sm" variant="secondary"
+                            loading={reverting === row.id}
+                            onClick={(e) => { e.stopPropagation(); revertEnglish(row); }}
+                          >
+                            Revert to original
+                          </Button>
+                        )}
+                        <Button
+                          size="sm" variant="danger"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDraftText(row.english);
+                            setEditing(row.id);
+                          }}
+                        >
+                          Edit
+                        </Button>
+                      </div>
                     )}
                   </div>
                 )}

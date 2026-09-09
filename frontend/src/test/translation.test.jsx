@@ -110,6 +110,60 @@ describe('the two documents', () => {
     ));
     expect(await screen.findByText(/French has NOT changed/)).toBeInTheDocument();
   });
+
+  it('does not offer Revert on a line that was never edited', async () => {
+    render(<TranslationWorkspace task={TASK} />);
+    await screen.findByText('Several times a second');
+
+    expect(screen.queryByRole('button', { name: 'Revert to original' })).not.toBeInTheDocument();
+    expect(screen.queryByText('edited')).not.toBeInTheDocument();
+  });
+});
+
+describe('reverting an edited line', () => {
+  const EDITED_DRAFT = {
+    ...DRAFT,
+    source: [
+      { ...DRAFT.source[0], is_edited: true },
+      DRAFT.source[1],
+    ],
+  };
+
+  it('marks an edited line and offers a way back', async () => {
+    vi.spyOn(translation, 'get').mockResolvedValue(EDITED_DRAFT);
+    render(<TranslationWorkspace task={TASK} />);
+    await screen.findByText('Several times a second');
+
+    expect(screen.getByText('edited')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Revert to original' })).toBeInTheDocument();
+  });
+
+  it('sends the revert request for that line and refreshes', async () => {
+    vi.spyOn(translation, 'get').mockResolvedValue(EDITED_DRAFT);
+    const revert = vi.spyOn(segmentsApi, 'revert').mockResolvedValue({});
+    render(<TranslationWorkspace task={TASK} />);
+    await screen.findByText('Several times a second');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Revert to original' }));
+
+    await waitFor(() => expect(revert).toHaveBeenCalledWith('job-1', 's1'));
+    // A silent refresh means a second call to the same loader.
+    await waitFor(() => expect(translation.get).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText(/Reverted to the original English/)).toBeInTheDocument();
+  });
+
+  it('surfaces a server refusal rather than pretending it worked', async () => {
+    vi.spyOn(translation, 'get').mockResolvedValue(EDITED_DRAFT);
+    vi.spyOn(segmentsApi, 'revert').mockRejectedValue(
+      new ApiError('This line has not been edited.', { status: 400 })
+    );
+    render(<TranslationWorkspace task={TASK} />);
+    await screen.findByText('Several times a second');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Revert to original' }));
+
+    expect(await screen.findByText(/Could not revert that line/)).toBeInTheDocument();
+  });
 });
 
 describe('following the audio', () => {

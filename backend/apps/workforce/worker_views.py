@@ -325,7 +325,8 @@ class TranslationDraftView(views.APIView):
         if task.job_id:
             source = [
                 {'id': str(seg.id), 'start_time': seg.start_time,
-                 'end_time': seg.end_time, 'text': seg.text}
+                 'end_time': seg.end_time, 'text': seg.text,
+                 'is_edited': seg.original_text is not None}
                 for seg in task.job.segments.all().order_by('start_time')
             ]
 
