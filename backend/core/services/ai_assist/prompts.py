@@ -90,6 +90,15 @@ Examples of the intended transformation: "x squared plus y squared equals z
 squared" becomes "x² + y² = z²"; "H two O" becomes "H₂O"; "ten to the power
 minus three" becomes "10⁻³".
 
+A SIMPLE, STANDALONE MENTION MAY STAY IN WORDS, THE SAME JUDGMENT THE
+TRANSLATE TASK USES. An accepted document did exactly this: it spelled out
+one casual, one-off "x squared" as prose, but used real notation -- "x³",
+"z²", "zⁿ", subscripted variables like "aₙ" -- for a general polynomial
+written out across several terms. Convert anything that is part of an
+actual expression, is structurally complex, or is repeated; a single
+passing mention in ordinary conversation does not have to become notation
+just because it technically could.
+
 Use PLAIN UNICODE characters only. Never emit LaTeX, never emit markdown,
 never wrap anything in dollar signs or backslashes -- this text is exported
 directly to TXT, DOCX, SRT, and VTT files with no rendering step, so any

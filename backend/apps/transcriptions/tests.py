@@ -4135,6 +4135,21 @@ class AIAssistPromptTestCase(TestCase):
         self.assertIn('Unicode superscripts, subscripts', task)
         self.assertIn('never LaTeX', task)
 
+    def test_academic_uses_the_same_simple_versus_complex_judgment_as_translate(self):
+        """
+        Consistency, on request: the ACADEMIC operation used to convert any
+        unambiguous notation with no exception, while TRANSLATE's rule 12
+        left a simple one-off mention spelled out. Both now cite the same
+        real accepted-document evidence and reach the same judgment, so a
+        transcription-only job and a translation task no longer disagree on
+        which phrases are worth converting.
+        """
+        from core.services.ai_assist import prompts
+        task = prompts.task_description('academic')
+        self.assertIn('SIMPLE, STANDALONE MENTION MAY STAY IN WORDS', task)
+        self.assertIn('x³', task)
+        self.assertIn('structurally complex', task)
+
     def test_custom_requires_an_instruction(self):
         from core.services.ai_assist import prompts
         payload = prompts.build_payload(self._segments('hello'))
@@ -4392,6 +4407,35 @@ class AIAssistProcessorTestCase(TestCase):
         self.assertEqual(usage.total_tokens, 0)
         # One retry, then it gave up.
         self.assertEqual(provider.call_count, 2)
+
+    def test_domain_context_reaches_the_prompt(self):
+        """
+        Regression test: build_prompt() has accepted domain_context since it
+        was written, and until this was wired up nothing ever called it with
+        one -- the quality gate's own domain detection was spent entirely on
+        tightening severity thresholds, never on the translation itself.
+        """
+        provider = FakeStructuredProvider(transform=str.upper)
+        processor = make_ai_processor(provider)
+
+        processor.process(
+            self._segments('hello'), 'translate', target_language='French',
+            domain_context='Domain: mathematics\nRegister: lecture',
+        )
+
+        self.assertIn('Domain: mathematics', provider.last_prompt)
+        self.assertIn('Context established by analysing this material',
+                      provider.last_prompt)
+
+    def test_no_domain_context_is_byte_identical_to_before_this_existed(self):
+        """The overwhelmingly common case -- no caller passes domain_context
+        at all -- must produce exactly the prompt it always did."""
+        provider = FakeStructuredProvider(transform=str.upper)
+        processor = make_ai_processor(provider)
+
+        processor.process(self._segments('hello'), 'correct')
+
+        self.assertNotIn('Context established', provider.last_prompt)
 
     def test_short_response_is_an_integrity_failure(self):
         from core.services.ai_assist import SegmentIntegrityError
@@ -6399,6 +6443,154 @@ class AIRevisionPipelineIntegrationTestCase(TestCase):
         sent = [call['payload'][0]['text'] for call in downstream_provider.calls]
         self.assertEqual(
             sent, ['SENTENCE NUMBER 0', 'SENTENCE NUMBER 1', 'SENTENCE NUMBER 2'],
+        )
+
+
+class _CombinedDraftAndQualityProvider:
+    """
+    One fake standing in for Gemini across the WHOLE gated pipeline: the
+    initial draft's segment-batch schema, analysis, audit, and repair.
+
+    Nothing in the existing suite needed this before -- every quality-engine
+    test exercises engine.run() directly, in isolation, against
+    FakeQualityProvider, which only knows the gate's three schemas. This
+    test is specifically about the WIRING run_ai_revision_pipeline does
+    between the draft and the gate, so it has to be one provider answering
+    both, the way the real one is in production.
+    """
+
+    model = 'fake-combined-model'
+
+    def __init__(self, transform=None):
+        from core.services.ai_assist import TokenUsage
+        self.transform = transform or (lambda text: text)
+        self.usage = TokenUsage(10, 5, 15)
+        self.calls = []
+
+    @staticmethod
+    def _kind(schema):
+        props = schema.get('properties', {})
+        if 'domain' in props:
+            return 'analysis'
+        if 'issues' in props:
+            return 'audit'
+        item_props = props.get('segments', {}).get('items', {}).get('properties', {})
+        if 'processed_text' in item_props:
+            return 'draft'
+        if 'repaired_text' in item_props:
+            return 'repair'
+        return 'unknown'
+
+    def generate_json(self, system_instruction, prompt, schema, max_output_tokens=None):
+        from core.services.ai_assist.sanitize import TRANSCRIPT_CLOSE, TRANSCRIPT_OPEN
+
+        kind = self._kind(schema)
+        self.calls.append({'kind': kind, 'prompt': prompt})
+
+        if kind == 'analysis':
+            return {
+                'domain': 'mathematics', 'subdomain': '', 'register': 'lecture',
+                'audience': '', 'target_region': '', 'risk_level': 'standard',
+                'is_transcript': True, 'terminology': [], 'entities': [],
+                'formatting_notes': '', 'confidence': 0.9, 'notes': '',
+            }, self.usage
+        if kind == 'audit':
+            return {'status': 'clean', 'confidence': 0.95, 'issues': []}, self.usage
+        if kind == 'draft':
+            start = prompt.index(TRANSCRIPT_OPEN) + len(TRANSCRIPT_OPEN)
+            end = prompt.index(TRANSCRIPT_CLOSE)
+            data = json.loads(prompt[start:end].strip())
+            return {
+                'segments': [
+                    {'segment_id': item['segment_id'],
+                     'processed_text': self.transform(item['text']), 'changed': True}
+                    for item in data
+                ]
+            }, self.usage
+        # repair -- not expected to be reached: a clean audit means no
+        # blocking issues, so the engine never asks for one.
+        return {'segments': []}, self.usage
+
+    def count(self, kind):
+        return len([c for c in self.calls if c['kind'] == kind])
+
+    def prompts_of(self, kind):
+        return [c['prompt'] for c in self.calls if c['kind'] == kind]
+
+
+class AIRevisionPipelineDomainAwareIntegrationTestCase(TestCase):
+    """
+    The wiring, end to end: run_ai_revision_pipeline analyses the document
+    ONCE, feeds that into BOTH the draft's own prompt and the quality gate
+    that audits it afterward -- not twice, and not only into one of them.
+    """
+
+    def setUp(self):
+        self.project = Project.objects.create(name="Domain Wiring Test Project")
+        self.job = TranscriptionJob.objects.create(
+            project=self.project, input_source='url',
+            source_url='https://example.com/a.mp3', status='completed',
+        )
+        self.segment = TranscriptSegment.objects.create(
+            job=self.job, speaker_label='Speaker 0',
+            start_time=0.0, end_time=2.0, text='x squared plus one',
+        )
+
+    def _run(self, provider, quality_profile):
+        from apps.transcriptions.tasks import run_ai_revision_pipeline
+        revision = AIRevision.objects.create(
+            job=self.job, operation='translate', target_language='fr',
+            label='AI Translated', quality_profile=quality_profile,
+        )
+        with patch(
+            'apps.transcriptions.tasks.AIPostProcessor',
+            lambda: make_ai_processor(provider),
+        ):
+            run_ai_revision_pipeline(revision.id)
+        revision.refresh_from_db()
+        return revision
+
+    def test_analysis_runs_once_and_feeds_both_the_draft_and_the_gate(self):
+        provider = _CombinedDraftAndQualityProvider(transform=str.upper)
+
+        revision = self._run(provider, quality_profile='volume')
+
+        self.assertEqual(revision.status, 'completed')
+        # ONE analysis call for the whole run, not one per consumer.
+        self.assertEqual(provider.count('analysis'), 1)
+        # The draft's own prompt carries what that one call found.
+        draft_prompts = provider.prompts_of('draft')
+        self.assertEqual(len(draft_prompts), 1)
+        self.assertIn('Context established by analysing this material', draft_prompts[0])
+        self.assertIn('mathematics', draft_prompts[0])
+        # The gate ran too -- reusing the same analysis, not skipping it.
+        self.assertEqual(revision.quality_status, 'validated')
+
+    def test_an_operation_whose_profile_skips_analysis_does_not_run_it(self):
+        """EAGLE_STANDARD's whole point is no semantic pass at all -- this
+        must not force one on just to fill domain_context."""
+        provider = _CombinedDraftAndQualityProvider(transform=str.upper)
+
+        revision = self._run(provider, quality_profile='eagle_standard')
+
+        self.assertEqual(provider.count('analysis'), 0)
+        self.assertNotIn(
+            'Context established',
+            provider.prompts_of('draft')[0],
+        )
+
+    def test_an_ungated_run_never_analyses_at_all(self):
+        """The common case, and the cheapest one: no quality_profile means
+        no analysis call and a domain-blind draft, exactly as before any of
+        this existed."""
+        provider = _CombinedDraftAndQualityProvider(transform=str.upper)
+
+        revision = self._run(provider, quality_profile='')
+
+        self.assertEqual(provider.count('analysis'), 0)
+        self.assertNotIn(
+            'Context established',
+            provider.prompts_of('draft')[0],
         )
 
 
@@ -8992,6 +9184,67 @@ class AISegmentCacheTestCase(TestCase):
         self.assertEqual(results2[0].processed_text, "FIRST SEGMENT")
         self.assertEqual(results2[1].processed_text, "SECOND SEGMENT")
 
+    def test_a_cached_result_from_before_domain_context_is_not_reused_for_a_domain_aware_call(self):
+        """
+        THE CORRECTNESS RISK domain_context introduces, and the reason
+        _resolve_prompt_version now hashes it in. Segment caching is keyed
+        by (operation, target_language, model, prompt_version, content).
+        Without this, a segment cached under the OLD domain-blind prompt
+        would be handed back forever to a domain-aware caller as though
+        domain-aware translation had actually run on it.
+        """
+        from core.services.ai_assist import AIPostProcessor, TokenUsage
+        from apps.transcriptions.models import AISegmentCache
+
+        class CountingFakeProvider:
+            def __init__(self):
+                self.model = 'gemini-3.6-flash'
+                self.call_count = 0
+
+            def generate_json(self, system_instruction, prompt, schema,
+                              max_output_tokens=None):
+                self.call_count += 1
+                data = json.loads(
+                    prompt.split('<<<TRANSCRIPT_DATA>>>\n')[1]
+                    .split('\n<<<END_TRANSCRIPT_DATA>>>')[0]
+                )
+                segments_out = [
+                    {'segment_id': item['segment_id'],
+                     'processed_text': item['text'].upper(), 'changed': True}
+                    for item in data
+                ]
+                return {'segments': segments_out}, TokenUsage(100, 50, 150)
+
+        provider = CountingFakeProvider()
+        processor = AIPostProcessor(provider=provider)
+        seg = TranscriptSegment.objects.create(
+            job=self.job, start_time=0.0, end_time=2.0,
+            text='x squared', speaker_label='Speaker 1',
+        )
+
+        # Cached with no domain context -- the pre-existing behaviour.
+        processor.process([seg], operation='translate', target_language='French')
+        self.assertEqual(provider.call_count, 1)
+        self.assertEqual(AISegmentCache.objects.count(), 1)
+
+        # Same segment, same operation, same target language -- but NOW
+        # domain-aware. Must be a fresh call, not a silent cache hit on the
+        # domain-blind entry above.
+        processor.process(
+            [seg], operation='translate', target_language='French',
+            domain_context='Domain: mathematics',
+        )
+        self.assertEqual(provider.call_count, 2)
+        self.assertEqual(AISegmentCache.objects.count(), 2)
+
+        # And it is itself cacheable: the SAME domain_context on a repeat
+        # call is a hit, not a third request.
+        processor.process(
+            [seg], operation='translate', target_language='French',
+            domain_context='Domain: mathematics',
+        )
+        self.assertEqual(provider.call_count, 2)
+
     def test_200_segments_with_single_edited_segment_reprocesses_only_the_edited_segment(self):
         from core.services.ai_assist import AIPostProcessor, TokenUsage
         from apps.transcriptions.models import AISegmentCache
@@ -9818,6 +10071,38 @@ class QualityEngineTestCase(TestCase):
         self.assertEqual(result.status, QualityStatus.VALIDATED)
         self.assertEqual(provider.count('repair'), 0)
         self.assertEqual(result.iterations, 0)
+
+    def test_no_precomputed_domain_profile_runs_analysis_as_before(self):
+        """Baseline: every existing caller, which never passes
+        domain_profile, must keep spending exactly one analysis call."""
+        provider = FakeQualityProvider()
+        make_quality_engine('translation', provider).run(
+            _pairs(('The agent acts.', 'Le mandataire agit.')),
+            target_language='French', target_language_code='fr',
+        )
+        self.assertEqual(provider.count('analysis'), 1)
+
+    def test_a_precomputed_domain_profile_skips_a_second_analysis_call(self):
+        """
+        THE POINT OF THREADING domain_profile THROUGH AT ALL. A caller that
+        already analysed this document -- to feed the initial draft's own
+        prompt, see run_ai_revision_pipeline -- must not have this gate pay
+        for the identical answer a second time.
+        """
+        from core.services.ai_assist.quality.profiles import DomainProfile
+        provider = FakeQualityProvider()
+        precomputed = DomainProfile(domain='mathematics', risk_level='high', confidence=0.92)
+
+        result = make_quality_engine('translation', provider).run(
+            _pairs(('The agent acts.', 'Le mandataire agit.')),
+            target_language='French', target_language_code='fr',
+            domain_profile=precomputed,
+        )
+
+        self.assertEqual(provider.count('analysis'), 0)
+        # The passed-in profile is what the gate actually used, not just
+        # accepted and ignored -- it shows up on the result it produced.
+        self.assertIs(result.domain_profile, precomputed)
 
     def test_a_blocking_issue_triggers_repair_then_revalidates(self):
         from core.services.ai_assist.quality import QualityStatus

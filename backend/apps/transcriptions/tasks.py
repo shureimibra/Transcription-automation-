@@ -46,6 +46,9 @@ try:
     )
     from backend.core.services.academic import SubjectDetector, AcademicFormatterRegistry, validate as academic_validate
     from backend.core.services.ai_assist import AIAssistError, AIPostProcessor, TokenUsage, int_config
+    from backend.core.services.ai_assist.quality import get_profile as get_quality_profile
+    from backend.core.services.ai_assist.quality.profiles import STAGE_ANALYSIS
+    from backend.core.services.ai_assist.quality.stages import analyze_source
 except ModuleNotFoundError:
     from core.services.ai_pipeline import AudioExtractor, JobCancelledError
     from core.services.languages import is_supported
@@ -60,6 +63,9 @@ except ModuleNotFoundError:
     )
     from core.services.academic import SubjectDetector, AcademicFormatterRegistry, validate as academic_validate
     from core.services.ai_assist import AIAssistError, AIPostProcessor, TokenUsage, int_config
+    from core.services.ai_assist.quality import get_profile as get_quality_profile
+    from core.services.ai_assist.quality.profiles import STAGE_ANALYSIS
+    from core.services.ai_assist.quality.stages import analyze_source
 
 logger = logging.getLogger(__name__)
 
@@ -934,6 +940,53 @@ def run_ai_revision_pipeline(revision_id):
         model_used = ''
         tokens_saved_total = 0
 
+        # ANALYSIS RUNS ONCE, BEFORE THE DRAFT, WHEN THE PROFILE WANTS IT --
+        # NOT ONLY INSIDE THE GATE THAT USED TO BE THE ONLY THING THAT SAW IT.
+        #
+        # STAGE_ANALYSIS used to run exclusively inside the quality gate,
+        # AFTER this draft already existed -- auditing text that was
+        # generated with no domain awareness at all. domain_context is a
+        # real parameter build_prompt() has supported since it was written,
+        # and nothing ever called it with one. Moving analysis here, before
+        # the draft, means the SAME call feeds both the initial prompt
+        # (domain_context below) and the gate (domain_profile= on
+        # _run_quality_gate) -- one request either way, not two.
+        #
+        # NOT FATAL. A failure here costs the draft its domain awareness,
+        # not the run: domain_profile stays None, the gate below runs its
+        # own analysis exactly as it always has.
+        domain_profile = None
+        domain_context = ''
+        quality_profile_obj = (
+            get_quality_profile(revision.quality_profile)
+            if revision.quality_profile else None
+        )
+        if quality_profile_obj is not None and quality_profile_obj.runs(STAGE_ANALYSIS):
+            try:
+                analysis_pairs = [{'source': seg.text or ''} for seg in segments]
+                domain_profile, analysis_usage = analyze_source(
+                    processor.provider, analysis_pairs,
+                    target_language=target_language_name,
+                    source_language=revision.source_language,
+                )
+                usage_total = usage_total + analysis_usage
+                if analysis_usage.total_tokens:
+                    ai_budget.record_usage(revision, analysis_usage, job=revision.job)
+                domain_context = domain_profile.describe()
+                broadcast_update(job_id, {
+                    'type': 'ai_revision_status_update',
+                    'revision_id': str(revision.id),
+                    'status': 'processing',
+                    'message': f'Detected domain: {domain_profile.domain}',
+                })
+            except Exception:
+                logger.exception(
+                    '[AI ASSIST] Pre-draft analysis failed for revision %s; '
+                    'continuing without domain context.', revision.id,
+                )
+                domain_profile = None
+                domain_context = ''
+
         with AI_CONCURRENCY_SEMAPHORE:
             for batch in processor.iter_batches(
                 segments,
@@ -942,6 +995,7 @@ def run_ai_revision_pipeline(revision_id):
                 custom_instruction=revision.custom_instruction,
                 should_cancel=revision_cancelled,
                 source_language=revision.source_language,
+                domain_context=domain_context,
             ):
                 cache_hits_total += batch.cache_hits
                 cache_misses_total += batch.cache_misses
@@ -1008,6 +1062,7 @@ def run_ai_revision_pipeline(revision_id):
         if revision.quality_profile and not revision_cancelled():
             quality_result = _run_quality_gate(
                 revision, processor, job_id, revision_cancelled,
+                domain_profile=domain_profile,
             )
             if quality_result is not None and quality_result.usage.total_tokens:
                 usage_total = usage_total + quality_result.usage
@@ -1113,7 +1168,7 @@ def _quality_language_code(revision):
     return revision.source_language or None
 
 
-def _run_quality_gate(revision, processor, job_id, should_cancel):
+def _run_quality_gate(revision, processor, job_id, should_cancel, domain_profile=None):
     """
     Runs the requested quality profile over this revision's segments and
     persists the outcome. Returns the QualityResult, or None when no engine
@@ -1130,6 +1185,12 @@ def _run_quality_gate(revision, processor, job_id, should_cancel):
     fresh. Two reasons: one authenticated client per run rather than two
     (spec 23), and it is what makes the whole gate testable with the
     FakeStructuredProvider the existing suite already injects.
+
+    `domain_profile`, when the caller already ran the pre-draft analysis
+    above, is forwarded to engine.run() so this gate reuses that result
+    instead of paying for STAGE_ANALYSIS a second time. None (the caller
+    skipped analysis, or it failed) means the engine runs its own, exactly
+    as before this parameter existed.
     """
     try:
         from core.services.ai_assist.quality import QualityStatus, build_engine
@@ -1184,6 +1245,7 @@ def _run_quality_gate(revision, processor, job_id, should_cancel):
             source_language=revision.source_language,
             should_cancel=should_cancel,
             on_stage=on_stage,
+            domain_profile=domain_profile,
         )
     except Exception as exc:
         logger.error(

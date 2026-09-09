@@ -243,6 +243,7 @@ class AIQualityEngine:
         source_language: Optional[str] = None,
         should_cancel: Optional[Callable[[], bool]] = None,
         on_stage: Optional[Callable[[str, Dict], None]] = None,
+        domain_profile: Optional[DomainProfile] = None,
     ) -> QualityResult:
         """
         `pairs` is [{'source': str, 'target': str}, ...] in transcript order.
@@ -257,6 +258,12 @@ class AIQualityEngine:
         `on_stage(stage, payload)` is the progress hook. Broadcast-shaped
         rather than returning a generator so the caller can forward it to
         the existing WebSocket bus without restructuring its loop.
+
+        `domain_profile`, when given, is used AS-IS instead of running
+        STAGE_ANALYSIS again. The caller that already spent a request
+        analysing this document -- to feed the initial draft's own prompt,
+        see run_ai_revision_pipeline -- passes its result back in here so
+        the gate doesn't pay for the same answer twice.
         """
         texts = [pair.get('target') or '' for pair in pairs]
 
@@ -294,8 +301,15 @@ class AIQualityEngine:
 
         try:
             # -------------------------------------------------- analysis
-            domain_profile = None
-            if self.profile.runs(STAGE_ANALYSIS):
+            #
+            # `domain_profile` is a parameter now, not always a local: a
+            # caller that already analysed this document (to feed the
+            # initial draft's own prompt) passed its result in, and that
+            # value must survive to here untouched -- this used to
+            # unconditionally reset it to None before the check below,
+            # which would have thrown away a passed-in profile and paid for
+            # analyze_source a second time regardless.
+            if domain_profile is None and self.profile.runs(STAGE_ANALYSIS):
                 notify(STAGE_ANALYSIS, {'message': 'Analysing source material...'})
                 started = time.monotonic()
                 domain_profile, stage_usage = stages.analyze_source(
@@ -305,6 +319,7 @@ class AIQualityEngine:
                 )
                 usage = usage + stage_usage
                 record(STAGE_ANALYSIS, started, stage_usage)
+            if domain_profile is not None:
                 if domain_profile.domain == 'unknown':
                     degraded.append(STAGE_ANALYSIS)
                 notify(STAGE_ANALYSIS, {

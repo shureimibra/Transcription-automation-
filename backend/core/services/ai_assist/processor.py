@@ -61,12 +61,31 @@ def _get_segment_cache_model():
             return None
 
 
-def _resolve_prompt_version(operation: str, custom_instruction: Optional[str] = None) -> str:
+def _resolve_prompt_version(
+    operation: str, custom_instruction: Optional[str] = None,
+    domain_context: Optional[str] = None,
+) -> str:
+    """
+    Cache partition key. Two calls only ever share a cached segment result
+    when they would have produced the same prompt.
+
+    domain_context IS PART OF THE PROMPT NOW, SO IT MUST BE PART OF THIS. A
+    segment cached before domain_context existed -- or under a different
+    document's detected domain -- must not be handed back forever as though
+    domain-aware translation had run, just because the segment's own text
+    happened to match. Hashed rather than embedded verbatim: this string
+    ends up in a cache row's indexed column, and domain_context can run to a
+    few hundred characters of prose.
+    """
     base_version = get_prompt_version(operation)
+    suffix = ''
     if operation == prompts.CUSTOM and custom_instruction:
         instr_hash = hashlib.sha256(custom_instruction.strip().encode('utf-8')).hexdigest()[:10]
-        return f"{base_version}:{instr_hash}"
-    return base_version
+        suffix += f":{instr_hash}"
+    if domain_context:
+        domain_hash = hashlib.sha256(domain_context.strip().encode('utf-8')).hexdigest()[:10]
+        suffix += f":d{domain_hash}"
+    return f"{base_version}{suffix}"
 
 
 def _estimate_saved_tokens(segments: List[Any]) -> int:
@@ -289,6 +308,7 @@ class AIPostProcessor:
         should_cancel: Optional[Callable[[], bool]] = None,
         source_language: Optional[str] = None,
         use_cache: bool = True,
+        domain_context: Optional[str] = None,
     ) -> Iterator[BatchResult]:
         if not segments:
             return
@@ -296,7 +316,7 @@ class AIPostProcessor:
         batches = self.build_batches(segments)
         cache_model = _get_segment_cache_model() if use_cache else None
         model_name = getattr(self.provider, 'model', None) or resolve_model_name()
-        prompt_version = _resolve_prompt_version(operation, custom_instruction)
+        prompt_version = _resolve_prompt_version(operation, custom_instruction, domain_context)
         target_lang = target_language or ''
         source_lang = source_language or ''
 
@@ -358,7 +378,7 @@ class AIPostProcessor:
                     self._sleep(self.inter_batch_delay, should_cancel)
                 miss_result = self._process_batch(
                     miss_batch, operation, target_language, custom_instruction,
-                    should_cancel=should_cancel,
+                    should_cancel=should_cancel, domain_context=domain_context,
                 )
             except _Cancelled:
                 logger.info(
@@ -425,6 +445,7 @@ class AIPostProcessor:
         custom_instruction: Optional[str] = None,
         source_language: Optional[str] = None,
         use_cache: bool = True,
+        domain_context: Optional[str] = None,
     ) -> Tuple[List[ProcessedSegment], TokenUsage, bool]:
         """Materializes every batch. Convenience for callers and tests that
         don't need incremental progress."""
@@ -437,6 +458,7 @@ class AIPostProcessor:
             custom_instruction=custom_instruction,
             source_language=source_language,
             use_cache=use_cache,
+            domain_context=domain_context,
         ):
             results.extend(batch_result.segments)
             usage = usage + batch_result.usage
@@ -476,6 +498,7 @@ class AIPostProcessor:
         target_language: Optional[str],
         custom_instruction: Optional[str],
         should_cancel: Optional[Callable[[], bool]] = None,
+        domain_context: Optional[str] = None,
     ) -> Tuple[List[ProcessedSegment], TokenUsage]:
         """`_call`, but a 429 is waited out instead of failing the revision.
 
@@ -497,7 +520,10 @@ class AIPostProcessor:
         attempt = 0
         while True:
             try:
-                return self._call(batch, operation, target_language, custom_instruction)
+                return self._call(
+                    batch, operation, target_language, custom_instruction,
+                    domain_context=domain_context,
+                )
             except AIRateLimitedError as exc:
                 attempt += 1
                 if attempt > self.rate_limit_max_retries:
@@ -531,6 +557,7 @@ class AIPostProcessor:
         operation: str,
         target_language: Optional[str],
         custom_instruction: Optional[str],
+        domain_context: Optional[str] = None,
     ) -> Tuple[List[ProcessedSegment], TokenUsage]:
         payload = prompts.build_payload(batch)
         prompt = prompts.build_prompt(
@@ -538,6 +565,7 @@ class AIPostProcessor:
             payload,
             target_language=target_language,
             custom_instruction=custom_instruction,
+            domain_context=domain_context,
         )
         # Sized from THIS batch rather than a fixed ceiling. A long batch that
         # truncates does not fail cleanly -- it surfaces as a schema error and
@@ -559,11 +587,12 @@ class AIPostProcessor:
         custom_instruction: Optional[str],
         should_cancel: Optional[Callable[[], bool]] = None,
         _split_depth: int = 0,
+        domain_context: Optional[str] = None,
     ) -> BatchResult:
         try:
             segments, usage = self._call_with_backoff(
                 batch, operation, target_language, custom_instruction,
-                should_cancel=should_cancel,
+                should_cancel=should_cancel, domain_context=domain_context,
             )
             return BatchResult(segments=segments, usage=usage, degraded=False)
 
@@ -586,6 +615,7 @@ class AIPostProcessor:
                         half, operation, target_language, custom_instruction,
                         should_cancel=should_cancel,
                         _split_depth=_split_depth + 1,
+                        domain_context=domain_context,
                     )
                     for half in (batch[:midpoint], batch[midpoint:])
                 ]
