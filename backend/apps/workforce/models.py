@@ -517,6 +517,31 @@ def _ensure_account_for_worker(sender, instance, created, **kwargs):
 
 
 # --------------------------------------------------------------------- #
+# Idle session timeout
+# --------------------------------------------------------------------- #
+
+class TokenActivity(models.Model):
+    """
+    Last-seen timestamp for one DRF auth token.
+
+    Kept as its own table rather than adding a field to
+    rest_framework.authtoken.Token: that model belongs to a third-party app,
+    and migrating it directly would fight DRF's own migrations on upgrade.
+    A OneToOne here gets the same effect -- one row per token -- without
+    touching a table this project does not own.
+
+    WHY THIS EXISTS AT ALL. DRF's Token has no expiry concept whatsoever:
+    once issued, it is valid forever until something explicitly deletes it.
+    Confirmed live: a worker stayed signed in for two straight weeks with
+    never a second login. See authentication.IdleTimeoutTokenAuthentication,
+    which reads and updates last_used_at on every request.
+    """
+    token = models.OneToOneField(
+        'authtoken.Token', on_delete=models.CASCADE, related_name='activity')
+    last_used_at = models.DateTimeField(auto_now=True)
+
+
+# --------------------------------------------------------------------- #
 # External-platform credentials
 # --------------------------------------------------------------------- #
 #

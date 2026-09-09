@@ -1,5 +1,6 @@
-from rest_framework.authentication import SessionAuthentication, TokenAuthentication
+from rest_framework.authentication import SessionAuthentication
 
+from apps.workforce.authentication import IdleTimeoutTokenAuthentication
 from .permissions import (
     IsAuthenticatedUser, JobAccessPermission, is_admin, may_access_job,
     may_access_revision, visible_jobs_for,
@@ -12,7 +13,13 @@ from .permissions import (
 # Token first, then Session: the same load-bearing order as the workforce API.
 # Session first would authenticate a browser by its cookie and then reject the
 # request for a missing CSRF token. See apps/workforce/views.py.
-API_AUTH = [TokenAuthentication, SessionAuthentication]
+#
+# IdleTimeoutTokenAuthentication, not plain TokenAuthentication -- see its
+# own docstring (apps/workforce/authentication.py): DRF's base Token has no
+# expiry at all, confirmed live as a worker staying signed in for two
+# straight weeks. Both APIs share one token, so both must share the same
+# idle check or a request through this one would quietly outlive it.
+API_AUTH = [IdleTimeoutTokenAuthentication, SessionAuthentication]
 
 from rest_framework import viewsets, status, views
 from rest_framework.response import Response

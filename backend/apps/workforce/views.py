@@ -19,14 +19,15 @@ from django.contrib.auth import authenticate, login, logout
 from django.db.models import Count, Q
 from rest_framework import status, views, viewsets
 from rest_framework.pagination import PageNumberPagination
-from rest_framework.authentication import SessionAuthentication, TokenAuthentication
+from rest_framework.authentication import SessionAuthentication
 from rest_framework.authtoken.models import Token
 from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
 from . import roles, services, states
-from .models import Account, Task, TaskEvent, WorkerProfile
+from .authentication import IdleTimeoutTokenAuthentication
+from .models import Account, Task, TaskEvent, TokenActivity, WorkerProfile
 from .permissions import (
     IsAdmin, IsAuthenticatedWorkerOrAdmin, TaskAccessPermission, account_of,
     account_role, is_admin, visible_tasks_for, worker_profile,
@@ -54,7 +55,7 @@ logger = logging.getLogger('workforce')
 #
 # Session stays in the list so a browser session alone still works (the
 # frontend does send X-CSRFToken when Django has set the cookie).
-AUTH_CLASSES = [TokenAuthentication, SessionAuthentication]
+AUTH_CLASSES = [IdleTimeoutTokenAuthentication, SessionAuthentication]
 
 
 class LoginView(views.APIView):
@@ -127,6 +128,13 @@ class LoginView(views.APIView):
 
         login(request, user)
         token, _ = Token.objects.get_or_create(user=user)
+        # A REUSED TOKEN'S CLOCK RESETS ON SIGN-IN TOO, not just on API use.
+        # get_or_create above hands back the SAME token if the previous one
+        # had not yet gone idle -- signing in is itself activity, so its
+        # TokenActivity is touched here rather than waiting for the first
+        # authenticated request after login to do it implicitly.
+        activity, _ = TokenActivity.objects.get_or_create(token=token)
+        activity.save()
         if profile:
             profile.touch()
 

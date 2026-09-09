@@ -517,6 +517,83 @@ class AuthenticationAPITestCase(APITestCase):
         client.post('/api/v1/workforce/auth/logout/')
         self.assertIn(client.get('/api/v1/workforce/me/').status_code, (401, 403))
 
+    def _logged_in_client(self):
+        login = self.client.post('/api/v1/workforce/auth/login/', {
+            'username': 'alice', 'password': 'an-adequately-long-passphrase',
+        }, format='json')
+        token = login.data['token']
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f'Token {token}')
+        return client, token
+
+    def test_a_fresh_token_is_not_idle_expired(self):
+        client, _ = self._logged_in_client()
+        self.assertEqual(client.get('/api/v1/workforce/me/').status_code, 200)
+
+    def test_an_idle_token_is_rejected_and_deleted(self):
+        """
+        THE BUG THIS CLOSES. DRF's base Token has no expiry at all --
+        confirmed live, a worker stayed signed in for two straight weeks.
+        Deleted, not merely refused: a refused-but-still-valid token would
+        keep coming back on every retry with the same stale timestamp.
+        """
+        from django.utils import timezone
+        from datetime import timedelta
+        from rest_framework.authtoken.models import Token
+        from apps.workforce.models import TokenActivity
+
+        client, key = self._logged_in_client()
+        token = Token.objects.get(key=key)
+        TokenActivity.objects.filter(token=token).update(
+            last_used_at=timezone.now() - timedelta(hours=9))
+
+        response = client.get('/api/v1/workforce/me/')
+        self.assertIn(response.status_code, (401, 403))
+        self.assertFalse(Token.objects.filter(key=key).exists())
+
+    def test_activity_inside_the_window_keeps_the_token_alive_and_slides_it_forward(self):
+        from django.utils import timezone
+        from datetime import timedelta
+        from rest_framework.authtoken.models import Token
+        from apps.workforce.models import TokenActivity
+
+        client, key = self._logged_in_client()
+        token = Token.objects.get(key=key)
+        backdated = timezone.now() - timedelta(hours=7)
+        TokenActivity.objects.filter(token=token).update(last_used_at=backdated)
+
+        response = client.get('/api/v1/workforce/me/')
+        self.assertEqual(response.status_code, 200)
+        # SLIDING, NOT FIXED. Activity just now must have moved the clock
+        # forward -- an idle window measured from the ORIGINAL login rather
+        # than from last use would still be an absolute timeout wearing an
+        # idle timeout's name.
+        activity = TokenActivity.objects.get(token=token)
+        self.assertGreater(activity.last_used_at, backdated)
+
+    def test_signing_in_again_resets_a_reused_tokens_idle_clock(self):
+        """get_or_create hands back the SAME token on a second login when
+        the first has not yet gone idle -- signing in is activity too, and
+        must reset the clock rather than leaving the stale timestamp from
+        before this login."""
+        from django.utils import timezone
+        from datetime import timedelta
+        from rest_framework.authtoken.models import Token
+        from apps.workforce.models import TokenActivity
+
+        client, key = self._logged_in_client()
+        token = Token.objects.get(key=key)
+        backdated = timezone.now() - timedelta(hours=7, minutes=55)
+        TokenActivity.objects.filter(token=token).update(last_used_at=backdated)
+
+        second_login = self.client.post('/api/v1/workforce/auth/login/', {
+            'username': 'alice', 'password': 'an-adequately-long-passphrase',
+        }, format='json')
+        self.assertEqual(second_login.data['token'], key)  # same token, reused
+
+        activity = TokenActivity.objects.get(token=token)
+        self.assertGreater(activity.last_used_at, backdated)
+
     def test_weak_passwords_are_refused_when_creating_a_worker(self):
         """
         AUTH_PASSWORD_VALIDATORS was an empty list before Phase 2, which
