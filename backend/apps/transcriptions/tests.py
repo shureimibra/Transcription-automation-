@@ -2991,6 +2991,43 @@ class ParagraphGroupingTestCase(TestCase):
         group_segments_into_paragraphs(segments, diarization_enabled=True)
         mock_diarize.assert_not_called()
 
+    def test_eagle_grouping_does_not_crash_on_a_blank_speaker_label(self):
+        """
+        Regression test for a real production incident: a diarization
+        outage (pyannote's embedding model failing to load -- a real
+        [Errno 13] Permission denied on '.pyannote/database.yml') left
+        every segment's speaker_label blank. group_segments_into_eagle_
+        paragraphs' speaker lookup falls through to `_get(seg, 'speaker')`
+        when speaker_label is falsy -- and on a SimpleNamespace row (what
+        close_timestamp_gaps/apply_speaker_aliases actually yield, not a
+        dict), that attribute does not exist at all. _get() had no default,
+        so this raised AttributeError -- 500, on GET /preview/, for every
+        transcription task diarization had failed on, every single time it
+        was requested.
+        """
+        from types import SimpleNamespace
+        from core.services.transcript_formatting import group_segments_into_eagle_paragraphs
+
+        segments = [
+            SimpleNamespace(speaker_label='', start_time=0.0, end_time=2.0, text='hello'),
+            SimpleNamespace(speaker_label='', start_time=2.0, end_time=4.0, text='there'),
+        ]
+        paragraphs = group_segments_into_eagle_paragraphs(segments)  # must not raise
+        self.assertEqual(len(paragraphs), 1)
+        self.assertEqual(paragraphs[0].text, 'hello there')
+
+    def test_eagle_grouping_still_uses_a_real_speaker_label_when_present(self):
+        """The fix must not have quietly broken the normal, labelled case."""
+        from types import SimpleNamespace
+        from core.services.transcript_formatting import group_segments_into_eagle_paragraphs
+
+        segments = [
+            SimpleNamespace(speaker_label='Speaker A', start_time=0.0, end_time=2.0, text='hi'),
+            SimpleNamespace(speaker_label='Speaker B', start_time=2.0, end_time=4.0, text='hey'),
+        ]
+        paragraphs = group_segments_into_eagle_paragraphs(segments)
+        self.assertEqual([p.speaker_label for p in paragraphs], ['Speaker A', 'Speaker B'])
+
 
 class VttSrtIgnoreParagraphGroupingTestCase(AuthenticatedAPITransactionTestCase):
     """

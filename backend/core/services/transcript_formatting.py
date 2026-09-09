@@ -52,8 +52,21 @@ def _ends_sentence(text: str) -> bool:
     return text.rstrip().endswith(_SENTENCE_END_SUFFIXES)
 
 
-def _get(seg, key):
-    return seg.get(key) if isinstance(seg, dict) else getattr(seg, key)
+def _get(seg, key, default=None):
+    """
+    A missing key/attribute is a MISSING VALUE, not a crash.
+
+    Every call site already treats the result as possibly-absent -- `or ''`,
+    `or 0.0`, `or _get(seg, 'speaker')` -- which only works if a genuinely
+    missing value comes back as something falsy rather than raising.
+    `getattr(seg, key)` with no default broke that contract for the one
+    non-dict case: a real transcription with every speaker_label blank (a
+    diarization outage, not hypothetical -- confirmed live) reached the
+    'speaker' fallback on line ~278, and a SimpleNamespace row has no such
+    attribute at all. AttributeError, 500, submission blocked -- for every
+    transcription task diarization failed on, not just an edge case.
+    """
+    return seg.get(key, default) if isinstance(seg, dict) else getattr(seg, key, default)
 
 
 def group_segments_into_paragraphs(segments: Iterable, diarization_enabled: bool) -> List[Paragraph]:
