@@ -69,6 +69,17 @@ def _resolve_prompt_version(
     Cache partition key. Two calls only ever share a cached segment result
     when they would have produced the same prompt.
 
+    custom_instruction USED TO ONLY COUNT FOR THE 'custom' OPERATION,
+    BECAUSE THAT USED TO BE THE ONLY OPERATION build_prompt() EVER PUT IT
+    IN. Once build_prompt() started carrying a non-CUSTOM operation's
+    custom_instruction too (warmpool._warm_translation's disfluency
+    instruction on 'translate'), this stayed gated on operation == CUSTOM
+    -- so a segment cached from BEFORE that fix, translated with no
+    disfluency guidance at all, kept satisfying lookups from AFTER it,
+    silently serving the old, worse result forever. Same failure shape as
+    domain_context below; same fix: count it whenever it is present,
+    regardless of operation.
+
     domain_context IS PART OF THE PROMPT NOW, SO IT MUST BE PART OF THIS. A
     segment cached before domain_context existed -- or under a different
     document's detected domain -- must not be handed back forever as though
@@ -79,7 +90,7 @@ def _resolve_prompt_version(
     """
     base_version = get_prompt_version(operation)
     suffix = ''
-    if operation == prompts.CUSTOM and custom_instruction:
+    if custom_instruction:
         instr_hash = hashlib.sha256(custom_instruction.strip().encode('utf-8')).hexdigest()[:10]
         suffix += f":{instr_hash}"
     if domain_context:

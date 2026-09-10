@@ -9282,6 +9282,67 @@ class AISegmentCacheTestCase(TestCase):
         )
         self.assertEqual(provider.call_count, 2)
 
+    def test_a_cached_result_from_before_the_custom_instruction_fix_is_not_reused(self):
+        """
+        Same failure shape as domain_context above, for the same reason:
+        custom_instruction now reaches the prompt for ANY operation (see
+        build_prompt's own fix), but _resolve_prompt_version used to only
+        count it for 'custom'. A 'translate' segment cached under the old,
+        instruction-blind prompt must not be handed back forever once the
+        caller starts asking for the instruction-carrying one.
+        """
+        from core.services.ai_assist import AIPostProcessor, TokenUsage
+        from apps.transcriptions.models import AISegmentCache
+
+        class CountingFakeProvider:
+            def __init__(self):
+                self.model = 'gemini-3.6-flash'
+                self.call_count = 0
+
+            def generate_json(self, system_instruction, prompt, schema,
+                              max_output_tokens=None):
+                self.call_count += 1
+                data = json.loads(
+                    prompt.split('<<<TRANSCRIPT_DATA>>>\n')[1]
+                    .split('\n<<<END_TRANSCRIPT_DATA>>>')[0]
+                )
+                segments_out = [
+                    {'segment_id': item['segment_id'],
+                     'processed_text': item['text'].upper(), 'changed': True}
+                    for item in data
+                ]
+                return {'segments': segments_out}, TokenUsage(100, 50, 150)
+
+        provider = CountingFakeProvider()
+        processor = AIPostProcessor(provider=provider)
+        seg = TranscriptSegment.objects.create(
+            job=self.job, start_time=0.0, end_time=2.0,
+            text='raw asr text', speaker_label='Speaker 1',
+        )
+        instruction = 'The source is a raw speech-recognition transcript.'
+
+        # Cached with no custom_instruction -- the pre-fix behaviour.
+        processor.process([seg], operation='translate', target_language='French')
+        self.assertEqual(provider.call_count, 1)
+        self.assertEqual(AISegmentCache.objects.count(), 1)
+
+        # Same segment, same operation/language -- but NOW carrying the
+        # instruction. Must be a fresh call, not a hit on the old entry.
+        processor.process(
+            [seg], operation='translate', target_language='French',
+            custom_instruction=instruction,
+        )
+        self.assertEqual(provider.call_count, 2)
+        self.assertEqual(AISegmentCache.objects.count(), 2)
+
+        # And that result is itself cacheable on a repeat with the SAME
+        # instruction.
+        processor.process(
+            [seg], operation='translate', target_language='French',
+            custom_instruction=instruction,
+        )
+        self.assertEqual(provider.call_count, 2)
+
     def test_200_segments_with_single_edited_segment_reprocesses_only_the_edited_segment(self):
         from core.services.ai_assist import AIPostProcessor, TokenUsage
         from apps.transcriptions.models import AISegmentCache
