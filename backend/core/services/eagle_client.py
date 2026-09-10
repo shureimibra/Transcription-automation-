@@ -787,6 +787,36 @@ class TranslationClient:
 # Transcription -- Laravel + DataTables
 # ===================================================================== #
 
+def _balance_minutes(text: str) -> Optional[int]:
+    """
+    Fold Eagle Transcribe's balance to whole minutes.
+
+    Transcription shows the balance as a clock -- "12:34:56" (h:m:s) or
+    "12:34" (m:s) -- where the translation API just returns a minute count.
+    Parsing it here means the same EagleCredential.minutes_balance field and
+    the same affordability check cover both products.
+
+    FLOOR, not round: "5:30" is five and a half usable minutes, and calling
+    it six produces a claim check that passes for a task the platform then
+    declines for being thirty seconds short. Anything without a colon is
+    treated as unknown (None) rather than guessed at -- unknown lets the
+    platform itself decide at claim time, which is the safe direction.
+    """
+    text = (text or '').strip()
+    if ':' not in text:
+        return None
+    try:
+        parts = [int(p) for p in text.split(':')]
+    except ValueError:
+        return None
+    if any(p < 0 for p in parts):
+        return None
+    seconds = 0
+    for part in parts:
+        seconds = seconds * 60 + part
+    return seconds // 60
+
+
 class TranscriptionClient:
     product = 'transcription'
 
@@ -849,7 +879,14 @@ class TranscriptionClient:
                 f'Transcription session redirected to {final_url}.', status)
         html = raw.decode('utf-8', 'replace')
         match = re.search(r'Your Balance:\s*([0-9:]+)', html)
-        return EagleAccount(label='Eagle Transcribe', raw={'balance': match.group(1) if match else ''})
+        raw_balance = match.group(1) if match else ''
+        # The clock string is the precise value; minutes_balance is the folded
+        # one the affordability check and the admin card both read.
+        return EagleAccount(
+            label='Eagle Transcribe',
+            minutes_balance=_balance_minutes(raw_balance),
+            raw={'balance': raw_balance},
+        )
 
     def login(self, email: str, password: str) -> None:
         """

@@ -305,6 +305,45 @@ class SessionExpiryDetectionTestCase(NoNetworkMixin, TestCase):
         self.assertEqual(credential.minutes_balance, 15)
         self.assertEqual(result['minutes_balance'], 15)
 
+    def test_transcription_folds_its_clock_balance_to_whole_minutes(self):
+        """
+        Transcription shows the balance as a clock, not the minute count the
+        translation API returns. whoami must parse it so the same
+        credential field and affordability check cover both products.
+        """
+        client = TranscriptionClient(COOKIE)
+        page = b'<html><body><span>Your Balance: 2:05:30</span></body></html>'
+        with mock.patch('core.services.eagle_client._request',
+                        return_value=(200, 'https://transcribe.eaglewebcommerce.com/user/stt/tasks',
+                                      {}, page)):
+            account = client.whoami()
+
+        self.assertEqual(account.minutes_balance, 125)   # 2h05m30s, floored
+        self.assertEqual(account.raw['balance'], '2:05:30')  # exact value kept
+
+    def test_transcription_balance_parsing_is_conservative(self):
+        from core.services.eagle_client import _balance_minutes
+
+        self.assertEqual(_balance_minutes('12:34'), 12)     # m:s -> floor
+        self.assertEqual(_balance_minutes('0:45'), 0)       # under a minute
+        self.assertIsNone(_balance_minutes(''))             # absent
+        self.assertIsNone(_balance_minutes('47'))           # no colon: unknown, not guessed
+        self.assertIsNone(_balance_minutes('n/a'))
+
+    def test_transcription_balance_reaches_the_credential(self):
+        credential = store(TRANSCRIPTION)
+        service = EagleService()
+
+        from core.services.eagle_client import EagleAccount
+        with mock.patch.object(TranscriptionClient, 'whoami',
+                               return_value=EagleAccount(label='Eagle Transcribe',
+                                                         minutes_balance=125)):
+            result = service.check_session(TRANSCRIPTION)
+
+        credential.refresh_from_db()
+        self.assertEqual(credential.minutes_balance, 125)
+        self.assertEqual(result['minutes_balance'], 125)
+
 
 # ===================================================================== #
 # Media, and the credential boundary
