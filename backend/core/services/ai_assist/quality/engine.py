@@ -29,7 +29,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from ..errors import AIAssistError
 from ..providers import TokenUsage, build_provider, int_config
-from . import deterministic, prompts, stages, terminology
+from . import deterministic, prompts, stages, terminology, transcription
 from .issues import (
     IssueCategory, QualityIssue, QualityStatus, Severity, sort_issues, summarize,
 )
@@ -245,6 +245,7 @@ class AIQualityEngine:
         on_stage: Optional[Callable[[str, Dict], None]] = None,
         domain_profile: Optional[DomainProfile] = None,
         is_translation: Optional[bool] = None,
+        transcript_standard: Optional[str] = None,
     ) -> QualityResult:
         """
         `pairs` is [{'source': str, 'target': str}, ...] in transcript order.
@@ -273,6 +274,15 @@ class AIQualityEngine:
         English segment as "untranslated source" -- 92 HIGH findings on a
         90-segment transcript, every warm standard pass discarded. The
         operation knows the truth; pass it.
+
+        `transcript_standard` ('edited_verbatim' / 'strict_verbatim'), for a
+        NON-translation pass, adds the transcript-rubric checks -- fillers,
+        contractions, slang, number and quote style, keyed to that
+        standard's polarity. Without it the deterministic stage ran only the
+        translation checks against a transcript pass, so a pass that failed
+        to expand contractions sailed through the gate and the rubric was
+        not enforced until submission preflight, long after a tasker had
+        claimed the task.
         """
         texts = [pair.get('target') or '' for pair in pairs]
 
@@ -375,7 +385,7 @@ class AIQualityEngine:
                     started = time.monotonic()
                     det_issues = self._deterministic_pass(
                         pairs, texts, target_language_code, domain_profile,
-                        is_translation,
+                        is_translation, transcript_standard,
                     )
                     record(STAGE_DETERMINISTIC, started, TokenUsage())
                     notify(STAGE_DETERMINISTIC, {
@@ -532,6 +542,7 @@ class AIQualityEngine:
         target_language_code: Optional[str],
         domain_profile: Optional[DomainProfile],
         is_translation: bool,
+        transcript_standard: Optional[str] = None,
     ) -> List[QualityIssue]:
         """
         Per-segment checks plus whole-document anchor checks.
@@ -554,6 +565,16 @@ class AIQualityEngine:
                 is_translation=is_translation,
                 submission_ready=self.profile.submission_ready,
             )
+
+        # The transcript rubric, for a same-language verbatim pass. Runs once
+        # over the joined text: fillers, contractions and slang are a
+        # property of the whole document, and a single count keyed to the
+        # standard's polarity is what tells a reviewer the pass was applied
+        # at all. The label/timestamp checks are NOT here -- see
+        # run_transcript_content_checks; the engine has no rendered document.
+        if not is_translation and transcript_standard:
+            issues += transcription.run_transcript_content_checks(
+                '\n'.join(texts), transcript_standard)
 
         if domain_profile is not None:
             issues += terminology.run_anchor_checks(

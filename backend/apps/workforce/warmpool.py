@@ -732,6 +732,9 @@ def apply_transcription_standard(task: Task, job) -> bool:
         custom_instruction=standard_instruction(standard),
         source_language=task.source_language or '',
         quality_profile=(profile if profile != 'none' else ''),
+        # So the gate checks THIS pass against the transcript rubric's
+        # polarity, not the translation checks.
+        transcript_standard=standard.name,
     )
     run_ai_revision_pipeline(revision.id)
     revision.refresh_from_db()

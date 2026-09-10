@@ -935,6 +935,32 @@ def run_transcript_checks(
     return issues
 
 
+def run_transcript_content_checks(
+    text: str, standard_name: Optional[str] = None,
+) -> List[QualityIssue]:
+    """
+    The transcript-rubric checks that hold on raw segment text -- no speaker
+    labels, no timestamps, no bracket tags rendered yet.
+
+    `run_transcript_checks` is for the fully rendered submission document
+    (eagle_submit.py). The quality ENGINE only ever has the joined segment
+    text of an in-progress pass, so the label/timestamp/paragraph structure
+    checks would find nothing there and are left out -- the standard pass
+    edits wording, it does not touch labels or timing, so there is nothing
+    of theirs for it to break. What it CAN get wrong is the polarity rubric
+    (fillers, contractions, slang) and number/quote style, and those are
+    exactly what runs here.
+    """
+    issues = list(check_number_rules(text))
+    issues += check_quote_style(text)
+    standard = get_standard(standard_name)
+    if standard is not None:
+        issues += check_standard_policy(text, standard)
+        if standard.correct_grammar:
+            issues += check_capitalization(text)
+    return issues
+
+
 def describe_standards() -> List[Dict]:
     """What the capabilities endpoint advertises, so the UI renders the
     server's list rather than a copy that can drift."""

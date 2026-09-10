@@ -10212,6 +10212,50 @@ class QualityEngineTestCase(TestCase):
         self.assertIn(
             'leakage.untranslated-source', {i.rule for i in result.issues})
 
+    def test_a_transcript_pass_is_checked_against_its_verbatim_rubric(self):
+        """
+        The gate used to run only the translation checks against a
+        transcript pass, so a pass that never expanded a contraction was
+        never caught here -- the rubric was enforced only at submission,
+        after a tasker had claimed the task.
+        """
+        uncleaned = "I'm sure it's fine and we're not going to worry. " * 20
+        result = make_quality_engine('eagle_standard', FakeQualityProvider()).run(
+            _pairs((uncleaned, uncleaned)),
+            target_language_code='en',
+            is_translation=False,
+            transcript_standard='edited_verbatim',
+        )
+        self.assertIn(
+            'transcript.contractions-not-expanded',
+            {i.rule for i in result.issues},
+        )
+
+    def test_a_clean_edited_verbatim_pass_raises_no_rubric_finding(self):
+        cleaned = 'I am sure it is fine and we are not going to worry. ' * 20
+        result = make_quality_engine('eagle_standard', FakeQualityProvider()).run(
+            _pairs((cleaned, cleaned)),
+            target_language_code='en',
+            is_translation=False,
+            transcript_standard='edited_verbatim',
+        )
+        rules = {i.rule for i in result.issues}
+        self.assertNotIn('transcript.contractions-not-expanded', rules)
+        self.assertNotIn('transcript.fillers-not-removed', rules)
+
+    def test_a_translation_pass_gets_no_transcript_rubric_checks(self):
+        """No transcript_standard is passed for a translate op, so the
+        transcript checks stay off -- French contractions ("j'ai", "c'est")
+        are not an English verbatim-rubric violation."""
+        french = "J'ai vu que c'est l'usage du mandataire. " * 20
+        result = make_quality_engine('translation', FakeQualityProvider()).run(
+            _pairs(('I saw it is the agent usage. ' * 20, french)),
+            target_language='French', target_language_code='fr',
+            is_translation=True,
+        )
+        self.assertFalse(
+            any(i.rule.startswith('transcript.') for i in result.issues))
+
     def test_a_precomputed_domain_profile_skips_a_second_analysis_call(self):
         """
         THE POINT OF THREADING domain_profile THROUGH AT ALL. A caller that

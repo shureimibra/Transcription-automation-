@@ -1251,6 +1251,11 @@ def _run_quality_gate(revision, processor, job_id, should_cancel, domain_profile
             # and its source text surviving into the output is the point --
             # not "untranslated source" leakage.
             is_translation=(revision.operation == 'translate'),
+            # Set only for the warm standard pass. Turns on the transcript
+            # rubric checks (filler/contraction/slang polarity, number and
+            # quote style) so the gate verifies the standard was applied,
+            # not just that the translation checks pass.
+            transcript_standard=revision.transcript_standard or None,
         )
     except Exception as exc:
         logger.error(

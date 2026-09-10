@@ -108,6 +108,7 @@ from .transcription import (
     standard_for_project,
     PROJECT_STANDARDS,
     run_transcript_checks,
+    run_transcript_content_checks,
 )
 from .typography import (
     TypographyRegistry,
@@ -138,7 +139,8 @@ __all__ = [
     # typography
     'check_typography', 'normalize_typography', 'TypographyRegistry',
     # transcription standards (Eagle Web's two verbatim rubrics)
-    'run_transcript_checks', 'get_standard', 'describe_standards',
+    'run_transcript_checks', 'run_transcript_content_checks',
+    'get_standard', 'describe_standards',
     'standard_for_project', 'PROJECT_STANDARDS',
     'TranscriptionStandard', 'EDITED_VERBATIM', 'STRICT_VERBATIM',
     'check_speaker_labels', 'check_timestamps', 'check_number_rules',

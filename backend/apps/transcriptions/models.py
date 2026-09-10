@@ -539,6 +539,15 @@ class AIRevision(models.Model):
     # time for the same reason model_name is: the configured default can
     # change, and a revision must keep reporting the gate it actually passed.
     quality_profile = models.CharField(max_length=30, blank=True, default='')
+    # Eagle transcription standard this revision was produced under
+    # ('edited_verbatim' / 'strict_verbatim'), set only for the warm
+    # standard pass. The gate reads it to check the transcript-rubric
+    # polarity -- fillers kept or removed, contractions kept or expanded --
+    # rather than the translation checks, which are the wrong rulebook for
+    # a same-language pass. Stored, not re-derived: the project->standard
+    # mapping can change and this revision must keep reporting the standard
+    # it was actually graded against.
+    transcript_standard = models.CharField(max_length=30, blank=True, default='')
     quality_status = models.CharField(
         max_length=30, choices=QUALITY_STATUS_CHOICES, default='not_run',
     )
