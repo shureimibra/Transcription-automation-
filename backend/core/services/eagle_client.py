@@ -826,10 +826,22 @@ class TranscriptionClient:
         """
         No identity API here, so this reads the panel.
 
-        THE LOGGED-OUT SHAPE IS A REDIRECT to the marketing site, not a 401 --
-        so this checks where it landed, not the status code.
+        THE LOGGED-OUT SHAPE IS USUALLY A REDIRECT to the marketing site, not
+        a 401 -- so the primary check is where it landed, not the status
+        code. BUT A FLAT 403 IS ALSO A STALE-SESSION SHAPE, confirmed live on
+        2026-09-10: the transcription session sat dead for 10+ hours with
+        this endpoint returning 403 (never the redirect), which routed every
+        failure into EagleHTTPError -- a category _guard() never retries --
+        instead of EagleSessionExpired, the one that triggers automatic
+        re-login. A real re-login was then confirmed to fix it immediately.
+        Scoped to exactly 403, not every >=400: that is the shape that was
+        actually observed and verified, not a guess extended to cover
+        others there is no evidence for.
         """
         status, final_url, _, raw = self._req(f'{self.host}/user/stt/tasks')
+        if status == 403:
+            raise EagleSessionExpired(
+                f'Transcription panel returned 403 (stale session).', status)
         if status >= 400:
             raise EagleHTTPError(f'transcription panel returned {status}', status)
         if 'transcribe.eaglewebcommerce.com' not in final_url:

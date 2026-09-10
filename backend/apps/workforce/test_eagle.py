@@ -239,6 +239,36 @@ class SessionExpiryDetectionTestCase(NoNetworkMixin, TestCase):
             with self.assertRaises(EagleSessionExpired):
                 client.whoami()
 
+    def test_transcription_403_is_also_treated_as_a_lapsed_session(self):
+        """
+        Observed live, 2026-09-10: a stale transcription session returned a
+        flat 403 on this exact endpoint -- never the redirect above -- for
+        10+ hours, because EagleHTTPError (this method's old behaviour for
+        any >=400) is not one of the categories _guard() retries via
+        automatic re-login. A real re-login was then confirmed to fix it
+        immediately, which is what justifies routing 403 specifically
+        through EagleSessionExpired rather than the generic error.
+        """
+        client = TranscriptionClient(COOKIE)
+        with mock.patch('core.services.eagle_client._request',
+                        return_value=(403, 'https://transcribe.eaglewebcommerce.com/user/stt/tasks',
+                                      {}, b'')):
+            with self.assertRaises(EagleSessionExpired):
+                client.whoami()
+
+    def test_transcription_a_different_4xx_stays_a_plain_http_error(self):
+        # Scoped deliberately to 403 alone -- nothing here has evidence that
+        # any other status shares the stale-session meaning, so anything
+        # else should keep failing loudly as a generic error rather than
+        # being silently folded into the retry path too.
+        client = TranscriptionClient(COOKIE)
+        with mock.patch('core.services.eagle_client._request',
+                        return_value=(404, 'https://transcribe.eaglewebcommerce.com/user/stt/tasks',
+                                      {}, b'')):
+            with self.assertRaises(EagleHTTPError) as ctx:
+                client.whoami()
+        self.assertNotIsInstance(ctx.exception, EagleSessionExpired)
+
     def test_transcription_task_list_returning_html_is_treated_as_expired(self):
         # Cloudflare challenges and login pages both arrive as HTML with a
         # 200. Parsing failure here means the session, not a bug.
