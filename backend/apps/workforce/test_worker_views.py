@@ -303,6 +303,9 @@ class QueueStatusTestCase(WorkerEndpointBase):
         self.assertEqual(response.data['ready_now'], 1)
         self.assertNotIn('minutes_balance', body)
         self.assertNotIn('platform', response.data)
+        # The economics stay off the tasker's screen entirely, including
+        # the derived "out of minutes" flag.
+        self.assertNotIn('minutes_exhausted', response.data)
 
     def test_an_administrator_sees_the_balance_and_session_health(self):
         credential = EagleCredential(product=TRANSLATION)
@@ -315,6 +318,47 @@ class QueueStatusTestCase(WorkerEndpointBase):
 
         self.assertIn('platform', response.data)
         self.assertEqual(response.data['platform'][0]['minutes_balance'], 15)
+        # A healthy balance: not exhausted.
+        self.assertFalse(response.data['minutes_exhausted'])
+
+    def test_an_admin_is_told_when_ready_work_cannot_be_claimed_for_no_minutes(self):
+        self.warm_task()  # there IS ready work
+        credential = EagleCredential(product=TRANSLATION)
+        credential.set_cookie('a=b')
+        credential.minutes_balance = 0
+        credential.save()
+        self.client.force_authenticate(self.admin_user)
+
+        response = self.client.get('/api/v1/workforce/work/status/')
+
+        self.assertTrue(response.data['minutes_exhausted'])
+
+    def test_zero_minutes_is_not_flagged_when_there_is_no_ready_work_to_block(self):
+        credential = EagleCredential(product=TRANSLATION)
+        credential.set_cookie('a=b')
+        credential.minutes_balance = 0
+        credential.save()
+        self.client.force_authenticate(self.admin_user)
+
+        response = self.client.get('/api/v1/workforce/work/status/')
+
+        self.assertEqual(response.data['ready_now'], 0)
+        self.assertFalse(response.data['minutes_exhausted'])
+
+    def test_an_expired_session_at_zero_is_a_session_problem_not_a_minutes_one(self):
+        self.warm_task()
+        credential = EagleCredential(product=TRANSLATION)
+        credential.set_cookie('a=b')
+        credential.minutes_balance = 0
+        credential.status = EagleCredential.EXPIRED
+        credential.save()
+        self.client.force_authenticate(self.admin_user)
+
+        response = self.client.get('/api/v1/workforce/work/status/')
+
+        # The dead-session banner covers this; don't double-count it as a
+        # minutes failure when the balance may just be unreadable.
+        self.assertFalse(response.data['minutes_exhausted'])
 
 
 class BrowsableQueueOrderTestCase(WorkerEndpointBase):

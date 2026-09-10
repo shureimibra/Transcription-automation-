@@ -298,20 +298,27 @@ function ThemeToggle() {
 }
 
 /**
- * A dead platform session, said out loud.
+ * Platform trouble the operator needs to see, said out loud.
  *
- * WHY THIS EXISTS. When the Eagle cookie expires, the poller stops being
- * able to refresh anything -- and the queue does not empty, it FREEZES. The
- * screen keeps showing yesterday's tasks, confidently, and a tasker can
- * claim work that was taken hours ago. Nothing about that looks like a
- * failure, which is what makes it expensive: the only symptom is numbers
- * that quietly disagree with the platform.
+ * TWO FAILURES, ONE POLL. Both freeze the queue in a way that looks like
+ * nothing is wrong:
  *
- * Admin-only, because it is the operator who can fix it, and because the
- * response carries operational state a tasker has no use for.
+ *   * A DEAD SESSION. When the Eagle cookie expires the poller stops
+ *     refreshing anything -- the queue does not empty, it FREEZES, showing
+ *     yesterday's tasks confidently while a tasker claims work taken hours
+ *     ago.
+ *   * NO MINUTES. A zero balance leaves every task showing "Ready now"
+ *     while every claim fails with "not enough platform minutes". The team
+ *     pounds on work nobody can start; the per-claim message says "an
+ *     administrator has been notified" and, until this banner, that was not
+ *     actually true.
+ *
+ * Admin-only, because it is the operator who fixes both and the response
+ * carries operational state a tasker has no use for.
  */
 function SessionHealth() {
   const [dead, setDead] = useState([]);
+  const [noMinutes, setNoMinutes] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -320,8 +327,9 @@ function SessionHealth() {
         const data = await work.status();
         if (cancelled) return;
         setDead((data.platform || []).filter((p) => p.status === 'expired'));
+        setNoMinutes(Boolean(data.minutes_exhausted));
       } catch {
-        // A failing status call is not itself evidence of a dead session;
+        // A failing status call is not itself evidence of trouble;
         // claiming one would be its own false alarm.
       }
     };
@@ -330,23 +338,39 @@ function SessionHealth() {
     return () => { cancelled = true; clearInterval(timer); };
   }, []);
 
-  if (dead.length === 0) return null;
+  if (dead.length === 0 && !noMinutes) return null;
 
   return (
-    <div className="mx-auto max-w-[1500px] px-4 pt-4 sm:px-6">
-      <div
-        role="alert"
-        className="rounded-xl2 border border-status-rejected/30 bg-status-rejected/10 px-4 py-3"
-      >
-        <p className="text-xs text-ink">
-          <span className="font-semibold">
-            {dead.map((p) => p.product).join(' and ')} session expired.
-          </span>{' '}
-          New tasks are not being discovered and claimed tasks are not
-          disappearing, so these counts are stale. Sign in to that platform
-          again and store a fresh cookie.
-        </p>
-      </div>
+    <div className="mx-auto max-w-[1500px] space-y-3 px-4 pt-4 sm:px-6">
+      {dead.length > 0 && (
+        <div
+          role="alert"
+          className="rounded-xl2 border border-status-rejected/30 bg-status-rejected/10 px-4 py-3"
+        >
+          <p className="text-xs text-ink">
+            <span className="font-semibold">
+              {dead.map((p) => p.product).join(' and ')} session expired.
+            </span>{' '}
+            New tasks are not being discovered and claimed tasks are not
+            disappearing, so these counts are stale. Sign in to that platform
+            again and store a fresh cookie.
+          </p>
+        </div>
+      )}
+
+      {noMinutes && (
+        <div
+          role="alert"
+          className="rounded-xl2 border border-status-rejected/30 bg-status-rejected/10 px-4 py-3"
+        >
+          <p className="text-xs text-ink">
+            <span className="font-semibold">The platform is out of minutes.</span>{' '}
+            Tasks still show as ready, but every claim is failing with
+            &ldquo;not enough platform minutes&rdquo; and will keep failing
+            until the Eagle account is topped up.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

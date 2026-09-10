@@ -511,6 +511,8 @@ class WorkQueueStatusView(views.APIView):
 
         if is_admin(request.user):
             from .credentials import EagleCredential
+
+            credentials = list(EagleCredential.objects.all())
             payload['platform'] = [
                 {
                     'product': c.product,
@@ -518,7 +520,20 @@ class WorkQueueStatusView(views.APIView):
                     'minutes_balance': c.minutes_balance,
                     'last_verified_at': c.last_verified_at,
                 }
-                for c in EagleCredential.objects.all()
+                for c in credentials
             ]
+            # A zero balance means every claim fails with InsufficientMinutes
+            # while the queue still shows those tasks as "Ready now" -- the
+            # whole team pounding on work nobody can start, and nothing
+            # actively telling the one person who can fix it. Only raised
+            # when there IS ready work to be blocked. Admin-only, like the
+            # rest of this block: the economics stay off the tasker's screen
+            # (they already get a plain per-claim message). A dead session
+            # (EXPIRED) is a separate banner.
+            payload['minutes_exhausted'] = bool(warm) and any(
+                c.status != EagleCredential.EXPIRED
+                and c.minutes_balance is not None and c.minutes_balance <= 0
+                for c in credentials
+            )
             payload['pool_target'] = warmpool.DEFAULT_POOL_SIZE
         return Response(payload)
