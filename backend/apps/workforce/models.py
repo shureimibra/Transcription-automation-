@@ -391,6 +391,34 @@ class Task(models.Model):
         return (end - self.created_at).total_seconds() if end else None
 
 
+def ready_for_work_q():
+    """
+    THE ONE DEFINITION OF "READY RIGHT NOW", as a database filter.
+
+    A completed transcript job is not enough for a TRANSLATION task, which
+    also needs deliverable_revision set -- a translate pass can fail while
+    the transcript underneath it still shows job__status='completed', and a
+    filter that stops at the job status alone counts that task as ready when
+    a tasker who claims it would sit waiting on the machine.
+
+    THIS FUNCTION EXISTS BECAUSE THAT DISTINCTION DRIFTED OUT OF SYNC THREE
+    SEPARATE TIMES: warmpool.run_cycle's warm_now count, TaskViewSet's
+    ordering annotation, and WorkQueueStatusView.ready_now all re-implemented
+    it independently and one of them was wrong at any given time. Every
+    queryset-level "is this ready" check should filter on this, not
+    re-derive the Q expression locally.
+
+    Kept apart from warmpool.is_warm() and TaskSerializer.get_is_ready,
+    which ask the identical question of a Task object already fetched into
+    memory rather than as a filter -- same rule, different shape, because a
+    Q object is not a useful way to test one in-memory instance.
+    """
+    from django.db.models import Q
+    return Q(job__status='completed') & (
+        ~Q(kind=Task.TRANSLATION) | Q(deliverable_revision__isnull=False)
+    )
+
+
 class TaskEvent(models.Model):
     """
     Append-only record of everything that happened to a task.

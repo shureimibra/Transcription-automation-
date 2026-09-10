@@ -27,7 +27,7 @@ from rest_framework.response import Response
 
 from . import roles, services, states
 from .authentication import IdleTimeoutTokenAuthentication
-from .models import Account, Task, TaskEvent, TokenActivity, WorkerProfile
+from .models import Account, Task, TaskEvent, TokenActivity, WorkerProfile, ready_for_work_q
 from .permissions import (
     IsAdmin, IsAuthenticatedWorkerOrAdmin, TaskAccessPermission, account_of,
     account_role, is_admin, visible_tasks_for, worker_profile,
@@ -208,6 +208,19 @@ class TaskPagination(PageNumberPagination):
             return None
         return super().paginate_queryset(queryset, request, view=view)
 
+    def get_paginated_response(self, data):
+        # READY COUNT, OVER THE FULL FILTER, NOT THE PAGE. A queue view
+        # counting "ready now" over only its own loaded page caps the number
+        # at page_size regardless of how many are actually ready -- a real
+        # bug (25 shown when 40+ were ready). self.page.paginator.object_list
+        # is the queryset AFTER every filter but BEFORE the page slice, so
+        # this one extra count query answers the question the page slice
+        # cannot.
+        ready_count = self.page.paginator.object_list.filter(ready_for_work_q()).count()
+        response = super().get_paginated_response(data)
+        response.data['ready_count'] = ready_count
+        return response
+
 
 class TaskViewSet(viewsets.ModelViewSet):
     """
@@ -228,7 +241,7 @@ class TaskViewSet(viewsets.ModelViewSet):
             'claimed_by', 'assigned_to', 'job',
         )
         if self.request.query_params.get('ready') == 'true':
-            queryset = queryset.filter(job__status='completed')
+            queryset = queryset.filter(ready_for_work_q())
 
         # The two kinds are different jobs with different instructions and
         # wildly different supply (a handful of transcription tasks against
@@ -260,16 +273,13 @@ class TaskViewSet(viewsets.ModelViewSet):
         # job__status='completed' alone sorted transcript-only translations
         # into the front-page "ready" group, pushing genuinely ready tasks
         # onto later pages and making the on-page ready count read low even
-        # though the site-wide ready total was correct.
-        from django.db.models import Case, IntegerField, Q, Value, When
+        # though the site-wide ready total was correct. ready_for_work_q()
+        # is the shared definition -- see its docstring for why this needed
+        # one.
+        from django.db.models import Case, IntegerField, Value, When
         return queryset.annotate(
             _readiness=Case(
-                When(
-                    Q(job__status='completed') & (
-                        ~Q(kind=Task.TRANSLATION) | Q(deliverable_revision__isnull=False)
-                    ),
-                    then=Value(0),
-                ),
+                When(ready_for_work_q(), then=Value(0)),
                 default=Value(1), output_field=IntegerField(),
             ),
         ).order_by('_readiness', 'duration_seconds', '-priority', 'created_at')

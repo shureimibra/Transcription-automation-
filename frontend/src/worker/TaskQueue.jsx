@@ -146,10 +146,15 @@ export default function TaskQueue({ kind = null }) {
 
   // Ready work is what a tasker actually cares about: the count of tasks
   // they could start this minute without waiting on the machine.
-  const readyCount = useMemo(
-    () => (data || []).filter((t) => t.is_ready).length,
-    [data]
-  );
+  //
+  // OVER THE FULL FILTER, NOT THE LOADED PAGE. Counting `data` -- only the
+  // 25 rows on screen -- capped this at page_size regardless of how many
+  // were actually ready (a real bug: 25 shown when 40+ were ready). The
+  // server now computes this over the whole filtered-but-unpaginated
+  // queryset and returns it as `ready_count`; only fall back to counting
+  // the page when that is missing, i.e. the unpaginated plain-list shape.
+  const readyCount = envelope?.ready_count
+    ?? (data || []).filter((t) => t.is_ready).length;
 
   const presentStatuses = useMemo(() => {
     const present = new Set((data || []).map((t) => t.status));

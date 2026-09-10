@@ -968,6 +968,39 @@ class QueueOrderingAgreesWithIsReadyTestCase(APITestCase):
             'equally ready',
         )
 
+    def test_the_envelope_ready_count_is_the_whole_filter_not_the_page(self):
+        """
+        The bug the frontend hit: "ready now" was counted over the loaded
+        page, so it could never exceed page_size however many were actually
+        ready. The server now returns ready_count over the full filtered
+        queryset, and it must not follow the page slice.
+        """
+        ready = [
+            self._translation_task(f'q-r-{i}', translated=True) for i in range(4)
+        ]
+        self._translation_task('q-s', translated=False)  # not ready, excluded
+
+        response = self.client.get(
+            '/api/v1/workforce/tasks/'
+            '?kind=translation&available=true&page=1&page_size=2')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data['results']), 2)      # page is short
+        self.assertEqual(response.data['ready_count'], len(ready))  # count is not
+
+    def test_work_status_ready_now_excludes_a_transcript_only_translation(self):
+        self._translation_task('ws-ready', translated=True)
+        self._translation_task('ws-stuck', translated=False)
+
+        response = self.client.get('/api/v1/workforce/work/status/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data['ready_now'], 1,
+            'a translation whose translate pass never produced a revision is '
+            'not something a tasker can start, even with a completed transcript',
+        )
+
 
 # ===================================================================== #
 # Engine boundary

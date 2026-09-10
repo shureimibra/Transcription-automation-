@@ -34,7 +34,7 @@ from .eagle_claim import ClaimRefused, InsufficientMinutes, claim_for_worker
 from .eagle_submit import (
     SubmissionFailed, SubmissionRefused, preview_submission, submit_task,
 )
-from .models import Task, TaskEvent
+from .models import Task, TaskEvent, ready_for_work_q
 from .permissions import IsAuthenticatedWorkerOrAdmin, is_admin, worker_profile
 from .serializers import TaskSerializer
 from .views import AUTH_CLASSES
@@ -501,10 +501,12 @@ class WorkQueueStatusView(views.APIView):
     permission_classes = [IsAuthenticatedWorkerOrAdmin]
 
     def get(self, request):
+        # ready_for_work_q() is the shared definition (see its docstring):
+        # job__status='completed' alone overcounts a translation whose
+        # translate pass failed but whose transcript still completed.
         warm = Task.objects.filter(
-            status=states.NEW, claimed_by__isnull=True,
-            job__isnull=False, job__status='completed',
-        ).count()
+            status=states.NEW, claimed_by__isnull=True, job__isnull=False,
+        ).filter(ready_for_work_q()).count()
         payload = {'ready_now': warm}
 
         if is_admin(request.user):
