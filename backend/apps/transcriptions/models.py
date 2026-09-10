@@ -814,6 +814,22 @@ class AISegmentCache(models.Model):
                 fields=['operation', 'target_language', 'model_name', 'prompt_version', 'content_hash'],
                 name='ai_seg_cache_lookup_idx'
             ),
+            # RESTORED, DELIBERATELY, AFTER A REAL MISTAKE. Removing
+            # db_index=True from content_hash (migration 0021) turned out
+            # to drop BOTH indexes Django had tied to that flag -- the
+            # plain btree (genuinely 0 scans, correctly dropped) AND this
+            # pattern-ops one, which measured 6,348 real scans and was
+            # explicitly meant to be left alone. Django does not offer a
+            # way to keep only one half of that pair via db_index=True;
+            # this explicit Meta.indexes entry is how to have just the
+            # half that is actually used. Named freshly rather than
+            # reusing the old auto-generated name, since it is now a
+            # deliberate index, not a db_index=True side effect.
+            models.Index(
+                fields=['content_hash'],
+                name='ai_seg_cache_hash_like_idx',
+                opclasses=['varchar_pattern_ops'],
+            ),
         ]
         constraints = [
             models.UniqueConstraint(
