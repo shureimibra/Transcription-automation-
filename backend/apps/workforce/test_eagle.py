@@ -305,30 +305,64 @@ class SessionExpiryDetectionTestCase(NoNetworkMixin, TestCase):
         self.assertEqual(credential.minutes_balance, 15)
         self.assertEqual(result['minutes_balance'], 15)
 
-    def test_transcription_folds_its_clock_balance_to_whole_minutes(self):
-        """
-        Transcription shows the balance as a clock, not the minute count the
-        translation API returns. whoami must parse it so the same
-        credential field and affordability check cover both products.
-        """
+    # The dashboard's "Available Minutes" stat card, as it really renders.
+    _DASHBOARD = (
+        '<div class="card-body">'
+        '<button id="withdrawal">Withdraw</button>'
+        '<p class="fs-12 font-weight-bold">Available Balance</p>'
+        '<h6 class="mb-0"><strong>$1</strong></h6></div>'
+        '<div class="card-body">'
+        '<p class="fs-12 font-weight-bold">Available Minutes</p>'
+        '<h2 class="mb-0"><span class="number-font-chars">{n}</span></h2></div>'
+        '<div class="card-body">'
+        '<p class="fs-12 font-weight-bold">Total Minutes Awarded</p>'
+        '<h2 class="mb-0"><span class="number-font-chars">4210</span></h2></div>'
+    )
+
+    def _transcription_pages(self, minutes_html):
+        """A _request stand-in: the task panel for the session check, then
+        the dashboard for the balance."""
+        panel = (200, 'https://transcribe.eaglewebcommerce.com/user/stt/tasks',
+                 {}, b'<html><body>tasks</body></html>')
+        dash = (200, 'https://transcribe.eaglewebcommerce.com/user/dashboard',
+                {}, minutes_html.encode())
+
+        def fake(url, *a, **k):
+            return dash if url.endswith('/user/dashboard') else panel
+        return fake
+
+    def test_transcription_reads_available_minutes_from_the_dashboard(self):
         client = TranscriptionClient(COOKIE)
-        page = b'<html><body><span>Your Balance: 2:05:30</span></body></html>'
         with mock.patch('core.services.eagle_client._request',
-                        return_value=(200, 'https://transcribe.eaglewebcommerce.com/user/stt/tasks',
-                                      {}, page)):
+                        side_effect=self._transcription_pages(self._DASHBOARD.format(n='9'))):
             account = client.whoami()
 
-        self.assertEqual(account.minutes_balance, 125)   # 2h05m30s, floored
-        self.assertEqual(account.raw['balance'], '2:05:30')  # exact value kept
+        # The "Available Minutes" card -- not "Available Balance" ($1, money)
+        # and not "Total Minutes Awarded" (4210, a lifetime counter).
+        self.assertEqual(account.minutes_balance, 9)
 
-    def test_transcription_balance_parsing_is_conservative(self):
-        from core.services.eagle_client import _balance_minutes
+    def test_transcription_available_minutes_handles_thousands(self):
+        client = TranscriptionClient(COOKIE)
+        with mock.patch('core.services.eagle_client._request',
+                        side_effect=self._transcription_pages(self._DASHBOARD.format(n='1,234'))):
+            account = client.whoami()
+        self.assertEqual(account.minutes_balance, 1234)
 
-        self.assertEqual(_balance_minutes('12:34'), 12)     # m:s -> floor
-        self.assertEqual(_balance_minutes('0:45'), 0)       # under a minute
-        self.assertIsNone(_balance_minutes(''))             # absent
-        self.assertIsNone(_balance_minutes('47'))           # no colon: unknown, not guessed
-        self.assertIsNone(_balance_minutes('n/a'))
+    def test_transcription_balance_is_unknown_not_zero_when_unreadable(self):
+        from core.services.eagle_client import _parse_available_minutes
+
+        self.assertIsNone(_parse_available_minutes(''))
+        self.assertIsNone(_parse_available_minutes('<p>Available Minutes</p><h2>soon</h2>'))
+        # A missing dashboard must not fail the session check whoami already passed.
+        client = TranscriptionClient(COOKIE)
+
+        def fake(url, *a, **k):
+            if url.endswith('/user/dashboard'):
+                return (503, url, {}, b'')
+            return (200, 'https://transcribe.eaglewebcommerce.com/user/stt/tasks', {}, b'ok')
+        with mock.patch('core.services.eagle_client._request', side_effect=fake):
+            account = client.whoami()
+        self.assertIsNone(account.minutes_balance)
 
     def test_transcription_balance_reaches_the_credential(self):
         credential = store(TRANSCRIPTION)

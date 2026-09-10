@@ -787,34 +787,34 @@ class TranslationClient:
 # Transcription -- Laravel + DataTables
 # ===================================================================== #
 
-def _balance_minutes(text: str) -> Optional[int]:
-    """
-    Fold Eagle Transcribe's balance to whole minutes.
+#: The dashboard's "Available Minutes" stat card:
+#:
+#:   <p ...>Available Minutes</p>
+#:   <h2 class="mb-0"><span class="number-font-chars">9</span></h2>
+#:
+#: "Available Balance" right beside it is money ($), and "Total Minutes
+#: Awarded/Used" are lifetime counters -- this anchors on the exact label.
+_AVAILABLE_MINUTES_RE = re.compile(
+    r'Available Minutes\s*</p>.*?number-font-chars"[^>]*>\s*([\d,]+)',
+    re.S | re.I,
+)
 
-    Transcription shows the balance as a clock -- "12:34:56" (h:m:s) or
-    "12:34" (m:s) -- where the translation API just returns a minute count.
-    Parsing it here means the same EagleCredential.minutes_balance field and
-    the same affordability check cover both products.
 
-    FLOOR, not round: "5:30" is five and a half usable minutes, and calling
-    it six produces a claim check that passes for a task the platform then
-    declines for being thirty seconds short. Anything without a colon is
-    treated as unknown (None) rather than guessed at -- unknown lets the
-    platform itself decide at claim time, which is the safe direction.
+def _parse_available_minutes(html: str) -> Optional[int]:
     """
-    text = (text or '').strip()
-    if ':' not in text:
+    Pull the whole-minute balance out of the transcription dashboard.
+
+    None on any miss -- absent, markup changed, not a number. Unknown is the
+    safe direction: it lets the platform decide affordability at claim time,
+    exactly as before this was wired at all.
+    """
+    match = _AVAILABLE_MINUTES_RE.search(html or '')
+    if not match:
         return None
     try:
-        parts = [int(p) for p in text.split(':')]
+        return int(match.group(1).replace(',', ''))
     except ValueError:
         return None
-    if any(p < 0 for p in parts):
-        return None
-    seconds = 0
-    for part in parts:
-        seconds = seconds * 60 + part
-    return seconds // 60
 
 
 class TranscriptionClient:
@@ -877,16 +877,29 @@ class TranscriptionClient:
         if 'transcribe.eaglewebcommerce.com' not in final_url:
             raise EagleSessionExpired(
                 f'Transcription session redirected to {final_url}.', status)
-        html = raw.decode('utf-8', 'replace')
-        match = re.search(r'Your Balance:\s*([0-9:]+)', html)
-        raw_balance = match.group(1) if match else ''
-        # The clock string is the precise value; minutes_balance is the folded
-        # one the affordability check and the admin card both read.
         return EagleAccount(
             label='Eagle Transcribe',
-            minutes_balance=_balance_minutes(raw_balance),
-            raw={'balance': raw_balance},
+            minutes_balance=self._available_minutes(),
         )
+
+    def _available_minutes(self) -> Optional[int]:
+        """
+        The balance, from the dashboard's "Available Minutes" card -- it is
+        not on the task panel whoami() checks, so this is a second request.
+
+        BEST EFFORT, DELIBERATELY. The session was already confirmed above;
+        a balance this cannot read (dashboard down, markup moved) is None,
+        never a reason to fail the whole check. None means "unknown", which
+        lets the platform decide affordability at claim time -- the same
+        behaviour as before transcription reported a balance at all.
+        """
+        try:
+            status, final_url, _, raw = self._req(f'{self.host}/user/dashboard')
+        except EagleHTTPError:
+            return None
+        if status != 200 or 'transcribe.eaglewebcommerce.com' not in final_url:
+            return None
+        return _parse_available_minutes(raw.decode('utf-8', 'replace'))
 
     def login(self, email: str, password: str) -> None:
         """
