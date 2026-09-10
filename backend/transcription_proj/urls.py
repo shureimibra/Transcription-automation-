@@ -1,4 +1,3 @@
-from django.contrib import admin
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from apps.transcriptions.views import (
@@ -14,7 +13,15 @@ router.register(r'projects', ProjectViewSet, basename='project')
 router.register(r'transcriptions', TranscriptionJobViewSet, basename='transcription')
 
 urlpatterns = [
-    path('admin/', admin.site.urls),
+    # Django's built-in admin is deliberately NOT routed. Nothing in the
+    # product depends on it -- worker/account management is the custom admin
+    # UI plus the `create_worker` / `eagle_credential` management commands,
+    # and raw DB access is `manage.py shell` / `dbshell` on the box. Left
+    # exposed it is a brute-force target and a Django-admin-CVE surface that
+    # also hands out API tokens through a web form. `django.contrib.admin`
+    # stays in INSTALLED_APPS (its migration is applied; removing it there
+    # is a separate, riskier change) -- without this route there is no way
+    # in regardless.
     path('api/v1/', include(router.urls)),
 
     # Workforce & task management (Phase 2). Separate namespace from the
