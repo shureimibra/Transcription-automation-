@@ -316,7 +316,14 @@ def claim_task(task_id, worker: WorkerProfile, actor: User) -> Task:
     with transaction.atomic():
         task = _locked(task_id)
 
-        if task.claimed_by_id is not None:
+        # NOT is not None -- is held by someone ELSE. eagle_claim.py's
+        # reservation step sets claimed_by=worker on THIS SAME worker
+        # before calling here to finalize, specifically to close the
+        # cross-worker race against Eagle's own claim call. Rejecting any
+        # non-null claimed_by, the original check, would reject a
+        # worker's own reservation finalizing -- exactly the case this
+        # exists to let through.
+        if task.claimed_by_id is not None and task.claimed_by_id != worker.id:
             holder = task.claimed_by_id
             raise TaskConflict(
                 f'Task {task.id} already claimed by worker {holder}.',
@@ -351,7 +358,12 @@ def claim_task(task_id, worker: WorkerProfile, actor: User) -> Task:
         return _apply_transition(
             task, states.CLAIMED, actor, TaskEvent.TASK_CLAIMED,
             metadata={'worker_code': worker.worker_code},
-            extra_fields={'claimed_by': worker},
+            # claim_reserved_at=None whether or not a reservation actually
+            # preceded this call -- a task claimed without going through
+            # eagle_claim.py's reservation step (a local task, or a direct
+            # call) never had it set in the first place, so clearing it is
+            # a no-op there and the real cleanup for the reserved case.
+            extra_fields={'claimed_by': worker, 'claim_reserved_at': None},
         )
 
 

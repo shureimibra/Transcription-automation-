@@ -15,15 +15,18 @@ WHAT THESE PROTECT, in order of what a mistake costs:
 The Eagle side is a fake throughout. Claiming for real starts a one-hour
 deadline and deducts purchased minutes; a test suite must never do that.
 """
+from datetime import timedelta
 from unittest import mock
 
 from django.test import TestCase
+from django.utils import timezone
 
 from . import states
 from .eagle import EagleAuthError, EagleIntegrationService, EagleNotConfigured
 from .eagle_claim import (
-    ClaimRefused, InsufficientMinutes, check_minutes, claim_for_worker,
-    minutes_required_for,
+    RESERVATION_STRANDED_SECONDS, ClaimRefused, InsufficientMinutes,
+    _reserve, check_minutes, claim_for_worker, minutes_required_for,
+    sweep_stranded_reservations,
 )
 from .models import Task, TaskEvent
 from .tests import make_task, make_worker
@@ -233,6 +236,171 @@ class ClaimRefusalTestCase(TestCase):
 
         self.assertIn('finish or release', caught.exception.safe_message.lower())
         self.assertEqual(fake.claims, [])
+
+
+class ReservationRaceTestCase(TestCase):
+    """
+    BEFORE_DEPLOYMENT.md item 1: two workers racing the same task used to
+    both pass the unlocked "is this free?" read and both send a real claim
+    POST to Eagle. The atomic conditional UPDATE in _reserve() closes that
+    window before Eagle is ever called -- these tests prove the loser never
+    reaches the external call at all, not just that it eventually loses.
+    """
+
+    def setUp(self):
+        self.user_a, self.worker_a = make_worker('ana', 'W-01')
+        self.user_b, self.worker_b = make_worker('bo', 'W-02')
+
+    def test_a_second_concurrent_claim_is_refused_before_eagle_is_called(self):
+        task = eagle_task()
+        fake = FakeEagle(minutes=100)
+
+        # Simulates worker B's reservation having already landed the instant
+        # before worker A's claim_for_worker runs -- exactly what a real
+        # concurrent request would produce, without needing actual threads
+        # to prove the WHERE clause is what does the excluding.
+        self.assertTrue(_reserve(task.id, self.worker_b))
+
+        with self.assertRaises(ClaimRefused):
+            claim_for_worker(task.id, self.worker_a, self.user_a, service=fake)
+
+        # The one thing that matters most: the loser never touched Eagle.
+        self.assertEqual(fake.claims, [])
+        # And the winner's reservation is untouched -- losing does not roll
+        # back someone else's in-flight claim.
+        task.refresh_from_db()
+        self.assertEqual(task.claimed_by_id, self.worker_b.id)
+        self.assertIsNotNone(task.claim_reserved_at)
+
+    def test_only_one_reservation_can_ever_win_regardless_of_call_order(self):
+        task = eagle_task()
+
+        first = _reserve(task.id, self.worker_a)
+        second = _reserve(task.id, self.worker_b)
+
+        self.assertTrue(first)
+        self.assertFalse(second)
+        task.refresh_from_db()
+        self.assertEqual(task.claimed_by_id, self.worker_a.id)
+
+
+class ReservationRollbackTestCase(TestCase):
+
+    def setUp(self):
+        self.user, self.worker = make_worker('ana', 'W-01')
+
+    def test_a_refused_claim_releases_the_reservation_not_just_the_status(self):
+        task = eagle_task()
+
+        with self.assertRaises(ClaimRefused):
+            claim_for_worker(task.id, self.worker, self.user,
+                             service=FakeEagle(accept=False))
+
+        task.refresh_from_db()
+        self.assertIsNone(task.claimed_by_id)
+        self.assertIsNone(task.claim_reserved_at)
+
+    def test_an_unexpected_exception_still_rolls_back_the_reservation(self):
+        """
+        The finally-style guard is generic on purpose: a timeout, a dropped
+        connection, or a bug in the client all fall outside the two
+        Eagle-specific except clauses claim_for_worker already handles, and
+        none of them may be allowed to strand a reservation for the full
+        60s until the sweeper runs.
+        """
+        task = eagle_task()
+        fake = FakeEagle(error=RuntimeError('the network fell over'))
+
+        with self.assertRaises(RuntimeError):
+            claim_for_worker(task.id, self.worker, self.user, service=fake)
+
+        task.refresh_from_db()
+        self.assertIsNone(task.claimed_by_id)
+        self.assertIsNone(task.claim_reserved_at)
+
+    def test_an_insufficient_minutes_refusal_also_releases_the_reservation(self):
+        task = eagle_task(duration_seconds=1540)
+
+        with self.assertRaises(InsufficientMinutes):
+            claim_for_worker(task.id, self.worker, self.user, service=FakeEagle(minutes=5))
+
+        task.refresh_from_db()
+        self.assertIsNone(task.claimed_by_id)
+        self.assertIsNone(task.claim_reserved_at)
+
+
+class StrandedReservationSweepTestCase(TestCase):
+
+    def setUp(self):
+        self.user, self.worker = make_worker('ana', 'W-01')
+
+    def _reserved(self, seconds_ago, **kwargs):
+        task = eagle_task(**kwargs)
+        Task.objects.filter(pk=task.id).update(
+            claimed_by=self.worker,
+            claim_reserved_at=timezone.now() - timedelta(seconds=seconds_ago),
+        )
+        task.refresh_from_db()
+        return task
+
+    def test_a_reservation_older_than_the_threshold_is_swept(self):
+        stranded = self._reserved(RESERVATION_STRANDED_SECONDS + 30, external_task_id='1')
+
+        released = sweep_stranded_reservations()
+
+        self.assertEqual(released, 1)
+        stranded.refresh_from_db()
+        self.assertIsNone(stranded.claimed_by_id)
+        self.assertIsNone(stranded.claim_reserved_at)
+
+    def test_a_reservation_inside_the_threshold_is_left_alone(self):
+        """
+        A worker mid-round-trip -- checking minutes, then calling Eagle --
+        must not have its reservation snatched out from under it just
+        because a sweep happens to run at the same moment.
+        """
+        fresh = self._reserved(10, external_task_id='2')
+
+        released = sweep_stranded_reservations()
+
+        self.assertEqual(released, 0)
+        fresh.refresh_from_db()
+        self.assertEqual(fresh.claimed_by_id, self.worker.id)
+        self.assertIsNotNone(fresh.claim_reserved_at)
+
+    def test_a_completed_claim_is_never_touched_however_old(self):
+        """
+        services.claim_task clears claim_reserved_at as part of the same
+        update that moves status to CLAIMED, so a real, finished claim from
+        hours ago must not be mistaken for a stranded one.
+        """
+        task = eagle_task(external_task_id='3')
+        from . import services
+        claimed = services.claim_task(task.id, worker=self.worker, actor=self.user)
+        self.assertIsNone(claimed.claim_reserved_at)  # sanity on the fixture itself
+
+        released = sweep_stranded_reservations()
+
+        self.assertEqual(released, 0)
+        claimed.refresh_from_db()
+        self.assertEqual(claimed.status, states.CLAIMED)
+        self.assertEqual(claimed.claimed_by_id, self.worker.id)
+
+    def test_a_stranded_reservation_on_a_non_claimable_status_is_left_alone(self):
+        """
+        status__in=CLAIMABLE_STATES is deliberate: claim_reserved_at is only
+        ever meaningful mid-reservation, but guarding on status too means a
+        task that moved on for some other reason is never touched here
+        regardless of what an old, otherwise-unrelated timestamp says.
+        """
+        task = self._reserved(RESERVATION_STRANDED_SECONDS + 30,
+                              external_task_id='4', status=states.SUBMITTED)
+
+        released = sweep_stranded_reservations()
+
+        self.assertEqual(released, 0)
+        task.refresh_from_db()
+        self.assertEqual(task.claimed_by_id, self.worker.id)
 
 
 class LocalTaskTestCase(TestCase):

@@ -231,6 +231,18 @@ class Task(models.Model):
         WorkerProfile, on_delete=models.SET_NULL, null=True, blank=True,
         related_name='claimed_tasks',
     )
+    # Non-null means "claimed_by is a RESERVATION, not yet a real claim" --
+    # set by an atomic conditional UPDATE before the external Eagle call
+    # eagle_claim.claim_for_worker makes, cleared the moment that resolves
+    # either way (finalized into a real claim, or rolled back on refusal/
+    # error). Its purpose is closing the exact race BEFORE_DEPLOYMENT.md's
+    # own item 1 named: two workers racing one task used to both pass the
+    # "is this free?" check and both send a real claim POST to Eagle,
+    # relying on Eagle's own 422 as the only thing stopping a double claim.
+    # Also what the stranded-reservation sweeper keys off: a row where this
+    # is set and old means a worker's process died mid-flight, not that the
+    # task is genuinely held.
+    claim_reserved_at = models.DateTimeField(null=True, blank=True)
 
     # ---- links into the existing engine ------------------------------- #
     # SET_NULL, not CASCADE: deleting a job must not erase the operational

@@ -17,21 +17,46 @@ hold and submit into nothing. So the external call happens first, and our
 transition only follows an acknowledgement. The reverse -- Eagle accepted but
 our commit failed -- is recoverable by the sync; the other direction is not.
 
+THE RESERVATION CLOSES A DIFFERENT RACE, THE SAME ORDERING SERVES. "Eagle
+first" leaves the window between reading "is this free?" and actually
+calling Eagle unprotected -- two workers racing the same task could both
+read it as free and both send a real claim POST, relying on Eagle's own 422
+as the only thing stopping a double claim (BEFORE_DEPLOYMENT.md item 1).
+An atomic conditional UPDATE (claimed_by=worker, claim_reserved_at=now(),
+WHERE claimed_by IS NULL) closes that window before Eagle is ever called:
+the loser's WHERE clause simply stops matching once the winner's UPDATE
+commits, so at most one request ever reaches the external call for a given
+task. A reservation that does not resolve -- refused, errored, or the
+process died mid-flight -- is rolled back explicitly in a finally block, or
+by the sweeper (sweep_stranded_reservations) if nothing was left running to
+roll it back itself.
+
 THE MINUTES FLOOR IS DYNAMIC. Not "refuse below 25 minutes": a 3-minute task
 is perfectly claimable on a 5-minute balance, and a flat floor would idle a
 team over an arithmetic detail. What matters is whether THIS task fits.
 """
 import logging
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Optional
 
 from django.db import transaction
+from django.utils import timezone
 
 from . import services, states
 from .eagle import EagleAuthError, EagleIntegrationError, EagleNotConfigured
 from .models import Task, TaskEvent, WorkerProfile
 
 logger = logging.getLogger('eagle')
+
+#: How long a reservation may sit unresolved before the sweeper treats it
+#: as stranded -- a worker's process died between reserving and either
+#: finalizing or rolling back. The normal round trip is a couple of HTTP
+#: calls (minutes balance, then the claim itself), low single digits of
+#: seconds; 60s leaves real margin for a slow Eagle response or network
+#: jitter while still freeing a genuinely stranded task on the very next
+#: ~90s eagle-cycle turn.
+RESERVATION_STRANDED_SECONDS = 60
 
 
 class ClaimRefused(Exception):
@@ -118,13 +143,73 @@ def check_minutes(task: Task, service=None) -> MinutesCheck:
     )
 
 
+def _reserve(task_id, worker: WorkerProfile) -> bool:
+    """
+    Atomically marks one task as spoken-for by `worker`, closing the race
+    against a second concurrent claim attempt before either ever reaches
+    Eagle. True if this call won the reservation; False if someone else
+    already held (or had already reserved) the task.
+
+    A single UPDATE...WHERE is the whole mechanism: Postgres serializes
+    concurrent writers to the same row, so the loser's `claimed_by__isnull`
+    condition simply stops matching the instant the winner's UPDATE
+    commits. No select_for_update, no explicit transaction -- the atomicity
+    is the UPDATE statement itself.
+    """
+    updated = Task.objects.filter(
+        pk=task_id, status__in=states.CLAIMABLE_STATES, claimed_by__isnull=True,
+    ).update(claimed_by=worker, claim_reserved_at=timezone.now())
+    return bool(updated)
+
+
+def _release_reservation(task_id, worker: WorkerProfile) -> None:
+    """
+    Releases a reservation `worker` holds, so a refused or errored claim
+    attempt does not strand the task until the sweeper next runs.
+
+    Guarded by claimed_by=worker: this can only ever release a reservation
+    THIS call made, never a different, unrelated one -- even called late,
+    or called twice, it cannot clobber someone else's real claim.
+    """
+    Task.objects.filter(pk=task_id, claimed_by=worker).update(
+        claimed_by=None, claim_reserved_at=None,
+    )
+
+
+def sweep_stranded_reservations(older_than_seconds: int = RESERVATION_STRANDED_SECONDS) -> int:
+    """
+    Releases reservations nothing ever resolved -- the worker's process
+    died between reserving and either finalizing the claim or rolling it
+    back in `claim_for_worker`'s own finally block. Meant to run once per
+    eagle-cycle turn, the same ~90s heartbeat everything else in this
+    module's housekeeping already rides on.
+
+    status__in=CLAIMABLE_STATES matters: a reservation that DID finalize
+    has claim_reserved_at cleared by services.claim_task as part of the
+    same update that moves status to CLAIMED, so a genuinely-completed
+    claim is never touched here, however old it gets.
+    """
+    threshold = timezone.now() - timedelta(seconds=older_than_seconds)
+    released = Task.objects.filter(
+        claim_reserved_at__isnull=False,
+        claim_reserved_at__lt=threshold,
+        status__in=states.CLAIMABLE_STATES,
+    ).update(claimed_by=None, claim_reserved_at=None)
+    if released:
+        logger.warning('[CLAIM] swept %d stranded reservation(s) older than %ds',
+                       released, older_than_seconds)
+    return released
+
+
 def claim_for_worker(task_id, worker: WorkerProfile, actor, service=None) -> Task:
     """
-    Claim on Eagle, then record it here.
+    Reserve, then claim on Eagle, then record it here.
 
     Refuses early and cheaply for anything knowable in advance: an
     unaffordable task, a task already held, a worker at their limit. The
-    external call is the last thing to happen before the transition.
+    reservation is the last FREE thing that happens; everything from there
+    on either finalizes it or rolls it back, including on any unexpected
+    exception -- see the finally block below.
     """
     from .eagle import get_eagle_service
 
@@ -148,54 +233,76 @@ def claim_for_worker(task_id, worker: WorkerProfile, actor, service=None) -> Tas
 
     if not task.external_task_id:
         # A locally created task has nothing to claim externally; it is ours
-        # already. Fall straight through to the normal service path.
+        # already. Fall straight through to the normal service path -- no
+        # reservation needed, there is no external race to close.
         return services.claim_task(task.id, worker=worker, actor=actor)
 
-    check = check_minutes(task, service=service)
-    if not check.sufficient:
-        logger.error('[CLAIM] insufficient minutes for %s: %s',
-                     task.external_task_id, check.reason)
-        _record_refusal(task, actor, check)
-        raise InsufficientMinutes(
-            f'Task {task.external_task_id} needs {check.required} minutes, '
-            f'{check.available} available.',
-            'There are not enough platform minutes to start this task. '
-            'An administrator has been notified.',
+    # --- THE RESERVATION. Everything above was a read; this is the first
+    # write, and the one that closes the cross-worker race. -------------- #
+    if not _reserve(task_id, worker):
+        raise ClaimRefused(
+            f'Task {task.id} was reserved by another worker first.',
+            'Someone else already started that task.',
         )
 
-    # --- the external call. Everything above was free; this is not. ---- #
     try:
-        result = service.claim_task(task.external_task_id, task.external_source)
-    except (EagleNotConfigured, EagleAuthError) as exc:
-        raise ClaimRefused(exc.detail, exc.safe_message) from exc
-    except EagleIntegrationError as exc:
-        raise ClaimRefused(
-            exc.detail,
-            'The task platform could not be reached. Please try again.',
-        ) from exc
+        task.refresh_from_db()
 
-    if isinstance(result, dict) and result.get('accepted') is False:
-        raise ClaimRefused(
-            f'Platform refused the claim for {task.external_task_id}.',
-            'That task is no longer available.',
-        )
+        check = check_minutes(task, service=service)
+        if not check.sufficient:
+            logger.error('[CLAIM] insufficient minutes for %s: %s',
+                         task.external_task_id, check.reason)
+            _record_refusal(task, actor, check)
+            raise InsufficientMinutes(
+                f'Task {task.external_task_id} needs {check.required} minutes, '
+                f'{check.available} available.',
+                'There are not enough platform minutes to start this task. '
+                'An administrator has been notified.',
+            )
 
-    with transaction.atomic():
-        claimed = services.claim_task(task.id, worker=worker, actor=actor)
-        services.record_event(
-            claimed, TaskEvent.STATUS_CHANGED, actor=actor,
-            from_status=states.NEW, to_status=states.CLAIMED,
-            message='Claimed on the external platform.',
-            metadata={
-                'external_task_id': task.external_task_id,
-                'minutes_spent': check.required,
-                'minutes_remaining': (result or {}).get('minutes_balance'),
-            },
-        )
-    logger.info('[CLAIM] %s claimed %s task %s (%d minutes)',
-                worker.worker_code, task.external_source,
-                task.external_task_id, check.required)
-    return claimed
+        # --- the external call. Everything above was free; this is not. #
+        try:
+            result = service.claim_task(task.external_task_id, task.external_source)
+        except (EagleNotConfigured, EagleAuthError) as exc:
+            raise ClaimRefused(exc.detail, exc.safe_message) from exc
+        except EagleIntegrationError as exc:
+            raise ClaimRefused(
+                exc.detail,
+                'The task platform could not be reached. Please try again.',
+            ) from exc
+
+        if isinstance(result, dict) and result.get('accepted') is False:
+            raise ClaimRefused(
+                f'Platform refused the claim for {task.external_task_id}.',
+                'That task is no longer available.',
+            )
+
+        with transaction.atomic():
+            claimed = services.claim_task(task.id, worker=worker, actor=actor)
+            services.record_event(
+                claimed, TaskEvent.STATUS_CHANGED, actor=actor,
+                from_status=states.NEW, to_status=states.CLAIMED,
+                message='Claimed on the external platform.',
+                metadata={
+                    'external_task_id': task.external_task_id,
+                    'minutes_spent': check.required,
+                    'minutes_remaining': (result or {}).get('minutes_balance'),
+                },
+            )
+        logger.info('[CLAIM] %s claimed %s task %s (%d minutes)',
+                    worker.worker_code, task.external_source,
+                    task.external_task_id, check.required)
+        return claimed
+
+    except Exception:
+        # ANY failure past this point -- an expected ClaimRefused, an
+        # unhandled exception from the Eagle client, a timeout, a dropped
+        # connection -- releases the reservation immediately rather than
+        # leaving it for the 60s sweeper. The sweeper is the backstop for
+        # a process that dies before this block can even run; it is not
+        # meant to be the normal path for an ordinary refusal.
+        _release_reservation(task_id, worker)
+        raise
 
 
 def _record_refusal(task: Task, actor, check: MinutesCheck) -> None:

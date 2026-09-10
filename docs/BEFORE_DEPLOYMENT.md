@@ -237,10 +237,21 @@ correct it.
 
 ## 7. Still open, in priority order
 
-1. **The claim race.** N workers racing one task still send N claim POSTs;
-   only Eagle's 422 prevents a double claim. Needs a conditional-UPDATE
-   reservation before the external call, plus a sweeper for reservations
-   stranded by a crash between the reserve and the call.
+1. ~~**The claim race.**~~ **Fixed 2026-09-10.** An atomic conditional
+   UPDATE (`Task.objects.filter(pk=, status__in=CLAIMABLE_STATES,
+   claimed_by__isnull=True).update(claimed_by=worker,
+   claim_reserved_at=now())`) reserves the task locally before Eagle is
+   ever called, so at most one of N concurrent claim attempts reaches the
+   external call at all -- Eagle's 422 is no longer the only thing
+   stopping a double claim. `claim_for_worker` rolls the reservation back
+   in a blanket `except Exception` (a refusal, a timeout, an unhandled
+   client error -- anything) so a failed attempt does not strand the task
+   for the sweeper's full window. `sweep_stranded_reservations`, wired
+   into `eagle_cycle`'s existing turn (`--no-sweep` to disable), clears
+   any reservation still unresolved after 60s -- covering a worker
+   process that dies between reserving and either finalizing or rolling
+   back. See `apps/workforce/eagle_claim.py` and
+   `apps/workforce/test_eagle_claim.py`.
 2. **The four accounts share one password**, and it appears in a session
    transcript. Change before anyone else signs in.
 3. **`max_concurrent_tasks` is a flat 3.** During a drop that is a claiming

@@ -22,6 +22,7 @@ from django.core.management.base import BaseCommand
 
 from apps.workforce import warmpool
 from apps.workforce.credentials import EagleCredential
+from apps.workforce.eagle_claim import sweep_stranded_reservations
 from apps.workforce.sync import sync_all
 
 
@@ -76,6 +77,8 @@ class Command(BaseCommand):
                             help='Discover tasks but do not pre-process them.')
         parser.add_argument('--no-purge', action='store_true',
                             help='Skip the retention sweep.')
+        parser.add_argument('--no-sweep', action='store_true',
+                            help='Skip the stranded claim-reservation sweep.')
         parser.add_argument('--pool-size', type=int, default=None)
         parser.add_argument('--concurrency', type=int, default=None)
         parser.add_argument('--dry-run', action='store_true',
@@ -157,6 +160,12 @@ class Command(BaseCommand):
                 freed = purge['bytes_freed'] / (1024 * 1024)
                 self.stdout.write(
                     f"[purge] removed {purge['files_removed']} files ({freed:.1f} MB)")
+
+        if not options['no_sweep']:
+            swept = sweep_stranded_reservations()
+            if swept:
+                self.stdout.write(self.style.WARNING(
+                    f'[sweep] released {swept} stranded claim reservation(s)'))
 
     def _report_configuration(self):
         self.stdout.write(self.style.MIGRATE_HEADING('Eagle cycle configuration'))
