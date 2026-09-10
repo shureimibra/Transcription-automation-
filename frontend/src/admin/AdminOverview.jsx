@@ -1,6 +1,7 @@
 import React, { useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { stats as statsApi } from '../api/workforce.js';
+import { work } from '../api/eagle.js';
 import { useAsync, usePolling } from '../hooks/useAsync.js';
 import { useTaskStream } from '../hooks/useTaskStream.js';
 import { STATUS_ORDER, statusMeta } from '../components/StatusBadge.jsx';
@@ -8,6 +9,65 @@ import {
   Button, Card, EmptyState, ErrorState, FOCUS, Skeleton, Stat,
 } from '../components/ui/index.jsx';
 import { relative } from '../lib/format.js';
+
+const PRODUCT_LABEL = { transcription: 'Transcription', translation: 'Translation' };
+
+/**
+ * The Eagle side of the operation, which has no other home in the UI.
+ *
+ * Both numbers here are ones an operator otherwise learns only after
+ * something has already stalled: a session that has expired stops the
+ * poller, and a minutes balance at zero makes every claim fail while the
+ * queue still shows work as ready. Shown plainly so neither is a surprise.
+ */
+function PlatformCard({ platform }) {
+  if (!platform || platform.length === 0) return null;
+  return (
+    <Card title="Platform" subtitle="Eagle session and minutes">
+      <div className="-mx-4 overflow-x-auto">
+        <table className="w-full min-w-[28rem] text-left">
+          <thead>
+            <tr className="border-b border-edge text-2xs uppercase tracking-wide text-ink-mute">
+              <th scope="col" className="px-4 py-2 font-medium">Product</th>
+              <th scope="col" className="px-2 py-2 text-right font-medium">Minutes</th>
+              <th scope="col" className="px-2 py-2 font-medium">Session</th>
+              <th scope="col" className="px-4 py-2 text-right font-medium">Checked</th>
+            </tr>
+          </thead>
+          <tbody>
+            {platform.map((p) => {
+              const known = p.minutes_balance !== null && p.minutes_balance !== undefined;
+              const empty = known && p.minutes_balance <= 0;
+              const expired = p.status === 'expired';
+              return (
+                <tr key={p.product} className="border-b border-edge/60 last:border-0">
+                  <td className="px-4 py-2 text-xs text-ink">
+                    {PRODUCT_LABEL[p.product] || p.product}
+                  </td>
+                  <td
+                    className={`px-2 py-2 text-right text-xs tabular-nums ${
+                      empty ? 'font-semibold text-status-failed' : 'text-ink'
+                    }`}
+                  >
+                    {known ? p.minutes_balance : '—'}
+                  </td>
+                  <td className="px-2 py-2 text-2xs">
+                    <span className={expired ? 'font-medium text-status-failed' : 'text-ink-dim'}>
+                      {p.status || 'unknown'}
+                    </span>
+                  </td>
+                  <td className="px-4 py-2 text-right text-2xs text-ink-mute">
+                    {p.last_verified_at ? relative(p.last_verified_at) : 'never'}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
 
 /**
  * The operator's first screen: what is happening right now.
@@ -22,6 +82,13 @@ export default function AdminOverview() {
   const { data, error, loading, refresh } = useAsync(load, []);
   usePolling(refresh, 15000);
   useTaskStream(useCallback(() => refresh({ silent: true }), [refresh]));
+
+  // Its own call, not folded into the overview stats: the platform block is
+  // admin-only and small, and a failure to read it must not blank the whole
+  // dashboard. A missing/failed result simply hides the card.
+  const loadPlatform = useCallback(() => work.status(), []);
+  const { data: status, refresh: refreshPlatform } = useAsync(loadPlatform, []);
+  usePolling(refreshPlatform, 60000);
 
   if (loading && !data) {
     return (
@@ -74,6 +141,8 @@ export default function AdminOverview() {
           }
         />
       </div>
+
+      <PlatformCard platform={status?.platform} />
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card title="Where the work is" subtitle="Tasks by status">
