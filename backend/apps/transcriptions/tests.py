@@ -10180,6 +10180,38 @@ class QualityEngineTestCase(TestCase):
         )
         self.assertEqual(provider.count('analysis'), 1)
 
+    def test_a_same_language_pass_is_not_flagged_for_untranslated_source(self):
+        """
+        The bug that broke every warm transcription standard pass. The Eagle
+        verbatim pass is English ASR -> English: its source text surviving
+        into the output is the point. The gate read the typography language
+        code as proof of a translation and reported all ~90 segments as
+        'untranslated source' -- HIGH, blocking, every pass discarded, every
+        warm transcription task left on raw ASR.
+        """
+        from core.services.ai_assist.quality import QualityStatus
+        identical = 'the agent owes a duty of care to the principal at all times'
+        result = make_quality_engine('eagle_standard', FakeQualityProvider()).run(
+            _pairs((identical, identical)),
+            target_language_code='en',
+            is_translation=False,
+        )
+        self.assertNotIn(
+            'leakage.untranslated-source', {i.rule for i in result.issues})
+        self.assertNotEqual(result.status, QualityStatus.QUALITY_REVIEW_REQUIRED)
+
+    def test_a_translation_that_never_translated_is_still_flagged(self):
+        """The other half: is_translation=True still catches a 'translation'
+        that left the source untouched."""
+        identical = 'the agent owes a duty of care to the principal at all times'
+        result = make_quality_engine('translation', FakeQualityProvider()).run(
+            _pairs((identical, identical)),
+            target_language='French', target_language_code='fr',
+            is_translation=True,
+        )
+        self.assertIn(
+            'leakage.untranslated-source', {i.rule for i in result.issues})
+
     def test_a_precomputed_domain_profile_skips_a_second_analysis_call(self):
         """
         THE POINT OF THREADING domain_profile THROUGH AT ALL. A caller that

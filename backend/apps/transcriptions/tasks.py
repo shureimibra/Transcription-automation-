@@ -1246,6 +1246,11 @@ def _run_quality_gate(revision, processor, job_id, should_cancel, domain_profile
             should_cancel=should_cancel,
             on_stage=on_stage,
             domain_profile=domain_profile,
+            # Only a translate op crosses languages. Every other operation
+            # (cleanup, the Eagle verbatim standard pass) is same-language,
+            # and its source text surviving into the output is the point --
+            # not "untranslated source" leakage.
+            is_translation=(revision.operation == 'translate'),
         )
     except Exception as exc:
         logger.error(

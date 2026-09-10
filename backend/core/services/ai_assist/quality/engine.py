@@ -244,6 +244,7 @@ class AIQualityEngine:
         should_cancel: Optional[Callable[[], bool]] = None,
         on_stage: Optional[Callable[[str, Dict], None]] = None,
         domain_profile: Optional[DomainProfile] = None,
+        is_translation: Optional[bool] = None,
     ) -> QualityResult:
         """
         `pairs` is [{'source': str, 'target': str}, ...] in transcript order.
@@ -264,6 +265,14 @@ class AIQualityEngine:
         analysing this document -- to feed the initial draft's own prompt,
         see run_ai_revision_pipeline -- passes its result back in here so
         the gate doesn't pay for the same answer twice.
+
+        `is_translation` gates the source-leakage check. When None it falls
+        back to a heuristic, but that heuristic reads a language code meant
+        only for typography as proof of a translation, so a same-language
+        cleanup pass (raw ASR -> verbatim standard) was reporting every
+        English segment as "untranslated source" -- 92 HIGH findings on a
+        90-segment transcript, every warm standard pass discarded. The
+        operation knows the truth; pass it.
         """
         texts = [pair.get('target') or '' for pair in pairs]
 
@@ -286,6 +295,12 @@ class AIQualityEngine:
                 QualityStatus.NOT_RUN, texts,
                 reason='Nothing to review.', profile_name=self.profile.name,
             )
+
+        if is_translation is None:
+            # Legacy fallback. WRONG for a same-language pass that carries a
+            # typography language code -- pass is_translation explicitly.
+            is_translation = bool(
+                target_language_code or self.profile.name == 'translation')
 
         provider = _CountingProvider(self.provider)
         model_name = getattr(self.provider, 'model', '') or ''
@@ -360,6 +375,7 @@ class AIQualityEngine:
                     started = time.monotonic()
                     det_issues = self._deterministic_pass(
                         pairs, texts, target_language_code, domain_profile,
+                        is_translation,
                     )
                     record(STAGE_DETERMINISTIC, started, TokenUsage())
                     notify(STAGE_DETERMINISTIC, {
@@ -515,6 +531,7 @@ class AIQualityEngine:
         texts: List[str],
         target_language_code: Optional[str],
         domain_profile: Optional[DomainProfile],
+        is_translation: bool,
     ) -> List[QualityIssue]:
         """
         Per-segment checks plus whole-document anchor checks.
@@ -526,7 +543,6 @@ class AIQualityEngine:
         relative to the rest of the document -- so they run once over the
         joined text with segment_index=None.
         """
-        is_translation = bool(target_language_code or self.profile.name == 'translation')
         issues: List[QualityIssue] = []
 
         for index, pair in enumerate(pairs):
