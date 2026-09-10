@@ -254,6 +254,58 @@ correct it.
    watch for `[SYNC] ... unrecognised status`.
 5. **A warmed transcription outside the AI budget has no standard pass**,
    and nothing in the interface says so (section 6).
+6. **No database/cache retention policy exists yet — deferred until there's
+   meaningful production history to measure against.** Found during a
+   storage audit (2026-09-05), not acted on at the time: deliberately
+   deferred while
+   stabilization continues. Nothing here has been changed.
+
+   - `AISegmentCache` (`apps/transcriptions/models.py:748-787`) is a
+     content-addressed dedup cache (key: operation, languages, model,
+     `prompt_version`, sha256 of normalized text — no FK to any job/task)
+     with **no TTL, no size limit, no scheduled or manual cleanup, no
+     delete path anywhere in the codebase.** It can grow indefinitely.
+     Measured at the time of this audit: ~10MB of a ~29MB database.
+   - `prompt_version` is part of its unique key
+     (`core/services/ai_assist/hashing.py:35-95`), and `translate` alone
+     has been bumped v1→v5 across real defect fixes — every row written
+     under an old version is now structurally unreachable by the current
+     lookup and permanently dead weight. **This is the first safe cleanup
+     candidate**: delete rows whose `prompt_version` doesn't match the
+     current `PROMPT_VERSIONS` value for that `operation` — provably
+     unreachable, not a guess. Current-version rows are a genuine
+     storage/cache-effectiveness/API-cost tradeoff, not an obvious prune.
+   - Before touching any of this, measure: row count; rows by operation ×
+     prompt_version; current-vs-obsolete split; approximate storage of
+     each; cache age distribution; DB growth over time.
+   - Same audit, same disposition (measure later, not now):
+     `TranscriptionJob`/transcript/translation/AI-revision data has no
+     scheduled retention policy either; `AIUsageRecord` deliberately
+     survives job deletion via `SET_NULL` (a financial ledger, correctly
+     kept); Eagle `Task`/`TaskEvent` rows should stay as audit history;
+     media cache is already age-cleaned (`warmpool.purge_expired_audio`,
+     4 days terminal / ~1h lost-race) and measured at ~686MB with 227GB
+     free (6% used) — not urgent; a `.part` interrupted-download file has
+     no orphan sweep, a minor and likely small leak.
+   - **The measurement above was actually run, 2026-09-10.** Real numbers,
+     the retention decision it led to (no sweep — disk is not the
+     constraint, Gemini quota is), the 30-day revisit threshold, and a
+     genuine index-usage correction (a separate pass claimed two indexes
+     were unused; real `pg_stat_user_indexes` data showed that was only
+     true for one of them) are all in
+     `docs/FUTURE_MAINTENANCE_AI_CACHE_RETENTION.md`. This item's own
+     numbers above are the 2026-09-05 estimate that document supersedes.
+7. **Prompt/quality-gate enrichment — deferred, reference material saved.**
+   Found while comparing our prompts against a coach's manual (external)
+   translation-audit and transcription prompts: the automated Gemini
+   translate prompt (`core/services/ai_assist/prompts.py`) has no French
+   typography rules at all, and the multi-pass analysis→audit→repair→
+   re-audit quality gate is never invoked automatically during warming for
+   either product (`_warm_translation` sets no `quality_profile`; the
+   transcription standard pass's own profile deliberately omits the audit
+   stage after a real false-positive-revert incident). Full comparison and
+   the source prompts: `docs/COACH_PROMPTS_REFERENCE.md`. Same disposition
+   as item 6 — measure/decide later, nothing changed now.
 
 ### Done since this file was written
 

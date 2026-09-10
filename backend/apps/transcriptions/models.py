@@ -790,7 +790,16 @@ class AISegmentCache(models.Model):
     target_language = models.CharField(max_length=20, blank=True, default='')
     model_name = models.CharField(max_length=100)
     prompt_version = models.CharField(max_length=30, default='v1')
-    content_hash = models.CharField(max_length=64, db_index=True)
+    # NOT db_index=True. Measured live against pg_stat_user_indexes on
+    # ~70K real rows: the standalone content_hash index sat at 0 scans --
+    # every real lookup filters content_hash together with operation,
+    # target_language, model_name and prompt_version (see iter_batches in
+    # processor.py), which goes through ai_seg_cache_lookup_idx instead.
+    # operation keeps its own db_index=True: THAT standalone index measured
+    # 363 real scans, not zero -- it stays until whatever is generating
+    # those scans is identified, not removed on the same reasoning that
+    # correctly removed this one.
+    content_hash = models.CharField(max_length=64)
 
     source_text_snapshot = models.TextField(blank=True, default='')
     result_text = models.TextField(blank=True, default='')
