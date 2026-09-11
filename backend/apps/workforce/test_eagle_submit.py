@@ -15,7 +15,8 @@ from unittest import mock
 from django.test import TestCase, override_settings
 
 from apps.transcriptions.models import (
-    AIRevision, AIRevisionSegment, Project, TranscriptionJob, TranscriptSegment,
+    AIQualityReport, AIRevision, AIRevisionSegment, Project, TranscriptionJob,
+    TranscriptSegment,
 )
 
 from . import eagle_submit, services, states
@@ -678,6 +679,238 @@ class FindingLocationTestCase(TestCase):
         self.assertIn('first line', found['source_text'])
         self.assertEqual(found['target_text'], '')
         self.assertIn('missing from your translation', found['action'])
+
+
+class LocateSemanticTestCase(TestCase):
+    """
+    `_locate_semantic` looks a segment up by the index the audit already
+    attached, rather than searching for it -- unlike `_locate` above, which
+    has to search because deterministic checks run over the whole document
+    joined into one string and never know which segment produced a value.
+    A completeness or register finding usually names no number at all, so
+    `_locate`'s search would never find it; a direct index lookup does not
+    care.
+    """
+
+    def setUp(self):
+        super().setUp()
+        project = Project.objects.create(name='locate-semantic')
+        self.job = TranscriptionJob.objects.create(
+            project=project, input_source='upload', status='completed')
+        self.task = make_task(kind=Task.TRANSLATION, external_source='translation',
+                              external_task_id='5002', status=states.NEW,
+                              target_language='fr')
+        self.revision = AIRevision.objects.create(
+            job=self.job, operation='translate', target_language='fr',
+            status='completed')
+        Task.objects.filter(pk=self.task.pk).update(
+            job=self.job, deliverable_revision=self.revision)
+        self.task.refresh_from_db()
+
+    def _segment(self, start, english, french):
+        source = TranscriptSegment.objects.create(
+            job=self.job, start_time=start, end_time=start + 4, text=english)
+        return AIRevisionSegment.objects.create(
+            revision=self.revision, original_segment=source,
+            start_time=start, end_time=start + 4,
+            original_text=english, processed_text=french,
+            changed=True, accepted=True)
+
+    def _issue(self, segment_index=None):
+        from core.services.ai_assist.quality.issues import (
+            IssueCategory, QualityIssue, Severity,
+        )
+        return QualityIssue(
+            category=IssueCategory.COMPLETENESS, severity=Severity.CRITICAL,
+            problem='a non-numeric completeness defect, on purpose',
+            segment_index=segment_index,
+        )
+
+    def test_it_finds_the_segment_by_index_with_no_numbers_involved(self):
+        self._segment(10, 'first english line', 'premiere ligne francaise')
+        self._segment(173, 'second english line', 'deuxieme ligne francaise')
+
+        found = eagle_submit._locate_semantic(self._issue(segment_index=1), self.task)
+
+        self.assertEqual(found['segment_index'], 1)
+        self.assertEqual(found['at'], '02:53')
+        self.assertIn('second english', found['source_text'])
+
+    def test_no_segment_index_is_left_unlocated(self):
+        self._segment(10, 'a line', 'une ligne')
+
+        found = eagle_submit._locate_semantic(self._issue(segment_index=None), self.task)
+
+        self.assertEqual(found, {})
+
+    def test_an_out_of_range_index_is_left_unlocated(self):
+        self._segment(10, 'a line', 'une ligne')
+
+        found = eagle_submit._locate_semantic(self._issue(segment_index=5), self.task)
+
+        self.assertEqual(found, {})
+
+
+class SemanticAuditFindingsTestCase(TestCase):
+    """
+    Surfacing a semantic audit that already ran and was already paid for --
+    the gap a 20-document review of real translation submissions found:
+    dropped paragraphs, invented numbers, and untranslated passages reached
+    this preview with zero findings, because only the deterministic checks
+    ever ran here. Those defects are exactly what STAGE_AUDIT (the model
+    audit in quality/engine.py) already checks for, and for a warm-pool
+    translation it already ran, under a quality profile, before a worker
+    ever opened this preview -- its verdict just sat unread on the
+    revision. `_semantic_audit_findings` reads it; it starts no new audit
+    and makes no request of its own (see that function's own docstring).
+    """
+
+    def setUp(self):
+        super().setUp()
+        project = Project.objects.create(name='semantic-audit')
+        self.job = TranscriptionJob.objects.create(
+            project=project, input_source='upload', status='completed')
+        self.task = make_task(kind=Task.TRANSLATION, external_source='translation',
+                              external_task_id='5001', status=states.NEW,
+                              target_language='fr')
+        self.revision = AIRevision.objects.create(
+            job=self.job, operation='translate', target_language='fr',
+            status='completed')
+        Task.objects.filter(pk=self.task.pk).update(
+            job=self.job, deliverable_revision=self.revision)
+        self.task.refresh_from_db()
+
+    def _segment(self, start, english, french):
+        source = TranscriptSegment.objects.create(
+            job=self.job, start_time=start, end_time=start + 4, text=english)
+        return AIRevisionSegment.objects.create(
+            revision=self.revision, original_segment=source,
+            start_time=start, end_time=start + 4,
+            original_text=english, processed_text=french,
+            changed=True, accepted=True)
+
+    def _report(self, status, issues=None, reason=''):
+        self.revision.quality_status = status
+        self.revision.quality_reason = reason
+        self.revision.save(update_fields=['quality_status', 'quality_reason'])
+        AIQualityReport.objects.create(
+            revision=self.revision, profile='volume', status=status,
+            reason=reason, report={'issues': issues or []},
+        )
+
+    def test_a_revision_nobody_audited_produces_no_findings(self):
+        """The default fixture state: no quality_profile was ever
+        requested, so quality_status is 'not_run'. This is the ordinary
+        case for most of the platform's history, and it must keep behaving
+        exactly as it did before this feature existed."""
+        self.assertEqual(eagle_submit._semantic_audit_findings(self.task), [])
+
+    def test_an_audit_still_in_progress_produces_no_findings(self):
+        for status in ('pending', 'auditing'):
+            self.revision.quality_status = status
+            self.revision.save(update_fields=['quality_status'])
+            self.assertEqual(
+                eagle_submit._semantic_audit_findings(self.task), [],
+                f'status={status}')
+
+    def test_a_validated_revision_with_no_report_row_produces_no_findings(self):
+        self.revision.quality_status = 'validated'
+        self.revision.save(update_fields=['quality_status'])
+        self.assertEqual(eagle_submit._semantic_audit_findings(self.task), [])
+
+    def test_a_critical_semantic_issue_is_surfaced_with_its_location(self):
+        self._segment(10, 'The witness described three separate incidents.',
+                      'Le témoin a décrit un incident.')
+        self._report('quality_review_required', issues=[{
+            'category': 'completeness', 'severity': 'critical',
+            'problem': 'Two of the three incidents in the source are '
+                       'missing from the translation.',
+            'rule': 'completeness.dropped-content', 'segment_index': 0,
+        }])
+
+        findings = eagle_submit._semantic_audit_findings(self.task)
+
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]['severity'], 'critical')
+        self.assertEqual(findings[0]['code'], 'completeness.dropped-content')
+        self.assertEqual(findings[0]['segment_index'], 0)
+        self.assertEqual(findings[0]['at'], '00:10')
+
+    def test_a_critical_semantic_finding_blocks_submission(self):
+        """The integration point: `run_quality_gate` folds this function's
+        output into the same findings list deterministic checks use, so a
+        CRITICAL semantic finding blocks exactly the way a CRITICAL
+        deterministic one already does -- no new blocking logic needed."""
+        self._segment(10, 'The witness described three separate incidents.',
+                      'Le témoin a décrit un incident.')
+        self._report('quality_review_required', issues=[{
+            'category': 'completeness', 'severity': 'critical',
+            'problem': 'content dropped',
+            'rule': 'completeness.dropped-content', 'segment_index': 0,
+        }])
+        content = 'Target Language: French\nNumber Of Words: 4\nLe témoin.'
+
+        findings = run_quality_gate(self.task, content)
+
+        self.assertTrue(any(f['severity'] == 'critical' for f in findings))
+
+    def test_a_high_semantic_issue_is_advisory_not_blocking(self):
+        self._segment(10, 'source line', 'target line')
+        self._report('quality_review_required', issues=[{
+            'category': 'linguistic', 'severity': 'high',
+            'problem': 'Register is too informal for a legal transcript.',
+            'rule': 'linguistic.register', 'segment_index': 0,
+        }])
+        content = 'Target Language: French\nNumber Of Words: 2\ntarget line'
+
+        findings = run_quality_gate(self.task, content)
+
+        semantic = [f for f in findings if f['code'] == 'linguistic.register']
+        self.assertEqual(len(semantic), 1)
+        self.assertEqual(semantic[0]['severity'], 'high')
+        self.assertFalse(any(f['severity'] == 'critical' for f in findings))
+
+    def test_a_technical_failure_with_no_issues_adds_one_advisory_finding(self):
+        self._report('technical_failure', issues=[],
+                     reason='The quality pipeline could not complete. The '
+                            'AI result above has not been checked.')
+
+        findings = eagle_submit._semantic_audit_findings(self.task)
+
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]['code'], 'semantic-audit-incomplete')
+        self.assertEqual(findings[0]['severity'], 'high')
+        self.assertIn('could not complete', findings[0]['message'])
+
+    def test_review_required_with_no_stored_issues_still_says_something(self):
+        """Defensive: the engine's own invariants say this should not
+        happen (a refusal always carries its reasons), but a reporting
+        layer must not go silent just because an assumption from another
+        module turned out to be wrong."""
+        self._report('quality_review_required', issues=[])
+
+        findings = eagle_submit._semantic_audit_findings(self.task)
+
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]['code'], 'semantic-review-required')
+
+    def test_a_polished_document_suppresses_stale_semantic_findings(self):
+        """The audit judged the AI draft. Once a worker has pasted their
+        own polished replacement, THAT is what will actually be submitted
+        -- and the audit's findings may describe a paragraph that no
+        longer exists, exactly the staleness `_segment_pairs` already
+        refuses to guess through for deterministic findings."""
+        self._segment(10, 'source line', 'MACHINE: target line')
+        self._report('quality_review_required', issues=[{
+            'category': 'completeness', 'severity': 'critical',
+            'problem': 'content dropped',
+            'rule': 'completeness.dropped-content', 'segment_index': 0,
+        }])
+        Task.objects.filter(pk=self.task.pk).update(
+            polished_text='POLISHED: target line')
+        self.task.refresh_from_db()
+
+        self.assertEqual(eagle_submit._semantic_audit_findings(self.task), [])
 
 
 class UntranslatedSourceBlocksTestCase(TestCase):

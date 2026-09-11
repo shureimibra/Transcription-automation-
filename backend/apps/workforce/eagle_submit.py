@@ -19,6 +19,15 @@ AND the worker's hour, so the deterministic checks are worth their
 milliseconds. They are Tier 0 only -- no model calls -- because there is an
 hour on the clock and a quality gate that phones an API is a quality gate that
 can time out.
+
+TIER 0 STAYS TIER 0 -- THIS FILE STILL MAKES NO MODEL CALLS. The gate also
+surfaces a semantic audit's verdict now, but that audit already ran, on this
+exact deliverable, when the warm-pool pass created it under a quality profile
+(see warmpool._warm_translation) -- its result is a row already sitting in
+the database. `_semantic_audit_findings` only reads it. A revision nobody
+audited still reports quality_status='not_run' and contributes nothing here,
+same as before this existed: no request is made, and none skipped that this
+file would otherwise have made, because this file never made one.
 """
 import logging
 import os
@@ -462,6 +471,97 @@ def _translation_findings(task: Task, content: str) -> List[Dict]:
     return findings
 
 
+def _semantic_audit_findings(task: Task) -> List[Dict]:
+    """
+    Surfaces a semantic audit already paid for and already run -- this
+    function performs no audit and no provider request of its own.
+
+    THE GAP THIS CLOSES. A 20-document review of real translation
+    submissions found dropped paragraphs, invented numbers, and untranslated
+    passages reaching this preview with zero findings, because the gate only
+    ever ran `_translation_findings`' deterministic checks. Those are
+    exactly the defect classes the semantic audit (STAGE_AUDIT, in
+    quality/engine.py) already checks for -- and for a translation the
+    warm-pool pass produced (`warmpool._warm_translation`, under
+    `quality_profile`), that audit already ran against this exact text and
+    already wrote its verdict to `revision.quality_status` and an
+    `AIQualityReport` row. Nothing here ever consulted it.
+
+    WHY THIS DOES NOT COST A REQUEST. It reads `revision.quality_status` and
+    the most recent `AIQualityReport`, both already in the database by the
+    time a worker opens the preview. A revision nobody audited (no
+    `quality_profile` requested, or a run still in progress) reports
+    'not_run', 'pending' or 'auditing' and this returns nothing for it --
+    the same as if this function did not exist.
+
+    NOT RUN AGAINST A HUMAN-POLISHED DOCUMENT. The audit judged the AI
+    revision's own text; once a worker has pasted a polished replacement
+    (`task.polished_text`), that text is what will actually be submitted,
+    and the audit's findings may describe a paragraph that no longer exists
+    or miss one the human edit just introduced -- exactly the staleness
+    `_segment_pairs` already refuses to guess through for deterministic
+    findings. A worker actively polishing is already reading every line, so
+    nothing is lost by staying quiet here.
+
+    Never raises: same contract as `_translation_findings`.
+    """
+    if (task.polished_text or '').strip():
+        return []
+
+    revision = task.deliverable_revision
+    if revision is None:
+        return []
+
+    try:
+        from apps.transcriptions.models import AIRevision
+
+        if revision.quality_status == 'not_run':
+            return []
+        if revision.quality_status in AIRevision.QUALITY_IN_PROGRESS_STATUSES:
+            return []
+
+        report = revision.quality_reports.order_by('-created_at').first()
+        stored_issues = report.issues if report else []
+
+        if not stored_issues:
+            if revision.quality_status == 'validated':
+                return []
+            # The gate refused this revision but left no itemised issue --
+            # a technical failure, most likely. Say so rather than showing
+            # nothing, but as advice (HIGH, not CRITICAL): this is the audit
+            # infrastructure coming up empty, not a confirmed defect in the
+            # translation itself, and it must not strand a task on its own.
+            return [{
+                'severity': 'high',
+                'code': ('semantic-audit-incomplete'
+                         if revision.quality_status == 'technical_failure'
+                         else 'semantic-review-required'),
+                'message': revision.quality_reason or (
+                    'The semantic quality check did not clear this '
+                    'translation. Review it carefully before submitting.'
+                ),
+            }]
+
+        from core.services.ai_assist.quality.issues import QualityIssue
+
+        findings = []
+        for raw in stored_issues:
+            issue = QualityIssue.from_dict(raw)
+            finding = {
+                'severity': str(getattr(issue.severity, 'value', issue.severity)),
+                'code': issue.rule or 'semantic-quality',
+                'message': (f'{issue.problem} {issue.correction}'.strip()
+                            if issue.correction else issue.problem),
+            }
+            finding.update(_locate_semantic(issue, task))
+            findings.append(finding)
+        return findings
+    except Exception:  # pragma: no cover - a reporting bug is not a blocker
+        logger.exception(
+            '[SUBMIT] could not read the semantic audit for task %s', task.id)
+        return []
+
+
 def _segment_pairs(task: Task):
     """
     Aligned (start, source, target) lines to locate a finding against.
@@ -506,6 +606,34 @@ def _clock(seconds) -> str:
     except (TypeError, ValueError):
         return '00:00'
     return f'{total // 60:02d}:{total % 60:02d}'
+
+
+def _locate_semantic(issue, task: Task) -> Dict:
+    """
+    Where a semantic-audit finding lives, using the segment_index the audit
+    itself attached -- no searching required.
+
+    `_locate` (below) has to search for a deterministic finding's location
+    because those checks run over the whole document joined into one
+    string and never knew which segment they were looking at. A semantic
+    finding is different: `engine.run()` built its `pairs` in the exact
+    same per-segment, start-time order `_segment_pairs` returns here, so
+    the audit's own `segment_index` already IS that position -- reusing it
+    is a lookup, not a search, and cannot mis-locate a finding onto a
+    coincidentally-similar line the way number-matching could.
+    """
+    if issue.segment_index is None:
+        return {}
+    pairs = _segment_pairs(task)
+    if not (0 <= issue.segment_index < len(pairs)):
+        return {}
+    start, source_text, target_text = pairs[issue.segment_index]
+    return {
+        'segment_index': issue.segment_index,
+        'at': _clock(start),
+        'source_text': source_text,
+        'target_text': target_text,
+    }
 
 
 def _locate(issue, task: Task) -> Dict:
@@ -660,6 +788,10 @@ def run_quality_gate(task: Task, content: str) -> List[Dict]:
         # under the reviewer -- for a worker who does not read the target
         # language, they are the reviewer.
         findings.extend(_translation_findings(task, content))
+        # AND WHATEVER THE SEMANTIC AUDIT ALREADY CONCLUDED. Free to read,
+        # not free to compute -- see _semantic_audit_findings for why this
+        # costs no additional request.
+        findings.extend(_semantic_audit_findings(task))
 
     # A transcript far shorter than its audio is the signature of a
     # truncated pipeline run, and it is worth stopping before it costs the
