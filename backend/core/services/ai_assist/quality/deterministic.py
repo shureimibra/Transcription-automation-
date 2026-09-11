@@ -136,8 +136,27 @@ def _multiset_diff(left: Dict, right: Dict) -> Tuple[List, List]:
     return missing, added
 
 
+def _display(value: Decimal) -> str:
+    """
+    A number, the way the human reading this finding expects to see it.
+
+    Decimal.normalize() strips trailing zeros -- needed so "30" and "30.0"
+    are recognized as the same value -- but for a whole number that means a
+    coefficient of 3 and a positive exponent, and Decimal's own __str__
+    switches to scientific notation exactly when the exponent is positive.
+    A genuinely missing 30 was reported as the baffling "3E+1" (and 100 as
+    "1E+2", 500 as "5E+2"...), which reads as a garbled number rather than
+    the round one it actually is. `to_integral_value()` does not fix this --
+    an already-integral Decimal is returned unchanged, exponent and all;
+    only the 'f' (fixed-point) format spec forces non-scientific notation
+    unconditionally, for any value, which is why that is what this uses
+    rather than reasoning about which values need it.
+    """
+    return format(value.normalize(), 'f')
+
+
 def _format_values(values, limit: int = 6) -> str:
-    shown = ', '.join(str(value.normalize()) for value in values[:limit])
+    shown = ', '.join(_display(value) for value in values[:limit])
     return shown + ('...' if len(values) > limit else '')
 
 
@@ -221,6 +240,38 @@ def spelled_number_values(text: str) -> set:
     return values
 
 
+def _forgive_hour_conversions(
+    missing: List[Decimal], added: List[Decimal],
+) -> Tuple[List[Decimal], List[Decimal]]:
+    """
+    5pm -> 17 heures, 2pm -> 14 heures: a correct 12h-to-24h conversion, not
+    a changed quantity. English commonly states a time as "5pm"; formal
+    French writes the same moment as "17 heures". The two notations share
+    no digits, so a literal value comparison read the conversion as the
+    source's 5 going missing and the target's 17 being invented -- a real
+    submission was blocked over lecture start times for exactly this
+    reason.
+
+    BOUNDED TO PLAUSIBLE HOURS, not "anything 12 apart": 12 is also "a
+    dozen", and forgiving every pair that happens to differ by 12 would let
+    a real defect ("12 patients" quietly became "24 patients") through as
+    a false time conversion. Only values in the ranges an hour can actually
+    take -- 1-11 for the 12-hour form, 13-23 for the 24-hour one -- are
+    eligible, and each pairing is consumed once, so a genuine surplus
+    number past the pairing is still reported.
+    """
+    remaining_missing = list(missing)
+    remaining_added = list(added)
+    for value in list(remaining_missing):
+        if not (1 <= value <= 11):
+            continue
+        pair = value + 12
+        if pair in remaining_added:
+            remaining_missing.remove(value)
+            remaining_added.remove(pair)
+    return remaining_missing, remaining_added
+
+
 def check_numbers(
     source: str, target: str, segment_index: Optional[int] = None
 ) -> List[QualityIssue]:
@@ -259,6 +310,8 @@ def check_numbers(
     missing = [v for v in dict.fromkeys(missing) if v not in target_set]
     added = [v for v in dict.fromkeys(added) if v not in source_set]
 
+    missing, added = _forgive_hour_conversions(missing, added)
+
     issues = []
     if missing:
         issues.append(QualityIssue(
@@ -293,13 +346,70 @@ def check_numbers(
 # Verbatim tokens: URLs, e-mail, identifiers
 # ---------------------------------------------------------------------- #
 
-#: A run of Title Case words, including the small connecting words a title
-#: is allowed to contain: "The Mind of the South", "Trouble the Water".
+#: Closed-class words a title may contain between its capitalized content
+#: words -- "The Mind of the South", "Trouble the Water", "Ideas That Have
+#: Shaped Our Country". Titles use ordinary English syntax, so this has to
+#: cover articles, prepositions and conjunctions AND the relative/possessive
+#: words a subtitle clause commonly needs. "that" was missing: a real title
+#: ("...Ideas that have shaped our country") fell through this list's gap
+#: and reported "that" as a foreign word surviving in a French translation,
+#: when it was the correctly-untranslated title doing exactly what a title
+#: is supposed to do. Shared with check_source_leakage's title exemption
+#: below, so both checks agree on what a title looks like.
+_TITLE_CONNECTORS = frozenset({
+    'of', 'the', 'and', 'or', 'nor', 'but', 'in', 'on', 'at', 'by', 'as',
+    'a', 'an', 'to', 'for', 'from', 'with', 'that', 'which', 'who', 'whom',
+    'whose', 'our', 'your', 'their', 'its', 'his', 'her', 'is', 'are',
+})
+
 _TITLE_RUN_RE = re.compile(
     r"\b[A-Z][\w'’-]+"
-    r"(?:\s+(?:[A-Z][\w'’-]+|of|the|and|in|on|a|an|to|for|from|with))*"
+    r"(?:\s+(?:[A-Z][\w'’-]+|" + '|'.join(sorted(_TITLE_CONNECTORS)) + r"))*"
     r"\s+[A-Z][\w'’-]+"
 )
+
+
+def _looks_like_a_title(phrase: str) -> bool:
+    """
+    True when `phrase` reads as title-case rather than ordinary prose --
+    available for check_source_leakage, which needs to ask this of an
+    already-located run rather than search for one the way _TITLE_RUN_RE
+    does.
+
+    ANCHORED ON SEVERAL DISTINCT CAPITALS, NOT "every word accounted for",
+    AND FOUND BY SLIDING, NOT JUDGED OVER THE WHOLE TEXT. A model does not
+    always apply full title-case to a title it renders mid-sentence --
+    measured on the real case this exists for, only 5 of 13 words in a
+    genuine 14-word book title were capitalized at all ("The Promise of
+    Canada, 150 years, People and Ideas that have shaped our country";
+    "years", "have", "shaped" and "country" stayed lowercase). And a real
+    segment usually frames the title in ordinary prose around it ("her
+    recent book is titled ... you know"), which dilutes any ratio measured
+    over the WHOLE segment below a title's own local density even though
+    the title itself, read in isolation, is unambiguous. So this slides an
+    8-word window (or the whole phrase, if shorter) and asks only whether
+    SOME window inside the text is title-dense -- not whether the text is,
+    on average. An ordinary skipped SENTENCE -- the real leak this exists
+    to catch -- has at most its own scattered proper nouns, and this
+    codebase's own content is proper-noun-heavy (case names, institutions),
+    so both thresholds matter together within one window: few 8-word
+    stretches combine three-plus capitals with half the window accounted
+    for by accident.
+    """
+    words = re.findall(r"[A-Za-z][\w'’-]*", phrase or '')
+    if len(words) < 2:
+        return False
+    flags = [
+        word[0].isupper() or word.lower() in _TITLE_CONNECTORS
+        for word in words
+    ]
+    caps = [word[0].isupper() for word in words]
+    window = min(8, len(words))
+    for start in range(0, len(words) - window + 1):
+        if (sum(caps[start:start + window]) >= 3
+                and sum(flags[start:start + window]) / window >= 0.5):
+            return True
+    return False
 
 _URL_RE = re.compile(r'https?://[^\s<>"\')\]]+', re.IGNORECASE)
 _EMAIL_RE = re.compile(r'[\w.+-]+@[\w-]+\.[\w.-]+')
@@ -324,6 +434,10 @@ def _check_verbatim(
         #   60-year-old  the same, with a second part -- the old pattern
         #                allowed only one, so this was reported as a code
         #   19th, 21st   an ordinal; French writes XIXe, XXIe
+        #   1L, 2L, 3L   US law-school jargon for first/second/third-year
+        #                student -- correctly translated as "premiere
+        #                annee" etc., which is exactly what this check
+        #                should not demand survive as literal "1L".
         # Demanding these survive character-for-character reports a correct
         # translation as having altered a code.
         #
@@ -331,8 +445,14 @@ def _check_verbatim(
         # task 4452 was ACCEPTED by the platform, and our gate reported
         # "60-year-old, 20th, 19th" as altered identifiers against a French
         # text that had rendered every one of them correctly.
+        #
+        # 1L/2L/3L IS ITS OWN ALTERNATIVE, NOT FOLDED INTO THE SUFFIX LIST
+        # ABOVE: a bare "\dL" pattern would also swallow a real code like
+        # "5L" meaning five litres, which this check exists to protect.
+        # Law school is exactly three years, so only 1-3 qualify.
         return not re.match(
-            r'^(?:[a-z]+-)?\d{1,4}(?:st|nd|rd|th|s)?(?:-[a-z]{2,})*$',
+            r'^(?:[a-z]+-)?\d{1,4}(?:st|nd|rd|th|s)?(?:-[a-z]{2,})*$'
+            r'|^[123]L$',
             str(token), re.IGNORECASE)
 
     source_tokens = _multiset([t for t in pattern.findall(source or '') if _keep(t)])
@@ -517,6 +637,19 @@ def check_foreign_language(
     """
     markers = _FOREIGN_MARKERS.get((target_language or '').strip().lower()[:2])
     if not markers or not text:
+        return []
+
+    if _looks_like_a_title(text):
+        # The segment itself reads as a title, not ordinary prose. The
+        # per-run stripping below (_TITLE_RUN_RE) still helps when a
+        # segment MIXES a title with ordinary framing text around it, but
+        # when the model did not title-case every single word of a long
+        # title, a marker word can survive stripping simply because
+        # nothing capitalized happens to follow it in THAT run -- "Ideas
+        # that have shaped our country" has no capital after "that" for
+        # the run to close on, even though the whole phrase is plainly
+        # still the title. Confirmed live: the same 14-word title this
+        # module's docstrings already cite reported "that" this way.
         return []
 
     # QUOTED MATERIAL IS FOREIGN ON PURPOSE. A title, a nickname or a
@@ -908,10 +1041,28 @@ def check_source_leakage(
 
     Matched on word sequences rather than characters, and only at eight
     words or more. Proper nouns, quoted titles, code and formulae are all
-    SUPPOSED to survive verbatim, and every one of them is short -- eight
-    consecutive identical words is a sentence the model skipped, not a name
-    it correctly preserved.
+    SUPPOSED to survive verbatim -- but "every one of them is short" turned
+    out to be false: a real, correctly-untranslated book title ("The
+    Promise of Canada, 150 years, People and Ideas that have shaped our
+    country") ran 14 words and was reported as a skipped sentence, blocking
+    a submission that was actually fine.
+
+    _looks_like_a_title (shared with check_foreign_language) is what tells
+    a skipped sentence apart from a title once the eight-word threshold is
+    crossed -- checked against the WHOLE target segment, not the matched
+    eight-word slice alone. A sliding window can land on the least-
+    capitalized tail of a real title (the model did not title-case "have",
+    "shaped" or "country" in the example above), which reads as ordinary
+    prose in isolation even though the segment as a whole is plainly still
+    the title; the anchor words earlier in it need to stay in view. The
+    same reasoning is why this looks at the target, not the source: raw
+    ASR rarely preserves a title's capitalization at all, having no way to
+    know a stretch of spoken audio names a book -- a model that recognized
+    the title and rendered it properly capitalized is where that structure
+    actually shows up.
     """
+    if _looks_like_a_title(target):
+        return []
     source_words = re.findall(r"[\w'-]+", (source or '').lower())
     target_lower = (target or '').lower()
     if len(source_words) < 8:

@@ -151,8 +151,15 @@ Fidelity rules, which apply to every subject equally:
 8. No markdown and no formatting characters. No asterisks, no underscores.
    A title is plain text. This is submitted as plain text and an asterisk
    arrives as literal punctuation.
-9. An official name -- a statute, court, institution or case -- keeps ONE
-   form throughout. A review was failed for naming one Act two ways.
+9. An official name -- a person, a statute, a court, an institution or a
+   case -- keeps ONE spelling throughout, including every later segment in
+   this same batch where it recurs. A review was failed for naming one Act
+   two ways; a real run named the same student FOUR different ways across
+   one document (Galsky, Rogalski, Agaski, Rogowski) despite the correct
+   spelling being stated plainly earlier in the very same transcript. Once
+   a name has appeared, reproduce that exact spelling every time it
+   recurs -- never vary it, and never "correct" it to a spelling that
+   merely sounds more familiar.
 10. ONE FORM OF ADDRESS THROUGHOUT. Where {target_language} distinguishes
    familiar from polite address (French tu/vous, Spanish tu/usted, German
    du/Sie), choose ONE from the speaker's register and never switch. A
@@ -176,7 +183,17 @@ Fidelity rules, which apply to every subject equally:
    judgment: "x au carré" for one simple mention, but "x³", "z²", "zⁿ",
    and subscripted variables like "γ₁" and "aₙ" for the general
    polynomial. Use standard Unicode superscripts, subscripts and symbols
-   for the field actually being discussed -- never LaTeX or markup.""",
+   for the field actually being discussed -- never LaTeX or markup.
+13. THE TITLE OF A BOOK, ARTICLE OR OTHER NAMED WORK STAYS ENTIRELY IN
+   ITS OWN LANGUAGE, WORD FOR WORD -- never partially translated, and
+   never given a different name than its real one. A real run rendered
+   the real English title "The Promise of Canada: 150 Years, People and
+   Ideas That Have Shaped Our Country" as "The Promised Canada, 150 ans,
+   les gens et les idées qui ont façonné le pays" -- wrong twice over: the
+   name itself was altered ("Promised" for "Promise of"), and half the
+   title was translated while the other half was not. Reproduce the whole
+   title exactly as spoken, then continue translating the sentence around
+   it.""",
 
     CUSTOM: """\
 Task: apply the user's instruction below to each segment's text.

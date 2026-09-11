@@ -4172,6 +4172,33 @@ class AIAssistPromptTestCase(TestCase):
         self.assertIn('Unicode superscripts, subscripts', task)
         self.assertIn('never LaTeX', task)
 
+    def test_translate_instructs_person_names_to_stay_consistent_too(self):
+        """
+        Rule 9 already asked for one spelling of an official name
+        throughout, but only named statutes, courts, institutions and
+        cases -- not people, which is exactly where a real document drifted
+        worst: the same student spelled four different ways (Galsky,
+        Rogalski, Agaski, Rogowski) in one transcript, despite the correct
+        spelling being given plainly early on.
+        """
+        from core.services.ai_assist import prompts
+        task = prompts.task_description('translate', 'French')
+        self.assertIn('a person, a statute, a court', task)
+        self.assertIn('Galsky', task)
+
+    def test_translate_instructs_a_title_to_stay_whole_not_half_translated(self):
+        """
+        A real submission rendered the real English title "The Promise of
+        Canada..." as "The Promised Canada, 150 ans, les gens et les
+        idées..." -- the name itself altered, and half the title
+        translated while the other half was not. Nothing previously told
+        the model a title is one indivisible unit.
+        """
+        from core.services.ai_assist import prompts
+        task = prompts.task_description('translate', 'French')
+        self.assertIn('STAYS ENTIRELY IN', task)
+        self.assertIn('The Promise of Canada', task)
+
     def test_academic_uses_the_same_simple_versus_complex_judgment_as_translate(self):
         """
         Consistency, on request: the ACADEMIC operation used to convert any
@@ -9728,6 +9755,48 @@ class QualityDeterministicCheckTestCase(TestCase):
         issues = check_numbers('several patients', '17 patients')
         self.assertTrue(any(i.rule == 'numeric.absent-from-source' for i in issues))
 
+    def test_a_round_number_displays_as_itself_not_scientific_notation(self):
+        """
+        Decimal.normalize() strips trailing zeros for correct value
+        equality (30 and 30.0 must compare equal), but for a round value
+        that leaves a coefficient of 3 and a positive exponent -- and
+        Decimal's own str() switches to scientific notation exactly when
+        the exponent is positive. A real, genuinely missing 30 was
+        reported to a worker as the baffling "3E+1" (also true of 100,
+        500, 1000...), reading as a garbled number rather than the round
+        one it actually is.
+        """
+        from core.services.ai_assist.quality import check_numbers
+        issues = check_numbers('30 patients recovered', 'les patients ont guéri')
+        missing = next(i for i in issues if i.rule == 'numeric.missing-from-target')
+        self.assertIn('30', missing.problem)
+        self.assertNotIn('E+', missing.problem)
+
+    def test_a_correct_12h_to_24h_time_conversion_is_not_a_changed_number(self):
+        """
+        A real submission was blocked over lecture start times: English
+        "5pm"/"2pm" correctly became French "17 heures"/"14 heures", and a
+        literal value comparison read the source's 5 and 2 as dropped and
+        the target's 17 and 14 as invented.
+        """
+        from core.services.ai_assist.quality import check_numbers
+        self.assertEqual(check_numbers(
+            'the second lecture is at 5 pm tomorrow and the third at 2 pm '
+            'on friday',
+            'la deuxième conférence est à 17 heures demain et la '
+            'troisième à 14 heures vendredi',
+        ), [])
+
+    def test_the_hour_conversion_forgiveness_does_not_swallow_a_real_dozen(self):
+        """12 is also a dozen. Forgiving every pair that happens to differ
+        by 12 would let a real defect -- a doubled quantity -- through as
+        a false time conversion, so the forgiveness is bounded to values
+        an hour can actually take (1-11 for the 12h form)."""
+        from core.services.ai_assist.quality import check_numbers
+        issues = check_numbers('12 patients enrolled', '24 patients ont participé')
+        self.assertTrue(any(i.rule == 'numeric.missing-from-target' for i in issues))
+        self.assertTrue(any(i.rule == 'numeric.absent-from-source' for i in issues))
+
     def test_a_dropped_url_is_reported(self):
         from core.services.ai_assist.quality import check_verbatim_tokens
         issues = check_verbatim_tokens(
@@ -9758,6 +9827,34 @@ class QualityDeterministicCheckTestCase(TestCase):
             'a 60-year-old veteran', 'un vétéran de 60 ans'), [])
         self.assertEqual(check_verbatim_tokens(
             'the 1780s and mid-1850s', 'les années 1780 et 1850'), [])
+
+    def test_1l_law_school_jargon_is_not_an_identifier_code(self):
+        """
+        A real blocking finding: "1L" -- US law-school shorthand for a
+        first-year student -- was correctly translated as "première
+        année", and the gate demanded it survive as literal "1L" instead,
+        which is jargon a French reader has no use for.
+        """
+        from core.services.ai_assist.quality import check_verbatim_tokens
+
+        self.assertEqual(check_verbatim_tokens(
+            'every 1L has a hard first semester',
+            'chaque étudiant de première année a un premier semestre difficile',
+        ), [])
+        self.assertEqual(check_verbatim_tokens(
+            'from 1L to 3L, the workload only grows',
+            'de la première à la troisième année, la charge de travail ne '
+            'fait qu\'augmenter',
+        ), [])
+
+    def test_a_real_unit_code_that_looks_similar_is_still_caught(self):
+        """The 1L exemption must not widen into "any digit plus L": a real
+        measurement code like "5L" (five litres) altering in translation
+        is exactly what this check exists to catch."""
+        from core.services.ai_assist.quality import check_verbatim_tokens
+
+        issues = check_verbatim_tokens('add 5L of water', 'ajoutez 10L d\'eau')
+        self.assertTrue(any(i.rule == 'entity.identifier-altered' for i in issues))
 
     def test_a_genuine_code_change_is_still_caught(self):
         """The guard above must not blind the check: these are the defects
@@ -9795,6 +9892,63 @@ class QualityDeterministicCheckTestCase(TestCase):
         issues = check_foreign_language(
             'Le signal était fort and le télescope était grand.', 'fr')
         self.assertTrue(any(i.rule == 'language.foreign-word' for i in issues))
+
+    def test_a_long_title_is_not_leakage_even_when_the_model_undercapitalizes_it(self):
+        """
+        A real submitted document: an English book title correctly left
+        untranslated blocked submission as HIGH "source-language text
+        carried into the output untranslated", because the title ran 14
+        words and check_source_leakage's eight-word threshold assumed a
+        legitimate verbatim run would always be shorter than that.
+
+        The model did not title-case every word either ("years", "have",
+        "shaped" and "country" stayed lowercase) -- exactly the shape the
+        fix has to tolerate, not just a perfectly-capitalized title.
+        """
+        from core.services.ai_assist.quality import check_source_leakage
+
+        source = (
+            'her recent book is titled The Promise of Canada, 150 years, '
+            'People and Ideas that have shaped our country you know'
+        )
+        target = (
+            'son livre récent est intitulé The Promise of Canada, 150 '
+            'years, People and Ideas that have shaped our country vous '
+            'savez'
+        )
+        self.assertEqual(check_source_leakage(source, target), [])
+
+    def test_a_genuinely_skipped_sentence_is_still_leakage(self):
+        """The fix above must not blind the check to a real one: eight or
+        more identical, ordinary-prose words surviving untranslated."""
+        from core.services.ai_assist.quality import check_source_leakage
+
+        identical = (
+            'the agent owes a duty of care to the principal at all '
+            'times and nothing changes that'
+        )
+        issues = check_source_leakage(identical, identical)
+        self.assertTrue(any(i.rule == 'leakage.untranslated-source' for i in issues))
+
+    def test_a_relative_clause_inside_a_title_is_not_a_foreign_word(self):
+        """
+        The sibling false positive on the same real title: "that" sits in
+        a relative clause ("Ideas that have shaped...") with no capitalized
+        word later in that specific run for _TITLE_RUN_RE to close on, so
+        widening its connector whitelist alone was not enough -- it also
+        needed check_foreign_language to recognize the whole segment as a
+        title rather than judging "that" in isolation.
+        """
+        from core.services.ai_assist.quality import check_foreign_language
+
+        self.assertEqual(check_foreign_language(
+            'Voici mon livre, The Promise of Canada, People and Ideas '
+            'that have shaped our country.', 'fr'), [])
+        # A second real title, colon-and-comma-interrupted rather than a
+        # single continuous Title Case run.
+        self.assertEqual(check_foreign_language(
+            'mon livre préféré est Seize the Hour : Nixon, Mao, and the '
+            'Meeting That Changed the World fin', 'fr'), [])
 
     def test_a_broken_paste_is_caught_before_it_is_submitted(self):
         """
