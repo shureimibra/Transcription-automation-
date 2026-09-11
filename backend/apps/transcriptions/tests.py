@@ -6658,6 +6658,99 @@ class AIRevisionPipelineDomainAwareIntegrationTestCase(TestCase):
         )
 
 
+class TranslationNameGlossaryIntegrationTestCase(TestCase):
+    """
+    The wiring for _build_name_glossary, end to end: a name that recurs
+    across a translation job's own segments reaches every batch's actual
+    prompt, without being written back onto the stored revision.
+    """
+
+    def setUp(self):
+        self.project = Project.objects.create(name="Glossary Wiring Test Project")
+        self.job = TranscriptionJob.objects.create(
+            project=self.project, input_source='url',
+            source_url='https://example.com/a.mp3', status='completed',
+        )
+        texts = [
+            'Dites-moi votre nom. Robert Galsky.',
+            'Monsieur Galsky, pourquoi a-t-il droit a la commission ?',
+            'Le juge Marshall a repondu a Monsieur Galsky.',
+        ]
+        for index, text in enumerate(texts):
+            TranscriptSegment.objects.create(
+                job=self.job, speaker_label='Speaker 0',
+                start_time=float(index), end_time=float(index) + 0.9, text=text,
+            )
+
+    def _run(self, custom_instruction=''):
+        from apps.transcriptions.tasks import run_ai_revision_pipeline
+        provider = _CombinedDraftAndQualityProvider(transform=str.upper)
+        revision = AIRevision.objects.create(
+            job=self.job, operation='translate', target_language='fr',
+            label='AI Translated', custom_instruction=custom_instruction,
+        )
+        with patch(
+            'apps.transcriptions.tasks.AIPostProcessor',
+            lambda: make_ai_processor(provider),
+        ):
+            run_ai_revision_pipeline(revision.id)
+        revision.refresh_from_db()
+        return revision, provider
+
+    def test_a_name_recurring_across_segments_reaches_the_draft_prompt(self):
+        revision, provider = self._run()
+
+        self.assertEqual(revision.status, 'completed')
+        draft_prompts = provider.prompts_of('draft')
+        self.assertTrue(draft_prompts)
+        for prompt in draft_prompts:
+            self.assertIn('Galsky', prompt)
+            self.assertIn('EXACTLY as spelled', prompt)
+
+    def test_the_stored_custom_instruction_is_not_polluted_by_the_glossary(self):
+        """The glossary must reach the prompt without being written back
+        onto revision.custom_instruction -- that field is the audit trail
+        of what a person actually typed, and this is generated, not typed."""
+        revision, _ = self._run(custom_instruction='keep it formal')
+
+        self.assertEqual(revision.custom_instruction, 'keep it formal')
+        self.assertNotIn('Galsky', revision.custom_instruction)
+
+    def test_a_users_own_custom_instruction_still_reaches_the_prompt_too(self):
+        revision, provider = self._run(custom_instruction='keep it formal')
+
+        self.assertIn('keep it formal', provider.prompts_of('draft')[0])
+        self.assertIn('Galsky', provider.prompts_of('draft')[0])
+
+    def test_a_name_mentioned_only_once_is_not_forced_into_the_glossary(self):
+        """A name with nothing to drift out of sync WITH does not need to
+        be listed -- keeping the prompt free of noise that adds nothing."""
+        job = TranscriptionJob.objects.create(
+            project=self.project, input_source='url',
+            source_url='https://example.com/b.mp3', status='completed',
+        )
+        TranscriptSegment.objects.create(
+            job=job, speaker_label='Speaker 0', start_time=0.0, end_time=1.0,
+            text='Emily Carr painted the rainforest once, briefly.',
+        )
+        from apps.transcriptions.tasks import run_ai_revision_pipeline
+        provider = _CombinedDraftAndQualityProvider(transform=str.upper)
+        revision = AIRevision.objects.create(
+            job=job, operation='translate', target_language='fr', label='AI Translated',
+        )
+        with patch(
+            'apps.transcriptions.tasks.AIPostProcessor',
+            lambda: make_ai_processor(provider),
+        ):
+            run_ai_revision_pipeline(revision.id)
+
+        # "Emily" itself legitimately appears in the prompt as part of the
+        # source segment text being translated -- that's not what's under
+        # test. What must NOT appear is the glossary instruction, since a
+        # name mentioned only once has nothing to drift out of sync with.
+        self.assertNotIn('EXACTLY as spelled here', provider.prompts_of('draft')[0])
+
+
 # =========================================================================
 # AI ASSIST -- HTTP API
 #
@@ -9725,6 +9818,63 @@ class QualitySeverityAndPolicyTestCase(TestCase):
         blob = json.dumps(describe_profiles()).lower()
         for word in ('legal', 'french', 'mandant', 'tort', 'fiduciary'):
             self.assertNotIn(word, blob)
+
+
+class NameGlossaryTestCase(TestCase):
+    """
+    _build_name_glossary, in isolation from the pipeline it feeds.
+    """
+
+    @staticmethod
+    def _glossary(*texts):
+        from apps.transcriptions.tasks import _build_name_glossary
+
+        class _Seg:
+            def __init__(self, text):
+                self.text = text
+        return _build_name_glossary([_Seg(t) for t in texts])
+
+    def test_a_surname_recurs_even_when_the_word_in_front_of_it_varies(self):
+        """THE ACTUAL BUG. "Robert Galsky" and "Monsieur Galsky" are two
+        different two-word phrases; only the surname itself is the same
+        both times. Phrase-level matching missed this; word-level does
+        not."""
+        glossary = self._glossary(
+            'Robert Galsky introduced himself.',
+            'Monsieur Galsky answered the question.',
+        )
+        self.assertIn('Galsky', glossary)
+
+    def test_a_name_mentioned_once_is_not_listed(self):
+        glossary = self._glossary('Emily Carr painted the forest, once, briefly.')
+        self.assertEqual(glossary, '')
+
+    def test_common_sentence_openers_are_not_treated_as_names(self):
+        glossary = self._glossary(
+            'The case was heard. The judge ruled. The parties left.',
+            'This was a long trial. This was expensive too.',
+        )
+        self.assertEqual(glossary, '')
+
+    def test_no_source_text_at_all_returns_no_glossary(self):
+        self.assertEqual(self._glossary(), '')
+
+    def test_the_list_is_capped_so_a_long_document_does_not_bloat_every_prompt(self):
+        from apps.transcriptions.tasks import _build_name_glossary
+
+        class _Seg:
+            def __init__(self, text):
+                self.text = text
+        # 30 distinct two-mention names -- comfortably over the cap. Suffix
+        # with a letter, not a digit: the name regex is letter-only, and a
+        # trailing digit would sit outside its \b word boundary entirely.
+        segments = [
+            _Seg(f'{name} spoke. {name} spoke again.')
+            for name in (f'Xamplename{chr(65 + n)}' for n in range(30))
+        ]
+        glossary = _build_name_glossary(segments, limit=20)
+        listed = glossary.split(': ', 1)[1].rstrip('.').split(', ')
+        self.assertLessEqual(len(listed), 20)
 
 
 class QualityDeterministicCheckTestCase(TestCase):

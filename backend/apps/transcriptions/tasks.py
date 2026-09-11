@@ -1,4 +1,5 @@
 import os
+import re
 import time
 import logging
 from typing import Dict
@@ -822,6 +823,71 @@ def _ai_language_name(language_code):
     return entry.get('name') or language_code
 
 
+#: A single capitalized word. ONE WORD, NOT A MULTI-WORD PHRASE -- a
+#: first attempt matched 1-3 word runs and counted "Robert Galsky" and
+#: "Monsieur Galsky" as two unrelated candidates, each seen only once,
+#: because the surname was never introduced by the identical preceding
+#: word twice. The part that actually needs to stay consistent -- the
+#: surname itself -- recurs; the honorific or first name in front of it
+#: does not. Counting single words fixes that directly: "Galsky" is
+#: counted every time regardless of what, if anything, precedes it.
+_NAME_CANDIDATE_RE = re.compile(r"\b[A-Z][a-zA-Z'-]{2,}\b")
+
+#: Common English sentence-openers and short function words that
+#: capitalize at a sentence start and would otherwise recur often enough
+#: to clear the occurrence threshold. Only filters an EXACT single-word
+#: match -- "The Promise of Canada" survives because "the" here is one
+#: word inside a three-word candidate, not the whole candidate.
+_NAME_STOPWORDS = frozenset({
+    'the', 'this', 'that', 'these', 'those', 'there', 'then', 'now',
+    'but', 'and', 'so', 'well', 'however', 'therefore', 'yes', 'no',
+    'okay', 'ok', 'right', 'actually', 'because', 'when', 'what',
+    'where', 'why', 'how', 'who', 'i', 'a', 'an', 'in', 'on', 'at',
+    'to', 'for', 'from', 'with', 'of', 'we', 'you', 'it', 'if',
+})
+
+
+def _build_name_glossary(segments, min_occurrences: int = 2, limit: int = 20) -> str:
+    """
+    A recurring-name instruction, built once from THIS document's own
+    source text and folded into every batch's translation prompt -- so a
+    name spelled correctly once stays spelled that way for the rest of the
+    document, even across separate batches that otherwise share no memory
+    of each other at all.
+
+    CONFIRMED LIVE. A real translation spelled the same student's surname
+    four different ways in one document (Galsky, Rogalski, Agaski,
+    Rogowski) despite the correct spelling appearing plainly early in the
+    very same transcript -- a different batch had simply never seen it.
+
+    LOCAL AND FREE: a plain regex pass over text already in memory, run
+    once per document rather than once per batch. It CANNOT fix a name
+    that ASR itself transcribed two different ways across two separate
+    Eagle tasks covering the same underlying lecture (Rourke/Rorck,
+    Pigeon/Peachon) -- that is a different document as far as this
+    revision, or any single AIRevision, is concerned, and nothing here has
+    visibility into another task's segments.
+    """
+    text = '\n'.join(getattr(seg, 'text', '') or '' for seg in segments)
+    counts: Dict[str, int] = {}
+    for match in _NAME_CANDIDATE_RE.finditer(text):
+        candidate = match.group(0)
+        if candidate.lower() in _NAME_STOPWORDS:
+            continue
+        counts[candidate] = counts.get(candidate, 0) + 1
+    names = sorted(
+        (name for name, count in counts.items() if count >= min_occurrences),
+        key=lambda name: counts[name], reverse=True,
+    )[:limit]
+    if not names:
+        return ''
+    return (
+        'The following names or terms recur in this transcript. Reproduce '
+        'each one EXACTLY as spelled here, every time it appears, in every '
+        'segment of this task: ' + ', '.join(names) + '.'
+    )
+
+
 def run_ai_revision_pipeline(revision_id):
     """
     Runs one AI Assist operation over a range of a job's completed transcript
@@ -987,12 +1053,28 @@ def run_ai_revision_pipeline(revision_id):
                 domain_profile = None
                 domain_context = ''
 
+        # A LOCAL glossary, not a stored one: revision.custom_instruction
+        # stays exactly what the user actually typed for the audit trail
+        # and the UI's own display of it, so this is combined into a
+        # separate value passed to iter_batches, never written back onto
+        # the revision itself. Scoped to translate -- the operation the
+        # evidence for this is actually about; free (no provider request)
+        # either way, so there is no cost reason to withhold it elsewhere,
+        # but no evidence to extend it either.
+        batch_instruction = revision.custom_instruction
+        if revision.operation == 'translate':
+            glossary = _build_name_glossary(segments)
+            if glossary:
+                batch_instruction = '\n\n'.join(
+                    part for part in (revision.custom_instruction, glossary) if part
+                )
+
         with AI_CONCURRENCY_SEMAPHORE:
             for batch in processor.iter_batches(
                 segments,
                 revision.operation,
                 target_language=target_language_name,
-                custom_instruction=revision.custom_instruction,
+                custom_instruction=batch_instruction,
                 should_cancel=revision_cancelled,
                 source_language=revision.source_language,
                 domain_context=domain_context,
