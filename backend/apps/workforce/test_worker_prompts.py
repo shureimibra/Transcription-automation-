@@ -258,6 +258,39 @@ class TranscriptCheckPromptTestCase(TestCase):
         self.assertIn('3D', prompt)
         self.assertIn('ten to the minus', prompt)
 
+    def test_it_does_not_flag_a_duration_or_a_citation_as_a_number(self):
+        """The same false positives already fixed in the deterministic
+        check (years/kilometers as durations, "Rule 8"/"No. 1" as
+        citations, "million" riding on a real count) -- the prompt
+        should not ask a worker's assistant to flag any of these by
+        hand, from a second real-submission audit round."""
+        prompt = worker_prompts.build_transcript_check('edited_verbatim')
+        self.assertIn('2 years ago', prompt)
+        # Checked separately, not as one unbroken phrase: the source's own
+        # line-wrap breaks "5 kilometers" and "50 million" across a line,
+        # same as the notation test above.
+        self.assertIn('plain duration', prompt)
+        self.assertIn('kilometers', prompt)
+        self.assertIn('Rule 8', prompt)
+        self.assertIn('scale word', prompt)
+        self.assertIn('million', prompt)
+
+    def test_it_does_not_flag_a_possessive_as_a_contraction(self):
+        """FROM A REAL SUBMISSION: "Archie Cox's office" was flagged as
+        an unexpanded contraction by the deterministic check before that
+        was fixed -- the same false positive must not be reintroduced by
+        a worker's own assistant reading this prompt."""
+        prompt = worker_prompts.build_transcript_check('edited_verbatim')
+        self.assertIn("Archie Cox's office", prompt)
+        self.assertIn('possessive', prompt)
+
+    def test_it_does_not_flag_the_verb_cause_as_slang(self):
+        """FROM A REAL SUBMISSION: "will cause the landlord to evict"
+        flagged as informal "'cause"."""
+        prompt = worker_prompts.build_transcript_check('edited_verbatim')
+        self.assertIn('ordinary verb', prompt)
+        self.assertIn("'cause", prompt)
+
     def test_edited_verbatim_is_told_to_flag_contractions(self):
         prompt = worker_prompts.build_transcript_check('edited_verbatim')
         self.assertIn('flag every one you see', prompt)

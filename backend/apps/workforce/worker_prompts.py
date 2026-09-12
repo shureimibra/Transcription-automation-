@@ -399,14 +399,28 @@ WHAT TO LOOK FOR, IN ORDER OF VALUE:
 4. Numbers: zero through nine should be spelled out as words, ten and
    above as figures -- except money, a time, a date, a percentage, a
    measurement, or an age, which are always figures regardless of size.
-   Do NOT flag a digit that is part of an identifier or notation rather
-   than a spoken count -- a variable like "K1", a musical note like "E4",
-   a dimension like "3D", an exponent read aloud like "ten to the minus
-   six" -- none of those are numbers being spoken, so this rule does not
-   apply to them.
+   A measurement includes a plain duration ("2 years ago", "5
+   kilometers" are both figures, the same as "2 days" or "5 km"), and a
+   legal or document citation ("Rule 8", "Section 4", "No. 1") is always
+   a figure too -- it names a specific numbered thing, not a spoken
+   count. A scale word riding on an already-correct figure ("50
+   million", "3 billion") is not itself a defect -- only the count in
+   front of it is, if that count is ALSO spelled out ("fifty million":
+   flag "fifty", leave "million" alone). Do NOT flag a digit that is
+   part of an identifier or notation rather than a spoken count -- a
+   variable like "K1", a musical note like "E4", a dimension like "3D",
+   an exponent read aloud like "ten to the minus six" -- none of those
+   are numbers being spoken, so this rule does not apply to them.
 5. Contractions ("it's", "don't", "I'm") and informal words ("yeah",
    "gonna", "kinda") that should be expanded or replaced for a
-   professional, academic transcript -- {standard_note}
+   professional, academic transcript -- {standard_note} A word ending in
+   's is not automatically a contraction: "Archie Cox's office" is a
+   possessive (an office belonging to Cox), not "Archie Cox is office" --
+   only flag an 's where it is genuinely short for "is" or "has" in
+   context. Likewise "cause" after "to", "will", "can", "would" or
+   another modal is the ordinary verb (to cause something), not the
+   informal "'cause" short for "because" -- only flag it where it is
+   actually standing in for "because".
 6. Whether the pattern of speaker labels looks right. If one label (say
    Male_1) only ever produces short transitional lines and a different
    label (Male_2) always immediately continues with the substantive
