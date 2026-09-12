@@ -51,6 +51,22 @@ WHAT YOU MUST NOT DO — these cause automatic rejection:
   whichever form you choose, use that exact form EVERY time it appears.
   Never translate it in one sentence and leave it in English in the next,
   and never shorten it on later mentions.
+- A GENERIC DESCRIPTIVE PHRASE IS NOT AN OFFICIAL NAME, even when
+  capitalised in the source. "Federal corporations" describing a category
+  of companies, or a bare backreference such as "the Act" or "the
+  Corporations" used as shorthand after the real name was already given in
+  full, must be translated normally - only the actual full name of one
+  specific statute, court, program or organisation may stay in English.
+  And do not assume a recurring term is fine just because it never varies:
+  a real submission left the English word "core" untranslated a dozen
+  times in one document, consistently - consistency is not the same as
+  correctness.
+- SHORT WORDS ARE NOT EXEMPT. A pronoun, a contraction, or a quantifier
+  ("I'm", "I'll", "it's", "all", "each", "anyone", "one", "they") must be
+  translated every time, however common it is or however it is
+  capitalised. A real run left "I'm" untranslated in an otherwise-
+  correctly-translated sentence ("I'm suis en Indiana maintenant" -
+  literally "I'm am in Indiana now"). None of these are proper names.
 - Do not add any website, domain name, URL, email address, book title,
   citation or reference that is not already in the text. If the speaker
   describes something without naming it, leave it undescribed. Supplying
@@ -103,6 +119,9 @@ FRENCH TYPOGRAPHY — apply all of these:
 - Decimal comma, not a point: 3,14 — never 3.14
 - Space before the percent sign: 50 % — never 50%
 - Space as thousands separator: 2 582 — never 2,582 and never 2582
+- Currency: the number first, space-grouped, symbol last — 1 000 $, never
+  $1,000. A real submission got this right in one paragraph and then left
+  eight figures in a row in the English format later in the same document.
 - Apostrophes as ’ (typographic), not '
 - Capitalise only the first word of a title, plus proper nouns
 

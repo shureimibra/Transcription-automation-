@@ -46,6 +46,8 @@ from .deterministic import (
     check_commentary,
     check_address_consistency,
     check_autocorrect,
+    check_common_word_leakage,
+    check_currency_format,
     check_encoding,
     check_foreign_language,
     check_invented_references,
@@ -131,7 +133,8 @@ __all__ = [
     'check_invented_references', 'check_foreign_language',
     'check_duplication', 'check_length_anomaly', 'check_commentary',
     'check_encoding', 'check_autocorrect', 'check_address_consistency',
-    'check_source_leakage', 'extract_numbers',
+    'check_source_leakage', 'check_common_word_leakage',
+    'check_currency_format', 'extract_numbers',
     # terminology / entities
     'run_anchor_checks', 'check_terminology_consistency',
     'check_distinct_concepts', 'check_entity_preservation',

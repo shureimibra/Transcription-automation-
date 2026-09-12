@@ -702,6 +702,151 @@ def check_foreign_language(
     )]
 
 
+#: Confirmed, from a real 11-document review of accepted-format
+#: submissions, to leak untranslated into French output at word level --
+#: never long enough for check_source_leakage's 8-word threshold, and
+#: (almost) every one capitalized, which is exactly what
+#: check_foreign_language's own proper-noun guard exists to let through
+#: ("I'm suis en Indiana", "It's est soit 100% soit 0%" -- the rest of
+#: each clause was translated correctly around the leaked word).
+#:
+#: A CURATED BLOCKLIST, NOT A GENERAL HEURISTIC. None of these terms is a
+#: valid French word or a plausible proper noun anywhere on this platform,
+#: so matching them by exact name carries essentially none of the
+#: false-positive risk a general "flag any capitalized word" rule would.
+#:
+#: LEFT OUT ON PURPOSE: institutional shorthand like "Act", "Duty" and
+#: "Corporations" (also confirmed leaking, e.g. "les Act", "la
+#: législation sur les Corporations") and a document-specific defined term
+#: like "core" (confirmed leaking a dozen times in one document). A rigid
+#: blocklist cannot tell a genuine official name some documents correctly
+#: keep in English apart from the shorthand backreference that should have
+#: been translated, and "core" is an ordinary English word that would
+#: misfire constantly on unrelated correct translations. Those are
+#: addressed in the TRANSLATE prompt instead (see prompts.py rule 14), not
+#: here.
+_LEAKED_TERMS_RE = {
+    # Each alternative carries its OWN boundaries rather than sharing one
+    # pair around the whole group. "U.S." needs that: it ends in
+    # punctuation, not a letter, so a shared trailing \b fails the moment
+    # it sits at the end of a sentence -- there is no \w/\W transition
+    # right after a period followed by nothing. A negative lookahead
+    # (not immediately followed by a word character) does the same job
+    # without demanding a boundary a period can't provide, and also stops
+    # this from matching only the first half of "U.S.A.".
+    'fr': re.compile(
+        r"\bI['’]m\b|\bI['’]ll\b|\bI['’]ve\b|\bIt['’]s\b|\bThat['’]s\b|"
+        r"\byou['’]re\b|\ball right\b|\bunited states\b|\bU\.S\.(?!\w)|"
+        r"\ball\b|\beach\b|\banyone\b|\bone\b|\bthey\b|\bcanadian\b|"
+        r"\bjanuary\b|\bfebruary\b|\bmarch\b|\bapril\b|\bjune\b|\bjuly\b|"
+        r"\baugust\b|\bseptember\b|\boctober\b|\bnovember\b|\bdecember\b",
+        re.IGNORECASE,
+    ),
+}
+
+
+def check_common_word_leakage(
+    target: str, target_language: Optional[str] = None,
+    segment_index: Optional[int] = None,
+) -> List[QualityIssue]:
+    """
+    A short, common English word or contraction surviving untranslated.
+
+    ITS OWN CHECK, SEPARATE FROM check_foreign_language AND
+    check_source_leakage -- neither can see this. check_source_leakage
+    only fires on an 8-word-or-longer verbatim run; check_foreign_language
+    explicitly SKIPS every capitalized token on the theory that it is a
+    name, which is exactly what almost every leak in `_LEAKED_TERMS_RE`
+    is (sentence-initial, or "I"-contracted, so always capitalized in the
+    source it came from).
+
+    Runs the SAME title/quote guards as the other two leakage checks, for
+    the same reason: a genuinely quoted English phrase, or a segment that
+    is itself a title, is not this defect.
+
+    MEDIUM, not blocking -- still new enough, on real traffic, to earn the
+    same caution every other check here already went through before being
+    trusted to stop a submission outright.
+    """
+    pattern = _LEAKED_TERMS_RE.get((target_language or '').strip().lower()[:2])
+    if not pattern or not target:
+        return []
+    if _looks_like_a_title(target):
+        return []
+    scanned = _QUOTED_RE.sub(' ', target)
+
+    seen = set()
+    found = []
+    for match in pattern.finditer(scanned):
+        word = match.group(0)
+        key = word.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        found.append(word)
+
+    if not found:
+        return []
+    shown = ', '.join(found[:6])
+    return [QualityIssue(
+        category=IssueCategory.LEAKAGE, severity=Severity.MEDIUM,
+        problem=f'English word(s) or phrase(s) left untranslated: {shown}.',
+        correction='Translate into the target language.',
+        target_span=shown,
+        rule='leakage.common-word',
+        segment_index=segment_index, detector='deterministic',
+    )]
+
+
+#: English-style currency: symbol immediately before the figure, and
+#: comma-grouped thousands -- "$1,000", "$60,000". French convention puts
+#: the symbol after the figure with a space-grouped thousands separator
+#: ("1 000 $"), so this shape surviving into a French translation is a
+#: display-format defect, not a value defect -- check_numbers already
+#: confirms the VALUE survived; this catches the convention check_numbers
+#: was never asked about.
+_ANGLO_CURRENCY_RE = re.compile(r'\$\s?\d{1,3}(?:,\d{3})+(?:\.\d+)?')
+
+
+def check_currency_format(
+    target: str, target_language: Optional[str] = None,
+    segment_index: Optional[int] = None,
+) -> List[QualityIssue]:
+    """
+    An English-formatted dollar figure ($60,000) surviving in French
+    output, where the convention is the number first, space-grouped, with
+    the symbol last (60 000 $).
+
+    Confirmed on a real submission: eight figures in a row -- $60,000,
+    $5,500 (twice), $27,500 (four times) -- all left in raw English
+    format, in a document where an EARLIER, similar figure ($5,143) had
+    been correctly reformatted moments before. Intermittent, exactly like
+    the word-leakage `check_common_word_leakage` targets, and invisible to
+    check_numbers, which only confirms the VALUE survived: 60,000 and
+    60 000 are the same number, so it has nothing to say about which one
+    is displayed.
+    """
+    if (target_language or '').strip().lower()[:2] != 'fr':
+        return []
+    if not target:
+        return []
+    found = _ANGLO_CURRENCY_RE.findall(target)
+    if not found:
+        return []
+    shown = ', '.join(found[:6])
+    return [QualityIssue(
+        category=IssueCategory.TYPOGRAPHY, severity=Severity.MEDIUM,
+        problem=f'Currency written in English format rather than French: {shown}.',
+        correction=(
+            'Write the figure with the number first and the symbol last, '
+            'using a space as the thousands separator (e.g. "1 000 $").'
+        ),
+        target_span=shown,
+        rule='typography.anglo-currency',
+        segment_index=segment_index, detector='deterministic',
+    )]
+
+
 #: The signature of UTF-8 bytes read as Latin-1/cp1252. These pairs do not
 #: occur in real French, Spanish, German or Portuguese text: "Ã©" is what
 #: "é" becomes, "â€™" is what a typographic apostrophe becomes, "Â«" is what
@@ -1119,6 +1264,8 @@ def run_deterministic_checks(
     # translation through this function and comparing with a human read.
     issues += check_invented_references(source, target, segment_index)
     issues += check_foreign_language(target, target_language, segment_index)
+    issues += check_common_word_leakage(target, target_language, segment_index)
+    issues += check_currency_format(target, target_language, segment_index)
     issues += check_duplication(target, segment_index)
     issues += check_length_anomaly(source, target, segment_index)
     issues += check_typography(target, target_language, segment_index)

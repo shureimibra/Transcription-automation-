@@ -4226,6 +4226,29 @@ class AIAssistPromptTestCase(TestCase):
         self.assertIn('STAYS ENTIRELY IN', task)
         self.assertIn('The Promise of Canada', task)
 
+    def test_translate_instructs_every_short_word_to_be_translated_too(self):
+        """
+        FROM AN 11-DOCUMENT REAL-SUBMISSION REVIEW: short, common English
+        words -- pronouns, contractions, quantifiers -- leaked untranslated
+        far more than any other defect found, always sitting inline in an
+        otherwise-correctly-translated sentence. Nothing previously told
+        the model these are not exempt just for being short or capitalized.
+        """
+        from core.services.ai_assist import prompts
+        task = prompts.task_description('translate', 'French')
+        self.assertIn("I'm suis en Indiana", task)
+        self.assertIn('"core"', task)
+
+    def test_translate_instructs_french_currency_formatting(self):
+        """Confirmed on the same review: dollar figures sometimes survive
+        in raw English format ($60,000) rather than French convention
+        (60 000 $), inconsistently -- even within one document that got a
+        similar figure right moments earlier."""
+        from core.services.ai_assist import prompts
+        task = prompts.task_description('translate', 'French')
+        self.assertIn('1 000 $', task)
+        self.assertIn('$1,000', task)
+
     def test_academic_uses_the_same_simple_versus_complex_judgment_as_translate(self):
         """
         Consistency, on request: the ACADEMIC operation used to convert any
@@ -10126,6 +10149,102 @@ class QualityDeterministicCheckTestCase(TestCase):
         self.assertEqual(check_foreign_language(
             'mon livre préféré est Seize the Hour : Nixon, Mao, and the '
             'Meeting That Changed the World fin', 'fr'), [])
+
+    def test_a_leaked_contraction_is_caught_even_translated_around(self):
+        """
+        FROM A REAL SUBMISSION. The rest of the clause was translated
+        correctly; only the English contraction itself was left behind --
+        "I'm suis en Indiana maintenant" is literally "I'm am in Indiana
+        now". Neither check_source_leakage (too short for its 8-word
+        threshold) nor check_foreign_language (skips every capitalized
+        token) can see this.
+        """
+        from core.services.ai_assist.quality import check_common_word_leakage
+
+        issues = check_common_word_leakage(
+            "I'm suis en Indiana maintenant.", 'fr')
+        self.assertTrue(any(i.rule == 'leakage.common-word' for i in issues))
+
+    def test_leaked_quantifiers_and_pronouns_are_caught(self):
+        """Confirmed on real submissions: "All", "Each", "Anyone", "One"
+        and "They" left untranslated, always capitalized -- sentence-
+        initial, or otherwise positioned exactly where
+        check_foreign_language's proper-noun guard lets them through."""
+        from core.services.ai_assist.quality import check_common_word_leakage
+
+        cases = [
+            "Each de nous a un ensemble de préférences différent.",
+            "Anyone qui déteste vraiment les champignons.",
+            "One des objectifs déclarés du NEP.",
+            "La plupart du temps, They ne savent pas ce qu'elles veulent.",
+            "All right, nous voulons commander une pizza.",
+        ]
+        for target in cases:
+            issues = check_common_word_leakage(target, 'fr')
+            self.assertTrue(
+                any(i.rule == 'leakage.common-word' for i in issues),
+                f'expected a finding on: {target!r}')
+
+    def test_united_states_and_its_abbreviation_leak(self):
+        from core.services.ai_assist.quality import check_common_word_leakage
+
+        self.assertTrue(any(
+            i.rule == 'leakage.common-word' for i in check_common_word_leakage(
+                "désormais résident des United States.", 'fr')))
+        self.assertTrue(any(
+            i.rule == 'leakage.common-word' for i in check_common_word_leakage(
+                "le gouvernement des U.S.", 'fr')))
+
+    def test_a_month_name_left_in_english_is_caught(self):
+        from core.services.ai_assist.quality import check_common_word_leakage
+
+        issues = check_common_word_leakage('le budget de November 1978,', 'fr')
+        self.assertTrue(any(i.rule == 'leakage.common-word' for i in issues))
+
+    def test_a_clean_french_sentence_has_no_common_word_leakage(self):
+        from core.services.ai_assist.quality import check_common_word_leakage
+
+        self.assertEqual(check_common_word_leakage(
+            "Je suis désolé, chacun d'entre nous a ses propres préférences.",
+            'fr'), [])
+
+    def test_common_word_leakage_does_not_run_on_a_title(self):
+        """Same guard as the other two leakage checks, for the same
+        reason: a segment that is itself a title is not this defect."""
+        from core.services.ai_assist.quality import check_common_word_leakage
+
+        self.assertEqual(check_common_word_leakage(
+            'The Promise of Canada, 150 years, People and Ideas that have '
+            'shaped our country', 'fr'), [])
+
+    def test_common_word_leakage_ignores_quoted_material(self):
+        from core.services.ai_assist.quality import check_common_word_leakage
+
+        self.assertEqual(check_common_word_leakage(
+            'Il a dit « I\'m not sure » avant de continuer.', 'fr'), [])
+
+    def test_currency_left_in_english_format_is_caught(self):
+        """FROM A REAL SUBMISSION: eight figures in a row left in raw
+        English format ($60,000, $5,500, $27,500) in a document where an
+        earlier, similar figure had been correctly reformatted to French
+        convention moments before. check_numbers only confirms the VALUE
+        survived and has nothing to say about which format is displayed."""
+        from core.services.ai_assist.quality import check_currency_format
+
+        issues = check_currency_format('Il a une hypothèque de $60,000 sur la maison.', 'fr')
+        self.assertTrue(any(i.rule == 'typography.anglo-currency' for i in issues))
+        self.assertIn('$60,000', issues[0].target_span)
+
+    def test_currency_in_french_format_is_not_flagged(self):
+        from core.services.ai_assist.quality import check_currency_format
+
+        self.assertEqual(check_currency_format(
+            'elle se retrouve avec 5 143 $ sur son investissement.', 'fr'), [])
+
+    def test_currency_format_check_only_applies_to_french(self):
+        from core.services.ai_assist.quality import check_currency_format
+
+        self.assertEqual(check_currency_format('a $60,000 mortgage', 'en'), [])
 
     def test_a_broken_paste_is_caught_before_it_is_submitted(self):
         """

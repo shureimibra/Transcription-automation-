@@ -193,7 +193,28 @@ Fidelity rules, which apply to every subject equally:
    name itself was altered ("Promised" for "Promise of"), and half the
    title was translated while the other half was not. Reproduce the whole
    title exactly as spoken, then continue translating the sentence around
-   it.""",
+   it.
+14. EVERY WORD OF THE SOURCE LANGUAGE GETS TRANSLATED -- INCLUDING THE
+   SHORT ONES. A pronoun, a contraction, or a quantifier is not exempt
+   just because it is common or capitalized. A real run left "I'm"
+   untranslated while correctly translating the rest of the very same
+   clause around it ("I'm suis en Indiana maintenant" -- literally "I'm
+   am in Indiana now"), and separately left "All", "Each", "Anyone",
+   "One", "They", "Canadian", and "the United States" untranslated
+   elsewhere in the same document series. None of these are proper
+   names. If a technical or institutional term recurs many times in one
+   document (an Act, a court, a defined term), decide ONCE whether it
+   stays in its source form or gets translated, and apply that same
+   decision every later time it recurs, including a shorthand
+   backreference to it -- a real run correctly translated "the Canadian
+   ownership rate" once, then left the same concept as the bare English
+   word "core" for the rest of the document, more than a dozen times.
+15. CURRENCY FOLLOWS THE TARGET LANGUAGE'S OWN CONVENTION, NOT THE
+   SOURCE'S. In French, a monetary amount is written with the number
+   first, a space as the thousands separator, and the currency symbol
+   last -- "1 000 $", never "$1,000". A real run correctly produced
+   "5 143 $" in one paragraph and then left "$60,000", "$5,500" and
+   "$27,500" in raw English format later in the same document.""",
 
     CUSTOM: """\
 Task: apply the user's instruction below to each segment's text.

@@ -55,6 +55,44 @@ class WorkerPromptTestCase(TestCase):
                               'untranslated', text)
                 self.assertIn('Write only in French', text)
 
+    def test_every_prompt_names_short_words_as_not_exempt(self):
+        """
+        FROM AN 11-DOCUMENT REAL-SUBMISSION REVIEW: a pronoun, contraction
+        or quantifier leaked untranslated far more than any other defect
+        found, always inline in an otherwise-correctly-translated sentence
+        -- "I'm suis en Indiana maintenant" (literally "I'm am in Indiana
+        now"). The general "do not leave X untranslated" rule alone did not
+        stop this in practice, because these are easy to read past.
+        """
+        for name, text in self.prompts.items():
+            with self.subTest(prompt=name):
+                self.assertIn('SHORT WORDS ARE NOT EXEMPT', text)
+                self.assertIn("I'm suis en Indiana", text)
+
+    def test_every_prompt_distinguishes_a_generic_phrase_from_an_official_name(self):
+        """
+        THE SAME REVIEW: "Federal corporations" (a category, not the name
+        of anything) and a bare backreference like "the Act" leaked in
+        English, protected by the same exemption that legitimately lets a
+        real official name stay untranslated. And "core" -- a real,
+        substantive technical term -- leaked a dozen times with nothing to
+        contradict it, which the consistency rule alone cannot catch.
+        """
+        for name, text in self.prompts.items():
+            with self.subTest(prompt=name):
+                self.assertIn('GENERIC DESCRIPTIVE PHRASE IS NOT AN '
+                              'OFFICIAL NAME', text)
+                self.assertIn('"core"', text)
+
+    def test_french_typography_covers_currency_format(self):
+        """FROM THE SAME REVIEW: eight dollar figures in a row left in raw
+        English format ($60,000) in a document where an earlier, similar
+        figure had been correctly reformatted to French convention moments
+        before."""
+        polish = self.prompts['polish']
+        self.assertIn('1 000 $', polish)
+        self.assertIn('$1,000', polish)
+
     def test_every_prompt_forbids_the_inventions_that_were_actually_seen(self):
         """Written from defects, not imagination: a real run supplied
         planethunters.org, a site the speaker never named, and another used

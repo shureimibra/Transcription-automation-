@@ -100,6 +100,22 @@ WHAT YOU MUST NOT DO — these cause automatic rejection:
   and never shorten it on later mentions. A reviewer rejected a real
   submission for exactly this: the same Act appeared under two different
   names in one transcript.
+- A GENERIC DESCRIPTIVE PHRASE IS NOT AN OFFICIAL NAME, even when
+  capitalised in the source. "Federal corporations" describing a category
+  of companies, or a bare backreference such as "the Act" or "the
+  Corporations" used as shorthand after the real name was already given in
+  full, must be translated normally — only the actual full name of one
+  specific statute, court, program or organisation may stay in {source}.
+  And do not assume a recurring term is fine just because it never varies:
+  a real submission left the English word "core" untranslated a dozen
+  times in one document, consistently — consistency is not the same as
+  correctness.
+- SHORT WORDS ARE NOT EXEMPT. A pronoun, a contraction, or a quantifier
+  ("I'm", "I'll", "it's", "all", "each", "anyone", "one", "they") must be
+  translated every time, however common it is or however it is
+  capitalised. A real run left "I'm" untranslated in an otherwise-
+  correctly-translated sentence ("I'm suis en Indiana maintenant" —
+  literally "I'm am in Indiana now"). None of these are proper names.
 - Use no formatting characters at all. No asterisks, no underscores, no
   markdown. Titles are written in plain text. What you produce is submitted
   as plain text and an asterisk arrives as literal punctuation in the middle
@@ -158,6 +174,9 @@ FRENCH TYPOGRAPHY — apply all of these:
 - Decimal comma, not a point: 3,14 — never 3.14
 - Space before the percent sign: 50 % — never 50%
 - Space as thousands separator: 2 582 — never 2,582 and never 2582
+- Currency: the number first, space-grouped, symbol last — 1 000 $, never
+  $1,000. A real submission got this right in one paragraph and then left
+  eight figures in a row in the English format later in the same document.
 - Apostrophes as ’ (typographic), not '
 - Capitalise only the first word of a title, plus proper nouns""",
 }
@@ -253,13 +272,23 @@ that cost a submission:
      invented number. Flag it only if the underlying quantity changed, not
      because the digit itself is not literally spoken in the source.
   2. Untranslated {source}. Any word or passage left in {source} that is
-     not a proper noun, brand, acronym or conventional title.
+     not a proper noun, brand, acronym or conventional title — including a
+     pronoun, contraction or quantifier ("I'm", "it's", "all", "each",
+     "one", "they") sitting inline in an otherwise-correctly-translated
+     sentence. These are easy to miss precisely because the rest of the
+     sentence around them reads as fine.
   3. Inventions. Any website, citation, title or reference in the
      translation that is not in the source.
-  4. Official names used inconsistently. List every statute, court,
-     institution, case and organisation named in the document, with each
-     form it appears in. If any one of them appears in more than one form,
-     say so — that alone has failed a review.
+  4. Official names used inconsistently, AND generic phrases wrongly kept
+     in {source}. List every statute, court, institution, case and
+     organisation named in the document, with each form it appears in. If
+     any one of them appears in more than one form, say so — that alone
+     has failed a review. Separately: for a term that stays in {source}
+     EVERY time, check whether it is actually the name of one specific
+     thing, or just a generic description or shorthand backreference that
+     should have been translated instead — a term wrong the same way every
+     time will not surface as an inconsistency, so absence of variation is
+     not proof of correctness.
   5. English/{target} typos. Words that are neither {source} nor {target}
      because a spellchecker altered them: in French, "don't" for "dont",
      "Vie siècle" for "VIe siècle". Check every one.
