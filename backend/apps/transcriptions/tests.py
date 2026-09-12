@@ -12939,6 +12939,93 @@ class TranscriptionStandardTestCase(TestCase):
             self._rules(text, 'edited_verbatim'),
         )
 
+    def test_bare_that_that_with_no_apostrophe_is_not_a_repeat(self):
+        """
+        FROM THREE SEPARATE REAL SUBMISSIONS, none involving a contraction:
+        "we might be prone to thinking that that is again a new problem",
+        "the effects that that would have on them", "critics like that
+        that point to a disproportionate...". A demonstrative or relative
+        "that" following the complementizer "that" is ordinary grammar,
+        not a stutter -- and unlike the that's case above, there is no
+        apostrophe here for the lookahead fix to catch.
+        """
+        text = (
+            'Male_1:\n'
+            '[00:00:00.000 --> 00:00:09.000]\n'
+            'We might be prone to thinking that that is again a new '
+            'problem, and it is entirely clear that the argument proceeds '
+            'in stages, and it is written down for anyone reading it '
+            'later, and it is a matter of public record.\n'
+        )
+        rules = self._rules(text, 'edited_verbatim')
+        self.assertNotIn('transcript.repetition-not-removed', rules)
+
+    def test_had_had_is_the_past_perfect_not_a_stutter(self):
+        """FROM A REAL SUBMISSION: "segregation had had an effect on
+        black doctors" -- ordinary past perfect tense."""
+        text = (
+            'Male_1:\n'
+            '[00:00:00.000 --> 00:00:09.000]\n'
+            'I had absolutely no idea of the extent to which segregation '
+            'had had an effect on black doctors, and it is entirely clear '
+            'that the argument proceeds in stages, and it is written down '
+            'for anyone reading it later.\n'
+        )
+        rules = self._rules(text, 'edited_verbatim')
+        self.assertNotIn('transcript.repetition-not-removed', rules)
+
+    def test_long_long_is_emphatic_doubling_not_a_stutter(self):
+        """FROM A REAL SUBMISSION: "he did that for a long long time" --
+        the normal spoken-English intensifier, not a disfluency."""
+        text = (
+            'Male_1:\n'
+            '[00:00:00.000 --> 00:00:09.000]\n'
+            'And he did that for a long long time, and it is entirely '
+            'clear that the argument proceeds in stages, and it is '
+            'written down for anyone reading it later, and it is a '
+            'matter of public record.\n'
+        )
+        rules = self._rules(text, 'edited_verbatim')
+        self.assertNotIn('transcript.repetition-not-removed', rules)
+
+    def test_the_verb_cause_is_not_slang_after_any_modal_or_infinitive(self):
+        """
+        A real submission had "to cause this walker to move" flagged as
+        informal, which "to " already excludes. A SECOND real submission
+        had "will cause the landlord to evict the grandmother" flagged
+        the same way -- same verb, a different auxiliary in front of it.
+        The conjunction "'cause" is never preceded by a modal ("he will
+        'cause I said so" is not English), so every modal gets the same
+        exclusion "to" already had, not just the one instance seen first.
+        """
+        for phrase in (
+            'to cause this walker to move along the spiral',
+            'will cause the landlord to evict the grandmother',
+            'can cause harm to the plaintiff',
+            'would cause a serious problem',
+            'that stigma that is caused by law',
+        ):
+            with self.subTest(phrase=phrase):
+                text = (
+                    'Male_1:\n[00:00:00.000 --> 00:00:09.000]\n'
+                    + (phrase + '. ') * 20 + '\n'
+                )
+                rules = self._rules(text, 'edited_verbatim')
+                self.assertNotIn('transcript.slang-not-standardized', rules)
+
+    def test_a_genuine_because_cause_still_fires_beside_a_modal_verb(self):
+        """The widened exclusion must not swallow a real 'cause sitting in
+        the same document as the verb."""
+        text = (
+            'Male_1:\n[00:00:00.000 --> 00:00:09.000]\n'
+            + ('This will cause a problem, cause nobody agreed to it. ') * 20
+            + '\n'
+        )
+        self.assertIn(
+            'transcript.slang-not-standardized',
+            self._rules(text, 'edited_verbatim'),
+        )
+
     def test_speaker_labels_must_be_gender_numbered_under_both(self):
         text = self.GOOD_EDITED.replace('Male_1:', 'THE COURT:')
         for standard in ('edited_verbatim', 'strict_verbatim'):
@@ -13003,6 +13090,84 @@ class TranscriptionStandardTestCase(TestCase):
         from core.services.ai_assist.quality import check_number_rules
         rules = {i.rule for i in check_number_rules('There were forty people.')}
         self.assertIn('transcript.number-large-as-word', rules)
+
+    def test_a_duration_in_years_is_a_measurement_not_a_count(self):
+        """
+        FROM A REAL SUBMISSION: "he gave this talk 2 years ago" flagged --
+        "2 years ago" is a duration, exactly the shape "2 days ago" or "2
+        weeks ago" already exempt. There was no principled reason "years"
+        alone required the word "old" right after it while every other
+        duration unit needed nothing.
+        """
+        from core.services.ai_assist.quality import check_number_rules
+        for text in ('He gave this talk 2 years ago.', 'She is 5 years old.'):
+            with self.subTest(text=text):
+                rules = {i.rule for i in check_number_rules(text)}
+                self.assertNotIn('transcript.number-small-as-figure', rules)
+
+    def test_a_spelled_out_distance_unit_is_a_measurement(self):
+        """FROM A REAL SUBMISSION: "5 kilometers" flagged, even though
+        "5 km" was already exempt one line down -- a speaker saying the
+        unit out loud produces the full word, not the abbreviation."""
+        from core.services.ai_assist.quality import check_number_rules
+        for text in ('The race is 5 kilometers long.', 'It weighs 3 pounds.',
+                     'He is 6 feet tall.'):
+            with self.subTest(text=text):
+                rules = {i.rule for i in check_number_rules(text)}
+                self.assertNotIn('transcript.number-small-as-figure', rules)
+
+    def test_a_scale_word_riding_on_a_real_count_is_not_spelled_out(self):
+        """
+        FROM A REAL SUBMISSION: "there were 50 million Hispanics" flagged
+        "million" as though it were an unconverted count. "50" is already
+        the figure; "million" is a scale word, and spelling it out is the
+        standard, correct way to write it -- nobody writes "50,000,000
+        Hispanics".
+        """
+        from core.services.ai_assist.quality import check_number_rules
+        rules = {i.rule for i in
+                 check_number_rules('There were 50 million Hispanics counted.')}
+        self.assertNotIn('transcript.number-large-as-word', rules)
+
+    def test_a_spelled_out_count_before_a_scale_word_still_fires(self):
+        """The count itself is still a real violation -- only the scale
+        word riding on it is exempt. "Fifty million" should still name
+        "fifty" as needing to become "50"."""
+        from core.services.ai_assist.quality import check_number_rules
+        rules = {i.rule for i in
+                 check_number_rules('There were fifty million Hispanics counted.')}
+        self.assertIn('transcript.number-large-as-word', rules)
+
+    def test_a_citation_is_recognised_even_split_across_a_block_boundary(self):
+        """
+        A REAL, PRE-EXISTING BUG, UNRELATED TO THIS SESSION'S OTHER FIXES:
+        _CITED_NUMBER_RE's source carried a literal backspace byte (0x08)
+        where a \\b word-boundary escape was intended -- \\b in a string
+        that was not raw at the point it was written, silently baked into
+        the committed file. That byte requires a literal backspace
+        character in the transcript to ever match anything, which never
+        happens, so "Rule 8", "Section 4" and every other citation this
+        check exists for were being flagged as ordinary numbers the whole
+        time it was live. Caught only because a real submission split a
+        citation ("School District No.") and its number (" 1") across a
+        speaker-block boundary, which is what led to inspecting the
+        regex directly.
+        """
+        from core.services.ai_assist.quality import check_number_rules
+        self.assertNotIn(
+            'transcript.number-small-as-figure',
+            {i.rule for i in check_number_rules('As stated in Rule 8, the court must comply.')},
+        )
+        split = (
+            'Male_1:\n[00:00:00.000 --> 00:00:05.000]\n'
+            'Keys versus School District No.\n\n'
+            'Male_1:\n[00:00:05.000 --> 00:00:10.000]\n'
+            '1 applied Brown to a school district in Denver.\n'
+        )
+        self.assertNotIn(
+            'transcript.number-small-as-figure',
+            {i.rule for i in check_number_rules(split)},
+        )
 
     def test_affirmations_are_never_treated_as_fillers(self):
         """

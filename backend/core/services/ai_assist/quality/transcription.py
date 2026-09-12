@@ -475,10 +475,28 @@ _SPELLED_LARGE_RE = re.compile(
     re.IGNORECASE,
 )
 # Contexts where a digit is always correct regardless of magnitude.
+#
+# "years" sits in the SAME duration-unit group as days/weeks/months/hours,
+# not carved out as an age-only exception. A real submission had "he gave
+# this talk 2 years ago" flagged -- "2 years ago" is a duration, exactly
+# the shape "2 days ago" or "2 weeks ago" already exempt one line down.
+# There was no principled reason "years" alone required the word "old"
+# right after it while every other duration unit needed nothing; that was
+# an oversight, not a distinction Eagle's rubric draws. The bare "years?"
+# here also still covers an age ("he is 5 years old"), so nothing is lost.
+#
+# SPELLED-OUT DISTANCE AND WEIGHT UNITS, not just their abbreviations. A
+# real submission had "5 kilometers" flagged -- "km" was already exempt
+# one line down, but a speaker saying the unit out loud produces
+# "kilometers", not "km", and nothing here matched that shape. The time
+# units beside these (hours, minutes, days...) were already spelled out
+# in full; the distance/weight units were not, for no principled reason.
 _ALWAYS_FIGURES_RE = re.compile(
     r'[$£€]\s?\d|\d\s?(?:%|percent|dollars?|pounds?|euros?|'
-    r'years?\s+old|a\.?m\.?|p\.?m\.?|kg|km|cm|mm|lbs?|oz|ft|mi|'
-    r'hours?|minutes?|seconds?|days?|weeks?|months?)\b',
+    r'a\.?m\.?|p\.?m\.?|'
+    r'kg|kilograms?|km|kilometers?|cm|centimeters?|mm|millimeters?|'
+    r'lbs?|pounds?|oz|ounces?|ft|feet|foot|mi|miles?|'
+    r'hours?|minutes?|seconds?|days?|weeks?|months?|years?)\b',
     re.IGNORECASE,
 )
 
@@ -498,8 +516,8 @@ def _strip_uncheckable(text: str) -> str:
 #: because that is how the source names them -- rewriting "Rule 8" as
 #: "Rule eight" would be wrong, not merely unusual.
 _CITED_NUMBER_RE = re.compile(
-    r'(?:Rule|Section|Article|Chapter|Part|Paragraph|Figure|Table|'
-    r'Exhibit|Amendment|Clause|Item|Page|No\.?)\s+\d+', re.IGNORECASE)
+    r'\b(?:Rule|Section|Article|Chapter|Part|Paragraph|Figure|Table|'
+    r'Exhibit|Amendment|Clause|Item|Page|No\.?)\s+\d+\b', re.IGNORECASE)
 
 
 def check_number_rules(text: str) -> List[QualityIssue]:
@@ -550,6 +568,23 @@ def check_number_rules(text: str) -> List[QualityIssue]:
         if re.search(r'\b(?:hundreds|thousands|millions|billions)\b', window,
                      re.IGNORECASE):
             continue
+        # "50 million", "fifty million" -- a real submission had "50
+        # million Hispanics" flagged, as though "million" itself were an
+        # unconverted count. It is not: "50" is already the figure: the
+        # count. "million" is a SCALE WORD riding on that count, and
+        # spelling it out is the standard, correct way to write it --
+        # nobody writes "50,000,000 Hispanics". Guarded on an actual
+        # numeral immediately before it, digit or spelled out, so a bare
+        # "a million dollars" with nothing to scale is unaffected and
+        # still gets its own finding if the rubric wants one.
+        word = match.group(1).lower()
+        if word in ('hundred', 'thousand', 'million', 'billion'):
+            before = body[max(0, match.start() - 15):match.start()]
+            if re.search(
+                r'(?:\d|' + '|'.join(_NUMBER_WORDS) + r')[\s-]*\Z',
+                before, re.IGNORECASE,
+            ):
+                continue
         issues.append(QualityIssue(
             category=IssueCategory.TYPOGRAPHY, severity=Severity.MEDIUM,
             problem=(
@@ -584,15 +619,22 @@ _SLANG = {
 #: "cause" is genuinely ambiguous once the apostrophe is dropped: 'cause
 #: (short for "because", a conjunction) and the ordinary verb "to cause"
 #: share a spelling. A real submission had "to cause this walker to move
-#: along this logarithmic spiral" -- an entirely formal, correct sentence
-#: -- flagged as informal, because a bare word match cannot tell the two
-#: apart. Excluded here: immediately after "to ", the infinitive marker,
-#: which 'cause (a conjunction) is never preceded by -- so this removes
-#: the confirmed false positive without weakening detection of a genuine
-#: "'cause" anywhere else in the text.
+#: along this logarithmic spiral" flagged as informal; a second had "will
+#: cause the landlord to evict the grandmother" flagged the same way --
+#: same verb, different auxiliary in front of it, still not "'cause".
+#:
+#: The conjunction "'cause" is never preceded by an infinitive "to" or by
+#: a modal auxiliary -- "he will 'cause I said so" and "he can 'cause I
+#: said so" are not English -- so excluding "cause" after any of them
+#: removes the whole class of false positive, not just the one instance
+#: that happened to be seen first.
+_CAUSE_VERB_PRECEDERS = (
+    'to ', 'will ', 'would ', 'can ', 'could ',
+    'may ', 'might ', 'must ', 'should ', 'shall ',
+)
 _SLANG_RE = re.compile(
     r'\b(' + '|'.join(k for k in _SLANG if k != 'cause') + r')\b'
-    r'|(?<!to )\bcause\b',
+    r'|' + ''.join(f'(?<!{w})' for w in _CAUSE_VERB_PRECEDERS) + r'\bcause\b',
     re.IGNORECASE,
 )
 
@@ -638,6 +680,27 @@ _CONTRACTION_RE = re.compile(
 # same word.
 _REPEATED_WORD_RE = re.compile(r"\b(\w+)\s+\1(?!')\b", re.IGNORECASE)
 
+#: Words that legitimately double in English, where a shape-only detector
+#: cannot tell intentional repetition from a stutter -- it can only be
+#: told which specific words are known to double on purpose:
+#:
+#:   * "that that" -- a demonstrative or relative pronoun following the
+#:     complementizer "that" ("critics that that point to..."), or a
+#:     nested clause ("we think that that is a new problem"). Confirmed
+#:     across FOUR separate real submissions, with no apostrophe involved
+#:     in most of them, so the contraction-lookahead above does not cover
+#:     this shape -- it is a different word entirely on the second side.
+#:   * "had had" -- ordinary past perfect ("segregation had had an
+#:     effect"), not a stutter.
+#:   * "long long" -- emphatic doubling of an adjective for effect ("a
+#:     long, long time"), a normal spoken-English intensifier.
+#:
+#: Evidenced, not invented: this stays a short list of the words actually
+#: seen doubling on purpose, not a guess at every word that ever could.
+#: A genuine stutter on any OTHER word ("the the point", "I I think")
+#: still fires exactly as before.
+_LEGITIMATE_DOUBLED_WORDS = frozenset({'that', 'had', 'long'})
+
 # Below this length, the ABSENCE of something proves nothing. People do
 # speak fluently for a sentence or two, so a short excerpt containing no
 # filler is unremarkable. Only the "wrongly removed / wrongly expanded"
@@ -667,7 +730,12 @@ def check_standard_policy(
     fillers = _count_outside_tags(_FILLER_RE, _AFFIRMATION_RE.sub(' ', text))
     slang = _count_outside_tags(_SLANG_RE, text)
     contractions = _count_outside_tags(_CONTRACTION_RE, text)
-    repeats = _count_outside_tags(_REPEATED_WORD_RE, text)
+    # See _LEGITIMATE_DOUBLED_WORDS: "had had", "that that", "long long"
+    # are words known to double on purpose, not stutters.
+    repeats = [
+        r for r in _count_outside_tags(_REPEATED_WORD_RE, text)
+        if r.split()[0].lower() not in _LEGITIMATE_DOUBLED_WORDS
+    ]
 
     if standard.remove_fillers and fillers:
         issues.append(QualityIssue(
