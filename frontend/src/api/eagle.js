@@ -38,6 +38,17 @@ export const submission = {
    */
   submit: (taskId, body = {}) =>
     api.post(`/workforce/tasks/${taskId}/submit-external/`, body),
+
+  /**
+   * The report-only accuracy-check prompt for a transcription task, already
+   * matched to the project's own standard (edited vs. strict verbatim) --
+   * see TranscriptCheckPromptView. A worker pastes this ahead of the
+   * document `preview` above already renders; there is no "polish" variant
+   * because a worker's assistant never hears the audio (see
+   * worker_prompts.build_transcript_check's own docstring).
+   */
+  checkPrompt: (taskId) =>
+    api.get(`/workforce/tasks/${taskId}/transcript-check-prompt/`),
 };
 
 // Segment editing lives on the transcription API, addressed by job.

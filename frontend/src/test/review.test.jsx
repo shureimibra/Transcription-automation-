@@ -378,6 +378,56 @@ describe('the submission preview', () => {
   });
 });
 
+describe('the accuracy check prompt', () => {
+  // THE TRANSCRIPTION-SIDE COUNTERPART TO "Copy a check instead" ON A
+  // TRANSLATION TASK. Report-only for the same reason: a worker's
+  // assistant has never heard the audio, so it hands back leads to verify
+  // rather than a document to paste over the transcript.
+
+  it('copies the prompt together with the rendered document, not either alone', async () => {
+    vi.spyOn(submission, 'checkPrompt').mockResolvedValue({
+      prompt: 'TRANSCRIPT-CHECK-PROMPT ',
+    });
+    vi.spyOn(submission, 'preview').mockResolvedValue({
+      content: 'Male_1:\nfirst turn', words: 2, characters: 10,
+      findings: [], blocking: false,
+    });
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+
+    render(<ReviewWorkspace task={TASK} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Copy accuracy check' }));
+
+    await waitFor(() => expect(writeText).toHaveBeenCalled());
+    const [payload] = writeText.mock.calls[0];
+    expect(payload).toContain('TRANSCRIPT-CHECK-PROMPT');
+    expect(payload).toContain('first turn');
+  });
+
+  it('is not offered on a translation task, which has no such prompt', async () => {
+    render(<ReviewWorkspace task={{ ...TASK, kind: 'translation' }} />);
+    await screen.findByText('first turn');
+
+    expect(screen.queryByRole('button', { name: 'Copy accuracy check' })).not.toBeInTheDocument();
+  });
+
+  it('surfaces the error instead of copying nothing', async () => {
+    vi.spyOn(submission, 'checkPrompt').mockRejectedValue(new Error('down for maintenance'));
+    vi.spyOn(submission, 'preview').mockResolvedValue({
+      content: 'Male_1:\nfirst turn', words: 2, characters: 10,
+      findings: [], blocking: false,
+    });
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+
+    render(<ReviewWorkspace task={TASK} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Copy accuracy check' }));
+
+    expect(await screen.findByText(/down for maintenance/)).toBeInTheDocument();
+    expect(writeText).not.toHaveBeenCalled();
+  });
+});
+
 describe('the deadline clock', () => {
   it('shows nothing until the platform has set a deadline', () => {
     const { container } = render(<DeadlineClock task={{ deadline_at: null }} />);

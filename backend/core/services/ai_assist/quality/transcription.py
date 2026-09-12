@@ -452,7 +452,24 @@ _NUMBER_WORDS = {
     'fifty', 'sixty', 'seventy', 'eighty', 'ninety', 'hundred', 'thousand',
     'million', 'billion',
 }
-_SMALL_DIGIT_RE = re.compile(r'(?<![\d:.\-/])([0-9])(?![\d:.\-/%])')
+#: A digit touching a letter directly, either side, with no space between
+#: them: E4, A3 (musical pitch notation), 3D (dimensional shorthand), D1,
+#: D0, K1, K2 (variable/identifier labels), 4G (an acceleration multiplier
+#: read as "four G"). A spoken NUMBER never has a letter fused onto it like
+#: this in real prose -- that shape is specifically what an identifier or a
+#: piece of notation looks like, in a genuinely general way, not a list of
+#: the specific tokens seen so far. Confirmed on five separate real
+#: instances across a 19-document review, none of them a spoken count.
+_SMALL_DIGIT_RE = re.compile(r'(?<![\d:.\-/A-Za-z])([0-9])(?![\d:.\-/%A-Za-z])')
+
+#: An exponent read aloud: "ten to the minus six", "ten to the sixteen".
+#: The digit here names a power, not a count, and check_verbatim's sibling
+#: exception for math notation elsewhere in this codebase makes the same
+#: call for "x squared" -- this is the transcription side of that same
+#: judgment, for a phrase shape rather than a symbol.
+_EXPONENT_PHRASE_RE = re.compile(
+    r'\bto\s+the(?:\s+(?:minus|negative))?\s*\Z', re.IGNORECASE,
+)
 _SPELLED_LARGE_RE = re.compile(
     r'\b(' + '|'.join(sorted(_NUMBER_WORDS, key=len, reverse=True)) + r')\b',
     re.IGNORECASE,
@@ -506,6 +523,13 @@ def check_number_rules(text: str) -> List[QualityIssue]:
         # "Rule eight" would be wrong rather than merely unusual.
         if _CITED_NUMBER_RE.search(window):
             continue
+        # "ten to the minus 6" -- an exponent, not a count. Checked against
+        # what comes immediately BEFORE the digit specifically, not a
+        # symmetric window, because the phrase has to land right there for
+        # this digit to be the power in it.
+        before = body[max(0, match.start() - 20):match.start()]
+        if _EXPONENT_PHRASE_RE.search(before):
+            continue
         issues.append(QualityIssue(
             category=IssueCategory.TYPOGRAPHY, severity=Severity.MEDIUM,
             problem=(
@@ -557,7 +581,20 @@ _SLANG = {
     'kinda': 'kind of', 'sorta': 'sort of', 'dunno': "do not know",
     'cause': 'because', 'yeah': 'yes', 'nope': 'no',
 }
-_SLANG_RE = re.compile(r'\b(' + '|'.join(_SLANG) + r')\b', re.IGNORECASE)
+#: "cause" is genuinely ambiguous once the apostrophe is dropped: 'cause
+#: (short for "because", a conjunction) and the ordinary verb "to cause"
+#: share a spelling. A real submission had "to cause this walker to move
+#: along this logarithmic spiral" -- an entirely formal, correct sentence
+#: -- flagged as informal, because a bare word match cannot tell the two
+#: apart. Excluded here: immediately after "to ", the infinitive marker,
+#: which 'cause (a conjunction) is never preceded by -- so this removes
+#: the confirmed false positive without weakening detection of a genuine
+#: "'cause" anywhere else in the text.
+_SLANG_RE = re.compile(
+    r'\b(' + '|'.join(k for k in _SLANG if k != 'cause') + r')\b'
+    r'|(?<!to )\bcause\b',
+    re.IGNORECASE,
+)
 
 _CONTRACTION_RE = re.compile(
     r"\b\w+'(?:s|t|re|ve|ll|d|m)\b", re.IGNORECASE,
@@ -762,6 +799,24 @@ def _prose_blocks(text):
     return [b for b in blocks if b.strip()]
 
 
+#: The final .!? of a block, allowing a trailing quote/bracket after it --
+#: but NOT a trailing ellipsis (three dots, or the single unicode
+#: character), because that specifically means the block was cut off
+#: rather than finished. The two lookbehinds are independently
+#: fixed-width, which Python's re allows chained like this even though
+#: neither alone covers both ellipsis spellings.
+_TERMINAL_PUNCTUATION_RE = re.compile(r'(?<!\.\.)(?<!…)[.!?]["\')\]]?\s*\Z')
+
+#: A leading ellipsis, three dots or the single unicode character -- the
+#: explicit signal that THIS block picks up mid-sentence. Only the first
+#: block of a document gets to rely on this signal alone: a bare lower-
+#: case first block with no such marker is not evidenced anywhere in the
+#: documents reviewed, so it stays a real, flaggable defect rather than
+#: getting the same blanket benefit of the doubt every later block gets
+#: from checking what came before it.
+_LEADING_ELLIPSIS_RE = re.compile(r'\A\s*(?:\.\.\.|…)')
+
+
 def check_capitalization(text):
     """
     RECORDINGS START MID-SENTENCE, and both accepted submissions do. Eagle
@@ -771,7 +826,25 @@ def check_capitalization(text):
 
     LOW, therefore, not MEDIUM: worth mentioning, never worth acting on
     without looking. Both documents the platform paid for trip this check.
-    
+
+    A LOWER-CASE BLOCK START IS NOT ALWAYS THIS DEFECT -- TWO CONFIRMED
+    SHAPES, ONE RULE EACH. The FIRST block of a document gets the benefit
+    of the doubt only when it carries the explicit signal, a leading
+    "...": the recording itself can start mid-sentence, exactly as this
+    docstring's opening paragraph says, but a bare lower-case first block
+    with nothing marking it that way is still a real, flaggable defect --
+    that shape is not evidenced in anything reviewed here, and staying
+    silent on it would blind the check to the first line of every
+    genuinely uncapitalized transcript. EVERY LATER block is judged
+    differently, by what came before it rather than by its own leading
+    character: a block that opens "he said God made the whole numbers",
+    continuing the PREVIOUS block's "...but even to Kronecker", carries no
+    ellipsis of its own anywhere -- the tell there is that the PREVIOUS
+    block never reached genuine terminal punctuation, so this one cannot
+    be starting a new sentence. A block that itself trails off on "..."
+    also does not count as having ended, so the block after IT gets the
+    same pass.
+
     Sentences start with a capital. EDITED VERBATIM ONLY.
 
     Strict verbatim forbids this outright -- "do NOT add artificial periods,
@@ -781,17 +854,26 @@ def check_capitalization(text):
     One finding per document: a transcript that does not capitalize has one
     systematic problem, not forty.
     """
-    for block in _prose_blocks(text):
+    blocks = _prose_blocks(text)
+    for index, block in enumerate(blocks):
         first = _BLOCK_START_RE.search(block)
         if first:
-            return [QualityIssue(
-                category=IssueCategory.TYPOGRAPHY, severity=Severity.LOW,
-                problem='A speaker block begins in lower case.',
-                correction='Capitalize the first word of each block.',
-                target_span=block.strip()[:60],
-                rule='transcript.block-not-capitalized',
-                detector='deterministic',
-            )]
+            if index == 0:
+                starts_a_real_new_sentence = not _LEADING_ELLIPSIS_RE.match(block)
+            else:
+                previous = blocks[index - 1].strip()
+                starts_a_real_new_sentence = bool(
+                    _TERMINAL_PUNCTUATION_RE.search(previous)
+                )
+            if starts_a_real_new_sentence:
+                return [QualityIssue(
+                    category=IssueCategory.TYPOGRAPHY, severity=Severity.LOW,
+                    problem='A speaker block begins in lower case.',
+                    correction='Capitalize the first word of each block.',
+                    target_span=block.strip()[:60],
+                    rule='transcript.block-not-capitalized',
+                    detector='deterministic',
+                )]
         for match in _SENTENCE_START_RE.finditer(block):
             preceding = block[max(0, match.start() - 12):match.start()].lower()
             word = re.split(r'[\s(]', preceding)[-1] if preceding else ''

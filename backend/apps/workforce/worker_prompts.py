@@ -340,3 +340,137 @@ def build(source_language: str, target_language: str, source_text: str = '') -> 
         'review': _REVIEW.format(source_text=(source_text or '').strip(),
                                  **parts, **sections),
     }
+
+
+# --------------------------------------------------------------------- #
+# The transcript accuracy check -- report only, on purpose
+# --------------------------------------------------------------------- #
+#
+# WHY THIS IS REPORT-ONLY, WITH NO REWRITE VARIANT AT ALL, UNLIKE THE
+# TRANSLATION PROMPTS ABOVE. A translation worker's assistant only ever
+# has to judge language -- is this correct {target}? -- and correcting
+# that needs no access to anything outside the text. A transcript's
+# accuracy is a claim about what a real person actually said, and an
+# assistant reading only the page has never heard the audio. It can spot
+# that "ciphate surface" does not look like a real term and that "Seifert
+# surface" fits the sentence around it, but it cannot know that is what
+# was actually said -- only the worker, listening, can confirm that. A
+# rewrite button here would let a worker paste in a plausible-sounding
+# guess without ever pressing play, which is a worse failure than the one
+# this exists to catch: a confident, uncaught wrong word becoming a
+# confident, uncaught DIFFERENT wrong word. So this hands back leads to
+# go verify, never a document to paste over the original.
+#
+# EVERY ITEM BELOW TRACES TO A REAL, CONFIRMED DEFECT. A 19-document
+# review of real transcription submissions -- see
+# docs/TRANSCRIPTION_QUALITY_FINDINGS_2026-09-12.md -- found that the
+# mechanical rubric (numbers, contractions, fillers) is caught well by
+# the platform's own checks, but proper nouns and technical terms are
+# not checked by anything at all, and were wrong constantly: real
+# scholars' names (Milnor -> "Milner", Dirac -> "Durac", de Broglie ->
+# "debris"), real terms (Sierpinski -> "Pinsky" AND "Spinsky", two
+# different wrong spellings in the same document), and even the literal
+# subject of one talk (bore -> "ball" for the first half of the
+# document, correct for the rest). None of these are hypothetical.
+_TRANSCRIPT_CHECK = """\
+You are checking an English transcript of a recorded lecture or talk for
+likely mishearings by the speech-recognition software that produced it.
+Report only -- do not rewrite anything, and do not produce a corrected
+version of the document.
+
+This is a machine transcript of real spoken audio. Every word on the page
+is a guess at what was said, made by software with no idea what field this
+is or who these people are. Your job is to use your own general knowledge
+of the subject to spot places where that guess is probably wrong -- a real
+person's name, a technical term, a book, a place or an institution --
+misheard as a different real word or as a plausible-sounding non-word.
+
+WHAT TO LOOK FOR, IN ORDER OF VALUE:
+1. A capitalized word or short phrase that is not a real name, place or
+   term you recognize, especially where a name plainly belongs (introducing
+   a person, citing a result, naming a place or an institution). If context
+   nearby points to what the real name or term almost certainly is, say so.
+2. The SAME name or term spelled two different wrong ways within this one
+   document. That is a strong, self-contained sign of a mishearing even
+   when you are not sure what the correct spelling is.
+3. A sentence that does not quite parse, or a single word that does not
+   fit its sentence, where a different, similar-sounding real word would
+   read naturally in its place.
+4. Numbers: zero through nine should be spelled out as words, ten and
+   above as figures -- except money, a time, a date, a percentage, a
+   measurement, or an age, which are always figures regardless of size.
+   Do NOT flag a digit that is part of an identifier or notation rather
+   than a spoken count -- a variable like "K1", a musical note like "E4",
+   a dimension like "3D", an exponent read aloud like "ten to the minus
+   six" -- none of those are numbers being spoken, so this rule does not
+   apply to them.
+5. Contractions ("it's", "don't", "I'm") and informal words ("yeah",
+   "gonna", "kinda") that should be expanded or replaced for a
+   professional, academic transcript -- {standard_note}
+6. Whether the pattern of speaker labels looks right. If one label (say
+   Male_1) only ever produces short transitional lines and a different
+   label (Male_2) always immediately continues with the substantive
+   content, with no real back-and-forth between them anywhere, say so --
+   that shape usually means one continuous speaker was split into two
+   labels, not that there are genuinely two people talking.
+
+WHAT NOT TO DO:
+- Do not rewrite the transcript, or any part of it. You were not there and
+  cannot hear the audio, so a guess at a name is a lead for the person who
+  CAN listen and confirm it -- never a fact to commit to the document.
+- Do not flag a name or term just because you personally have not heard of
+  it. Only flag it if something about its spelling looks phonetically
+  garbled, or if it contradicts itself elsewhere in this same document.
+- Do not comment on writing style, word choice, or anything outside the
+  six things above.
+
+For each thing you flag, give me exactly this and nothing else:
+
+  * the phrase as transcribed
+  * what you think it should probably be, if you have a real guess --
+    say "not sure" rather than inventing one you are not confident in
+  * why, in one line
+
+Order them worst first: the ones you are most confident about first.
+
+If you find nothing at all, reply with the single word: CLEAN.
+
+--- TRANSCRIPT ---
+"""
+
+#: The item-5 sentence needs to say the OPPOSITE thing under strict
+#: verbatim, where every filler, contraction and repetition is required
+#: to survive exactly as spoken -- flagging them there would be asking
+#: the worker to break the very standard the task is graded on.
+_STANDARD_NOTES = {
+    'edited_verbatim': (
+        'flag every one you see. This document follows the edited verbatim '
+        '(professional / academic) standard.'
+    ),
+    'strict_verbatim': (
+        'do NOT flag any of these here. This document follows the strict '
+        'verbatim standard, which requires every filler, contraction and '
+        'repetition to be preserved exactly as spoken -- removing one '
+        'would itself be the defect.'
+    ),
+}
+_STANDARD_NOTE_DEFAULT = (
+    'flag every one you see, unless you are told this document follows '
+    'the strict verbatim standard, in which case leave all of them alone.'
+)
+
+
+def build_transcript_check(standard_name: str = '') -> str:
+    """
+    The one prompt offered for a transcription task: report-only, and
+    aware of which verbatim standard applies so it does not ask a worker
+    to "fix" fillers a strict-verbatim transcript is required to keep.
+
+    `standard_name` is the SAME string TaskSerializer.get_transcription_standard
+    already resolves (`'edited_verbatim'` or `'strict_verbatim'`) -- passed
+    in rather than re-derived, so this never disagrees with what the
+    worker's own screen already told them the task's standard is.
+    """
+    note = _STANDARD_NOTES.get(
+        (standard_name or '').strip(), _STANDARD_NOTE_DEFAULT)
+    return _TRANSCRIPT_CHECK.format(standard_note=note)

@@ -110,6 +110,8 @@ export default function ReviewWorkspace({ task, onTaskChange }) {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [showPreview, setShowPreview] = useState(false);
+  const [copyingCheck, setCopyingCheck] = useState(false);
+  const [checkCopied, setCheckCopied] = useState(false);
 
   const jobId = task?.job;
   const load = useCallback(
@@ -279,6 +281,45 @@ export default function ReviewWorkspace({ task, onTaskChange }) {
     }
   };
 
+  /**
+   * The transcription-side counterpart to TranslationWorkspace's
+   * "Copy a check instead" -- see TranscriptCheckPromptView's own
+   * docstring for why this is the only variant: a worker's assistant has
+   * never heard the audio, so it hands back leads to go verify, not a
+   * document to paste over the transcript.
+   *
+   * REUSES THE SAME DOCUMENT THE PREVIEW DIALOG SHOWS, rather than
+   * rendering a second copy of it here -- `submission.preview` is already
+   * the one formatter this screen trusts to say what Eagle will receive.
+   */
+  const copyAccuracyCheck = async () => {
+    setCopyingCheck(true);
+    setError('');
+    try {
+      const [{ prompt }, preview] = await Promise.all([
+        submission.checkPrompt(task.id),
+        submission.preview(task.id),
+      ]);
+      const payload = `${prompt || ''}${preview?.content || ''}`;
+      if (!payload.trim()) {
+        setNotice('There is nothing to copy yet.');
+        return;
+      }
+      await navigator.clipboard.writeText(payload);
+      setCheckCopied(true);
+      setNotice(
+        'Prompt and transcript copied. Paste it into your assistant, then '
+        + 'check anything it flags against the audio before you edit -- it '
+        + 'has not heard this recording.'
+      );
+      setTimeout(() => setCheckCopied(false), 2500);
+    } catch (err) {
+      setError(err.message || 'Could not build the check prompt.');
+    } finally {
+      setCopyingCheck(false);
+    }
+  };
+
   if (!jobId) {
     return (
       <Card title="Transcript">
@@ -369,11 +410,23 @@ export default function ReviewWorkspace({ task, onTaskChange }) {
         title="Transcript"
         subtitle={`${rows.length} turns · click any line to hear it`}
         actions={
-          <Button size="sm" onClick={() => setShowPreview(true)}>
-            {/* Delivered work can still be READ -- a coach asks what was sent
-                often enough -- but it is never offered a submit path. */}
-            {isDelivered(task) ? 'View what was submitted' : 'Preview submission'}
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            {/* NOT OFFERED ON A TRANSLATION TASK -- see labelsSpeakers.
+                TranscriptCheckPromptView 404s there for the same reason: a
+                transcription accuracy check has nothing to say about a
+                document with no audio-derived words to mishear. */}
+            {labelsSpeakers && (
+              <Button size="sm" variant="secondary" loading={copyingCheck}
+                      onClick={copyAccuracyCheck}>
+                {checkCopied ? 'Copied' : 'Copy accuracy check'}
+              </Button>
+            )}
+            <Button size="sm" onClick={() => setShowPreview(true)}>
+              {/* Delivered work can still be READ -- a coach asks what was sent
+                  often enough -- but it is never offered a submit path. */}
+              {isDelivered(task) ? 'View what was submitted' : 'Preview submission'}
+            </Button>
+          </div>
         }
         padded={false}
       >

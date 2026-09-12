@@ -219,3 +219,59 @@ class WorkerPromptTestCase(TestCase):
 
         # Never a silent empty string where a language name belongs.
         self.assertIn('XX', prompts['translate'])
+
+
+class TranscriptCheckPromptTestCase(TestCase):
+    """
+    The one prompt offered for a transcription task -- see
+    worker_prompts.build_transcript_check's own docstring for why there is
+    no rewrite variant: a worker's assistant never hears the audio, so a
+    guess at a name is a lead to go verify, not a fact to paste over the
+    document.
+    """
+
+    def test_it_never_offers_to_rewrite(self):
+        """THE WHOLE DESIGN DECISION, IN ONE ASSERTION. If this ever starts
+        asking for a corrected document instead of a report, a worker could
+        paste an unconfirmed guess straight into a submission without ever
+        pressing play."""
+        prompt = worker_prompts.build_transcript_check('edited_verbatim')
+        self.assertIn('Report only', prompt)
+        self.assertIn('do not rewrite', prompt.lower())
+        self.assertNotIn('Reply with the corrected', prompt)
+
+    def test_it_asks_for_the_specific_defects_this_batch_actually_found(self):
+        """FROM A REAL 19-DOCUMENT REVIEW, not imagination: real names
+        mangled (Milnor, Dirac, de Broglie), the same term spelled two
+        different wrong ways in one document (Sierpinski), and the literal
+        subject of one talk wrong for half of it (bore/ball)."""
+        prompt = worker_prompts.build_transcript_check('edited_verbatim')
+        self.assertIn('two different wrong ways', prompt)
+        self.assertIn('speaker labels', prompt)
+
+    def test_it_does_not_flag_alphanumeric_notation_as_a_number(self):
+        """The same false positive already fixed in the deterministic
+        check (E4, 3D, K1, exponents) -- the prompt should not ask a
+        worker's assistant to re-introduce it by hand."""
+        prompt = worker_prompts.build_transcript_check('edited_verbatim')
+        self.assertIn('K1', prompt)
+        self.assertIn('3D', prompt)
+        self.assertIn('ten to the minus', prompt)
+
+    def test_edited_verbatim_is_told_to_flag_contractions(self):
+        prompt = worker_prompts.build_transcript_check('edited_verbatim')
+        self.assertIn('flag every one you see', prompt)
+        self.assertIn('edited verbatim', prompt)
+
+    def test_strict_verbatim_is_told_the_opposite(self):
+        """THE RULE INVERTS. Flagging a contraction on a strict-verbatim
+        transcript would ask the worker to break the very standard the
+        task is graded on."""
+        prompt = worker_prompts.build_transcript_check('strict_verbatim')
+        self.assertIn('do NOT flag any of these', prompt)
+        self.assertIn('strict verbatim', prompt)
+        self.assertNotIn('flag every one you see', prompt)
+
+    def test_an_unknown_standard_defaults_to_the_safer_instruction(self):
+        prompt = worker_prompts.build_transcript_check('')
+        self.assertIn('unless you are told', prompt)

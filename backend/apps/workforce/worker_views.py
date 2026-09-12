@@ -416,6 +416,49 @@ class TranslationDraftView(views.APIView):
             'blocking': preview.blocking,
         })
 
+class TranscriptCheckPromptView(views.APIView):
+    """
+    GET /workforce/tasks/<id>/transcript-check-prompt/ -- the accuracy-check
+    prompt for a transcription task, ready to paste.
+
+    THE MISSING HALF OF worker_prompts.py. That module already closed this
+    exact gap for translation -- a worker used to bring their own prompt to
+    their own assistant, one standard per worker, discovered when the
+    reviews came back a day later. Nothing offered the same thing on a
+    transcription task, even though the biggest thing the automated checks
+    cannot see at all -- a real name or technical term misheard as a
+    different real word -- is exactly as real here (see
+    docs/TRANSCRIPTION_QUALITY_FINDINGS_2026-09-12.md).
+
+    REPORT-ONLY, SO THERE IS NOTHING TO POST BACK. Unlike the translation
+    prompts, this hands back leads to go verify against the audio, not a
+    document to paste over the transcript -- see
+    worker_prompts.build_transcript_check's own docstring for why a rewrite
+    variant was deliberately not built. A worker copies this prompt, pastes
+    the transcript under it (the same server-rendered document Preview
+    already shows), reads what comes back, and acts on it by editing the
+    specific line after listening -- through the editing this screen
+    already offers, not through this endpoint.
+
+    STANDARD-AWARE, so the prompt never asks a worker to "fix" a
+    contraction on a strict-verbatim task, which would ask them to break
+    the very standard the task is graded on.
+    """
+
+    authentication_classes = AUTH_CLASSES
+    permission_classes = [IsAuthenticatedWorkerOrAdmin]
+
+    def get(self, request, pk):
+        task = TaskMediaView._task_for(request, pk)
+        if task.kind != Task.TRANSCRIPTION:
+            raise Http404
+        standard = TaskSerializer(task, context={'request': request}).data.get(
+            'transcription_standard') or {}
+        return Response({
+            'prompt': worker_prompts.build_transcript_check(standard.get('name', '')),
+        })
+
+
 class SubmissionPreviewView(views.APIView):
     """
     GET /workforce/tasks/<id>/preview/ -- exactly what Eagle will receive.

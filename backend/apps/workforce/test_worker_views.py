@@ -564,3 +564,57 @@ class TranslationDraftTestCase(WorkerEndpointBase):
 
         self.assertEqual(task.polished_by_id, self.ana.id)
         self.assertIsNotNone(task.polished_at)
+
+
+class TranscriptCheckPromptTestCase(WorkerEndpointBase):
+    """
+    GET /workforce/tasks/<id>/transcript-check-prompt/ -- see
+    TranscriptCheckPromptView's own docstring for the gap this closes.
+    """
+
+    def test_a_worker_holding_the_task_gets_the_prompt(self):
+        task = self.warm_task(claimed_by=self.ana, status=states.IN_PROGRESS)
+        self.client.force_authenticate(self.ana_user)
+
+        response = self.client.get(
+            f'/api/v1/workforce/tasks/{task.id}/transcript-check-prompt/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('Report only', response.data['prompt'])
+
+    def test_a_translation_task_has_no_transcript_check_prompt(self):
+        """A different job needs a different prompt -- worker_prompts.build
+        already covers translation, and this endpoint is not it."""
+        task = self.warm_task(claimed_by=self.ana, status=states.IN_PROGRESS)
+        task.kind = Task.TRANSLATION
+        task.save(update_fields=['kind'])
+        self.client.force_authenticate(self.ana_user)
+
+        response = self.client.get(
+            f'/api/v1/workforce/tasks/{task.id}/transcript-check-prompt/')
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_a_worker_cannot_read_another_workers_task(self):
+        task = self.warm_task(claimed_by=self.bo, status=states.IN_PROGRESS)
+        self.client.force_authenticate(self.ana_user)
+
+        response = self.client.get(
+            f'/api/v1/workforce/tasks/{task.id}/transcript-check-prompt/')
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_the_prompt_matches_the_projects_own_standard(self):
+        """THE STANDARD INVERTS THE INSTRUCTION. A task filed under a
+        strict-verbatim project must not be told to flag contractions --
+        that would ask the worker to break the standard the task is graded
+        on."""
+        task = self.warm_task(claimed_by=self.ana, status=states.IN_PROGRESS)
+        task.project = 'Legal Dictation'
+        task.save(update_fields=['project'])
+        self.client.force_authenticate(self.ana_user)
+
+        response = self.client.get(
+            f'/api/v1/workforce/tasks/{task.id}/transcript-check-prompt/')
+
+        self.assertIn('do NOT flag any of these', response.data['prompt'])

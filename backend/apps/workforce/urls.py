@@ -13,8 +13,8 @@ from rest_framework.routers import DefaultRouter
 from .analytics import WorkforcePerformanceView
 from .worker_views import (
     StartNextTaskView, SubmissionPreviewView,
-    TranslationDraftView, SubmitToEagleView, TaskMediaView,
-    WorkQueueStatusView,
+    TranscriptCheckPromptView, TranslationDraftView, SubmitToEagleView,
+    TaskMediaView, WorkQueueStatusView,
 )
 from .views import (
     AccountViewSet, CurrentUserView, LoginView, LogoutView, TaskViewSet,
@@ -41,6 +41,8 @@ urlpatterns = [
     path('work/status/', WorkQueueStatusView.as_view(), name='wf-work-status'),
     path('tasks/<uuid:pk>/media/', TaskMediaView.as_view(), name='wf-task-media'),
     path('tasks/<uuid:pk>/translation/', TranslationDraftView.as_view(), name='wf-task-translation'),
+    path('tasks/<uuid:pk>/transcript-check-prompt/', TranscriptCheckPromptView.as_view(),
+         name='wf-task-transcript-check-prompt'),
     path('tasks/<uuid:pk>/preview/', SubmissionPreviewView.as_view(), name='wf-task-preview'),
     path('tasks/<uuid:pk>/submit-external/', SubmitToEagleView.as_view(),
          name='wf-task-submit-external'),
