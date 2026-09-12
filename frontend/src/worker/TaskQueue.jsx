@@ -9,6 +9,7 @@ import {
 } from '../components/ui/index.jsx';
 import { BoltIcon, LanguagesIcon, ListIcon, MicIcon, SearchIcon } from '../components/icons.jsx';
 import { taskLabel } from '../lib/format.js';
+import TranslationGuideModal from './TranslationGuideModal.jsx';
 
 // Every task this person is allowed to see, with filters.
 //
@@ -64,6 +65,10 @@ export default function TaskQueue({ kind = null }) {
   const [statusFilter, setStatusFilter] = useState('');
   const [page, setPage] = useState(1);
   const searchRef = useRef(null);
+  // TRANSLATION ONLY, FOR NOW. A transcription version is planned once a
+  // comparable review of transcription submissions has actually happened --
+  // writing one today would be guessing at defects nobody has measured yet.
+  const [showGuide, setShowGuide] = useState(false);
 
   // Changing what you are looking at must return you to the first page --
   // page 3 of a filter with one page of results renders as "no tasks".
@@ -179,6 +184,17 @@ export default function TaskQueue({ kind = null }) {
               <BoltIcon className="h-4 w-4" />
               <span className="tabular-nums">{readyCount}</span> ready now
             </span>
+            {kind === 'translation' && (
+              <button
+                type="button"
+                onClick={() => setShowGuide(true)}
+                className="rounded-xl2 bg-white/15 px-3 py-2 text-xs font-semibold text-white backdrop-blur
+                  transition-colors hover:bg-white/25
+                  focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
+              >
+                Translation guide
+              </button>
+            )}
             <button
               type="button"
               onClick={() => refresh()}
@@ -303,6 +319,8 @@ export default function TaskQueue({ kind = null }) {
           />
         </>
       )}
+
+      {showGuide && <TranslationGuideModal onClose={() => setShowGuide(false)} />}
     </div>
   );
 }

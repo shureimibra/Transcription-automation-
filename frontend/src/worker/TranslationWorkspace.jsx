@@ -8,6 +8,7 @@ import Verdict from '../components/Verdict.jsx';
 import DeliveredBanner, { isDelivered } from '../components/DeliveredBanner.jsx';
 import SubmittedPanel from '../components/SubmittedPanel.jsx';
 import DeadlineClock from './DeadlineClock.jsx';
+import TranslationGuideModal from './TranslationGuideModal.jsx';
 import {
   Button, Card, ErrorState, FOCUS, LiveRegion, Skeleton,
 } from '../components/ui/index.jsx';
@@ -41,6 +42,7 @@ export default function TranslationWorkspace({ task, onTaskChange }) {
   const [notice, setNotice] = useState('');
   const [copied, setCopied] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const [showGuide, setShowGuide] = useState(false);
   // FOLLOWING THE AUDIO WAS THE MISSING HALF. This screen had a player and a
   // transcript and no connection between them: no highlight, no click to
   // jump. Checking whether line 90 matched the audio meant scrubbing by eye.
@@ -344,6 +346,11 @@ export default function TranslationWorkspace({ task, onTaskChange }) {
           notTranslatedYet
             ? 'The machine translation is not available — translate it yourself'
             : 'Three steps. You do not need to read French.'
+        }
+        actions={
+          <Button size="sm" variant="ghost" onClick={() => setShowGuide(true)}>
+            Full guide
+          </Button>
         }
       >
         {notTranslatedYet ? (
@@ -669,6 +676,8 @@ export default function TranslationWorkspace({ task, onTaskChange }) {
           }}
         />
       )}
+
+      {showGuide && <TranslationGuideModal onClose={() => setShowGuide(false)} />}
     </div>
   );
 }

@@ -370,6 +370,23 @@ describe('retranslating a single line', () => {
   });
 });
 
+describe('the full guide', () => {
+  it('opens on request and closes again', async () => {
+    render(<TranslationWorkspace task={TASK} />);
+    await screen.findByText('Plusieurs fois par seconde');
+    expect(screen.queryByRole('dialog', { name: /Translation job guide/i })).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Full guide' }));
+    const dialog = await screen.findByRole('dialog', { name: /Translation job guide/i });
+    expect(within(dialog).getByRole('heading', {
+      name: /What the checks still miss/i, level: 3,
+    })).toBeInTheDocument();
+
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
+    expect(screen.queryByRole('dialog', { name: /Translation job guide/i })).not.toBeInTheDocument();
+  });
+});
+
 describe('submitting', () => {
   it('blocks Submit when the preview was refused outright', async () => {
     vi.spyOn(submission, 'preview').mockRejectedValue(
