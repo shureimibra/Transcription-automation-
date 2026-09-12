@@ -59,6 +59,31 @@ def _make_api_user(username='test-operator'):
 # and it is where `self.client` is created. Authenticating here therefore
 # applies to all 23 classes without editing a single one of their `setUp`
 # methods -- which keeps this change mechanical and reviewable.
+#
+# `_pre_setup` IS A CLASSMETHOD, taking `cls`, not `self`. Django changed it
+# from a per-test instance hook to this shape -- `SimpleTestCase._pre_setup`
+# itself now does `cls.client = cls.client_class()`. For a plain `TestCase`
+# that is invisible: `SimpleTestCase.__call__` still calls `self._pre_setup()`
+# fresh before every test method, and a classmethod called through an
+# instance works exactly like calling it through the class. For a
+# `TransactionTestCase` (which `APITransactionTestCase` is, and `TestCase`
+# is NOT -- `TestCase` is the subclass, not the other way around) it is not
+# invisible: `TransactionTestCase.setUpClass` calls `cls._pre_setup()`
+# directly -- through the CLASS, before any instance exists -- exactly once
+# for the whole class, and every test method in it shares that one setup.
+#
+# A plain `def _pre_setup(self):` here used to be harmless because it was
+# always invoked through an instance either way. It stopped being harmless
+# the moment Django started calling it through the class instead for every
+# `AuthenticatedAPITransactionTestCase` subclass: `cls._pre_setup` on an
+# ordinary function accessed via the class is not a bound method, so calling
+# it with no arguments raised exactly the observed
+# "_pre_setup() missing 1 required positional argument: 'self'" --
+# proven pre-existing and unrelated to any of this session's other changes
+# via `git stash` before being fixed here. Writing `cls` here instead of
+# `self` matches the same one-class-instance-shared-setup contract Django's
+# own `_pre_setup` already uses for this exact test-case shape, so nothing
+# about test isolation gets weaker than it already was.
 
 class _ForceLoggedInMixin:
     """
@@ -70,17 +95,19 @@ class _ForceLoggedInMixin:
     super().
     """
 
-    def _pre_setup(self):
+    @classmethod
+    def _pre_setup(cls):
         super()._pre_setup()
-        self.api_user = _make_api_user()
-        self.client.force_login(self.api_user)
+        cls.api_user = _make_api_user()
+        cls.client.force_login(cls.api_user)
 
 
 class _ForceAuthenticatedMixin:
-    def _pre_setup(self):
+    @classmethod
+    def _pre_setup(cls):
         super()._pre_setup()
-        self.api_user = _make_api_user()
-        self.client.force_authenticate(user=self.api_user)
+        cls.api_user = _make_api_user()
+        cls.client.force_authenticate(user=cls.api_user)
 
 
 class AuthenticatedAPITestCase(_ForceAuthenticatedMixin, APITestCase):
