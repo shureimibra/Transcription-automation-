@@ -12868,6 +12868,77 @@ class TranscriptionStandardTestCase(TestCase):
             self._rules(long_edited, 'strict_verbatim'),
         )
 
+    def test_a_possessive_is_not_a_contraction(self):
+        """
+        FROM A REAL SUBMISSION: "Archie Cox's office" -- a correctly-formed
+        possessive -- was the example finding chosen for "contractions
+        remain", whose correction text reads "Expand contractions: I'm ->
+        I am". Taken at face value that turns a correct sentence into
+        "Archie Cox is office". A possessive noun must never itself be
+        the reason this rule fires.
+        """
+        text = (
+            'Male_1:\n'
+            '[00:00:00.000 --> 00:00:09.000]\n'
+            "They were all by Archie Cox's office in the stacks, and the "
+            "special trial judge's ruling was clear, and the Chief "
+            "Justice's position commanded four votes. "
+            'It is entirely clear that the argument proceeds in stages, '
+            'and it is written down for anyone reading it later, and it '
+            'is a matter of public record for every observer present.\n'
+        )
+        rules = self._rules(text, 'edited_verbatim')
+        self.assertNotIn('transcript.contractions-not-expanded', rules)
+
+    def test_a_pronoun_contraction_still_fires_beside_a_possessive(self):
+        """The fix narrows the host list; it must not silence genuine
+        contractions sitting in the same document as a possessive."""
+        text = (
+            'Male_1:\n'
+            '[00:00:00.000 --> 00:00:09.000]\n'
+            + "Archie Cox's office, and it's fine, and that's right, and "
+              "he's certain, and they're ready, and you're sure. " * 3
+            + '\n'
+        )
+        self.assertIn(
+            'transcript.contractions-not-expanded',
+            self._rules(text, 'edited_verbatim'),
+        )
+
+    def test_a_complementizer_followed_by_a_contraction_is_not_a_repeat(self):
+        """
+        FROM THE SAME SUBMISSION: "he thought that that's a better story"
+        -- the complementizer "that" followed by the demonstrative
+        contraction "that's", both grammatically required -- was flagged
+        as a duplicated word. The apostrophe is a non-word character, so
+        the bare pattern read "that" immediately followed by the "that"
+        stem of "that's" as the same word twice.
+        """
+        text = (
+            'Male_1:\n'
+            '[00:00:00.000 --> 00:00:09.000]\n'
+            "He thought that that's a better story than the ones you "
+            'know, and it is entirely clear that the argument proceeds '
+            'in stages, and it is written down for anyone reading it '
+            'later, and it is a matter of public record.\n'
+        )
+        rules = self._rules(text, 'edited_verbatim')
+        self.assertNotIn('transcript.repetition-not-removed', rules)
+
+    def test_a_genuine_stutter_repeat_still_fires(self):
+        text = (
+            'Male_1:\n'
+            '[00:00:00.000 --> 00:00:09.000]\n'
+            'I think that that that is the the point I was trying to '
+            'make, and it is entirely clear that the argument proceeds '
+            'in stages, and it is written down for anyone reading it '
+            'later.\n'
+        )
+        self.assertIn(
+            'transcript.repetition-not-removed',
+            self._rules(text, 'edited_verbatim'),
+        )
+
     def test_speaker_labels_must_be_gender_numbered_under_both(self):
         text = self.GOOD_EDITED.replace('Male_1:', 'THE COURT:')
         for standard in ('edited_verbatim', 'strict_verbatim'):

@@ -596,10 +596,47 @@ _SLANG_RE = re.compile(
     re.IGNORECASE,
 )
 
-_CONTRACTION_RE = re.compile(
-    r"\b\w+'(?:s|t|re|ve|ll|d|m)\b", re.IGNORECASE,
+#: Hosts after which 's IS a contraction of "is" or "has" -- pronouns,
+#: demonstratives and question words, where English has no competing
+#: possessive reading ("it's", "that's", "who's", "there's", "let's").
+#:
+#: EVERYTHING ELSE ENDING IN 's IS A POSSESSIVE, NOT A CONTRACTION. A real
+#: submission had "Archie Cox's office" -- a correctly-formed possessive --
+#: picked as the example finding for "contractions remain", with the
+#: correction text literally reading "Expand contractions: I'm -> I am,
+#: don't -> do not". A worker taking that at face value turns a correct
+#: sentence into "Archie Cox is office". The old pattern matched \w+'s
+#: unconditionally, so every possessive proper noun and common noun in the
+#: document (Cox's, the judge's ruling, the Justice's position) inflated
+#: the count and was eligible to be chosen as the example -- on a document
+#: full of names and titles, that is most of what "'s" is doing.
+#:
+#: The other suffixes (n't, 're, 've, 'll, 'd, 'm) have no possessive
+#: reading at all -- there is no word "dog're" or "table've" -- so they stay
+#: unrestricted.
+_CONTRACTION_S_HOSTS = (
+    'i', 'you', 'he', 'she', 'it', 'we', 'they',
+    'that', 'this', 'there', 'here',
+    'what', 'who', 'where', 'when', 'how', 'why',
+    'one', 'someone', 'somebody', 'everyone', 'everybody', 'let',
 )
-_REPEATED_WORD_RE = re.compile(r'\b(\w+)\s+\1\b', re.IGNORECASE)
+_CONTRACTION_RE = re.compile(
+    r"\b(?:" + '|'.join(_CONTRACTION_S_HOSTS) + r")'s\b"
+    r"|\b\w+'(?:t|re|ve|ll|d|m)\b",
+    re.IGNORECASE,
+)
+# (?!')  A GENUINE REPEAT, NOT THE START OF A CONTRACTION SHARING A STEM.
+#
+# A real submission had "he thought that that's a better story" -- the
+# complementizer "that" followed by the demonstrative contraction "that's",
+# both grammatically required, not a stutter. \b matches between "that"
+# and the apostrophe that follows it (an apostrophe is a non-word
+# character), so the bare pattern read "that" immediately by "that's" as
+# the word "that" repeated twice. The lookahead refuses a match wherever
+# the second occurrence is immediately followed by an apostrophe -- i.e.
+# wherever it is actually the stem of a longer word, not a repeat of the
+# same word.
+_REPEATED_WORD_RE = re.compile(r"\b(\w+)\s+\1(?!')\b", re.IGNORECASE)
 
 # Below this length, the ABSENCE of something proves nothing. People do
 # speak fluently for a sentence or two, so a short excerpt containing no
