@@ -3,6 +3,7 @@ import AudioPlayer from './AudioPlayer.jsx';
 import DeadlineClock from './DeadlineClock.jsx';
 import { segments as segmentsApi, submission, taskMedia, transcript } from '../api/eagle.js';
 import { ANNOTATION_TAGS, insertTagAtPosition } from '../lib/annotations.js';
+import TranscriptionGuideModal from './TranscriptionGuideModal.jsx';
 import Verdict from '../components/Verdict.jsx';
 import DeliveredBanner, { isDelivered } from '../components/DeliveredBanner.jsx';
 import SubmittedPanel from '../components/SubmittedPanel.jsx';
@@ -112,6 +113,7 @@ export default function ReviewWorkspace({ task, onTaskChange }) {
   const [showPreview, setShowPreview] = useState(false);
   const [copyingCheck, setCopyingCheck] = useState(false);
   const [checkCopied, setCheckCopied] = useState(false);
+  const [showGuide, setShowGuide] = useState(false);
 
   const jobId = task?.job;
   const load = useCallback(
@@ -411,6 +413,11 @@ export default function ReviewWorkspace({ task, onTaskChange }) {
         subtitle={`${rows.length} turns · click any line to hear it`}
         actions={
           <div className="flex flex-wrap items-center gap-2">
+            {labelsSpeakers && (
+              <Button size="sm" variant="ghost" onClick={() => setShowGuide(true)}>
+                Full guide
+              </Button>
+            )}
             {/* NOT OFFERED ON A TRANSLATION TASK -- see labelsSpeakers.
                 TranscriptCheckPromptView 404s there for the same reason: a
                 transcription accuracy check has nothing to say about a
@@ -555,6 +562,8 @@ export default function ReviewWorkspace({ task, onTaskChange }) {
           }}
         />
       )}
+
+      {showGuide && <TranscriptionGuideModal onClose={() => setShowGuide(false)} />}
     </div>
   );
 }

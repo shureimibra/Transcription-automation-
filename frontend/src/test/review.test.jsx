@@ -428,6 +428,30 @@ describe('the accuracy check prompt', () => {
   });
 });
 
+describe('the full guide', () => {
+  it('opens on request and closes again', async () => {
+    render(<ReviewWorkspace task={TASK} />);
+    await screen.findByText('first turn');
+    expect(screen.queryByRole('dialog', { name: /Transcription job guide/i })).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Full guide' }));
+    const dialog = await screen.findByRole('dialog', { name: /Transcription job guide/i });
+    expect(within(dialog).getByRole('heading', {
+      name: /What the checks still miss/i, level: 3,
+    })).toBeInTheDocument();
+
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
+    expect(screen.queryByRole('dialog', { name: /Transcription job guide/i })).not.toBeInTheDocument();
+  });
+
+  it('is not offered on a translation task, which has its own guide elsewhere', async () => {
+    render(<ReviewWorkspace task={{ ...TASK, kind: 'translation' }} />);
+    await screen.findByText('first turn');
+
+    expect(screen.queryByRole('button', { name: 'Full guide' })).not.toBeInTheDocument();
+  });
+});
+
 describe('the deadline clock', () => {
   it('shows nothing until the platform has set a deadline', () => {
     const { container } = render(<DeadlineClock task={{ deadline_at: null }} />);

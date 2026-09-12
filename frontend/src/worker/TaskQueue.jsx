@@ -10,6 +10,7 @@ import {
 import { BoltIcon, LanguagesIcon, ListIcon, MicIcon, SearchIcon } from '../components/icons.jsx';
 import { taskLabel } from '../lib/format.js';
 import TranslationGuideModal from './TranslationGuideModal.jsx';
+import TranscriptionGuideModal from './TranscriptionGuideModal.jsx';
 
 // Every task this person is allowed to see, with filters.
 //
@@ -65,9 +66,10 @@ export default function TaskQueue({ kind = null }) {
   const [statusFilter, setStatusFilter] = useState('');
   const [page, setPage] = useState(1);
   const searchRef = useRef(null);
-  // TRANSLATION ONLY, FOR NOW. A transcription version is planned once a
-  // comparable review of transcription submissions has actually happened --
-  // writing one today would be guessing at defects nobody has measured yet.
+  // One guide per kind -- the content genuinely differs (speaker labels and
+  // proper nouns here, French typography and numbers on the translation
+  // side), each written from its own real-submission review rather than
+  // guessed. Which modal actually renders is decided below by `kind`.
   const [showGuide, setShowGuide] = useState(false);
 
   // Changing what you are looking at must return you to the first page --
@@ -184,7 +186,7 @@ export default function TaskQueue({ kind = null }) {
               <BoltIcon className="h-4 w-4" />
               <span className="tabular-nums">{readyCount}</span> ready now
             </span>
-            {kind === 'translation' && (
+            {(kind === 'translation' || kind === 'transcription') && (
               <button
                 type="button"
                 onClick={() => setShowGuide(true)}
@@ -192,7 +194,7 @@ export default function TaskQueue({ kind = null }) {
                   transition-colors hover:bg-white/25
                   focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
               >
-                Translation guide
+                {kind === 'translation' ? 'Translation guide' : 'Transcription guide'}
               </button>
             )}
             <button
@@ -320,7 +322,12 @@ export default function TaskQueue({ kind = null }) {
         </>
       )}
 
-      {showGuide && <TranslationGuideModal onClose={() => setShowGuide(false)} />}
+      {showGuide && kind === 'translation' && (
+        <TranslationGuideModal onClose={() => setShowGuide(false)} />
+      )}
+      {showGuide && kind === 'transcription' && (
+        <TranscriptionGuideModal onClose={() => setShowGuide(false)} />
+      )}
     </div>
   );
 }
