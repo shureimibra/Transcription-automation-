@@ -1,56 +1,56 @@
 """
-Shared Unicode lookup tables used by mathematics.py/physics.py/chemistry.py.
-Deliberately plain data + tiny pure functions, no LaTeX involved anywhere --
-every academic formatter emits Unicode directly (see the package docstring
-in __init__.py for why).
+Shared lookup tables used by mathematics.py/physics.py/chemistry.py.
+
+PLAIN-ASCII NOTATION, NOT UNICODE -- changed 2026-09-13 to match Eagle's
+General Guidelines, which is now the policy baseline for this codebase.
+This module used to emit real Unicode superscript/subscript characters
+and Unicode Greek letters (x -> x², H2O -> H₂O, pi -> π), on the reasoning
+that "no LaTeX involved anywhere" meant Unicode was the natural plain-text
+choice. It wasn't evidenced against what Eagle actually asks for, and the
+guideline's own worked examples are explicit and go the other way:
+"x^4", "y_2", "H_2O", and Greek letters spelled as capitalized words
+("Alpha", "Pi", "Sigma") -- caret, underscore and plain word, never a
+Unicode symbol. See docs/ (the compliance and evidence audits this change
+is based on) for the full reasoning.
 """
 from typing import Optional
 
 # Spoken number words -> digit string, used both for exponents/subscripts
 # ("x squared" doesn't need this, but "H two O" and "integral from zero to
-# one" do) and written out for anything not in SUPERSCRIPT/SUBSCRIPT_DIGITS.
+# one" do) and for calculus-phrase limits not already a plain digit.
 NUMBER_WORDS = {
     'zero': '0', 'one': '1', 'two': '2', 'three': '3', 'four': '4',
     'five': '5', 'six': '6', 'seven': '7', 'eight': '8', 'nine': '9', 'ten': '10',
 }
 
-SUPERSCRIPT_DIGITS = {
-    '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴',
-    '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹',
-}
-
-SUBSCRIPT_DIGITS = {
-    '0': '₀', '1': '₁', '2': '₂', '3': '₃', '4': '₄',
-    '5': '₅', '6': '₆', '7': '₇', '8': '₈', '9': '₉',
-}
-
-# Lowercase spoken Greek letter names -> Unicode. Deliberately lowercase
-# forms only for v1 (ticket's own worked examples never ask for e.g.
-# capital Delta as a separate spoken word from lowercase delta -- "Delta"
-# said aloud is indistinguishable from "delta" by ASR anyway).
+# Capitalized spoken Greek letter names, kept as words -- Eagle's own
+# example table lists "Alpha | Beta | Sigma | Mu | Epsilon | Pi | Tau" as
+# the required form, not the Unicode character. Capitalization matches
+# that table; nothing here converts to a symbol.
 GREEK_LETTERS = {
-    'alpha': 'α', 'beta': 'β', 'gamma': 'γ', 'theta': 'θ',
-    'lambda': 'λ', 'mu': 'μ', 'sigma': 'σ', 'pi': 'π',
-    'delta': 'δ', 'omega': 'ω', 'phi': 'φ', 'epsilon': 'ε',
+    'alpha': 'Alpha', 'beta': 'Beta', 'gamma': 'Gamma', 'theta': 'Theta',
+    'lambda': 'Lambda', 'mu': 'Mu', 'sigma': 'Sigma', 'pi': 'Pi',
+    'delta': 'Delta', 'omega': 'Omega', 'phi': 'Phi', 'epsilon': 'Epsilon',
 }
 
 
 def to_superscript(digits: str) -> Optional[str]:
-    """Converts a plain digit string to Unicode superscript digits, or
-    returns None if it contains anything else (no general-purpose
-    superscript exists in Unicode for arbitrary text -- see mathematics.py's
-    module docstring for why this is a real, honestly-documented limit,
-    not an oversight)."""
+    """Converts a plain digit string to caret notation ("2" -> "^2"), or
+    returns None if it contains anything else. Eagle's own example is
+    "x^4" -- a caret, not a Unicode superscript character -- so this no
+    longer tries to render a true superscript at all; the caret is the
+    correct form, not a fallback for one."""
     if not digits or not digits.isdigit():
         return None
-    return ''.join(SUPERSCRIPT_DIGITS[d] for d in digits)
+    return '^' + digits
 
 
 def to_subscript(digits: str) -> Optional[str]:
-    """Same limitation as to_superscript, for subscripts."""
+    """Same shape as to_superscript, for subscripts -- Eagle's own
+    example is "H_2O": an underscore, not a Unicode subscript character."""
     if not digits or not digits.isdigit():
         return None
-    return ''.join(SUBSCRIPT_DIGITS[d] for d in digits)
+    return '_' + digits
 
 
 def spoken_number_to_digits(word: str) -> Optional[str]:

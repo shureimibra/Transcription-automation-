@@ -1,18 +1,18 @@
 """
-Converts spoken mathematical phrases into Unicode notation -- "x squared" ->
-"x²", "square root of two" -> "√(2)", etc. Deliberately Unicode-only, never
-LaTeX: every rule's replacement is a literal Unicode string built from
-symbols.py's tables, so AcademicSegment.text is always directly exportable
-with zero extra conversion step (see the ticket's own "don't blindly put
-raw LaTeX into every export").
+Converts spoken mathematical phrases into plain-text notation -- "x
+squared" -> "x^2", "H two O" -> "H_2O", etc. Never LaTeX, and -- changed
+2026-09-13 -- never Unicode superscript/subscript/Greek characters either:
+Eagle's General Guidelines' own worked examples show caret ("x^4"),
+underscore ("y_2"), and spelled-out capitalized Greek words ("Pi",
+"Alpha"), not the Unicode symbols this formatter used to emit. See
+symbols.py's own docstring for the full reasoning; every replacement here
+is still a literal plain-text string built from symbols.py's tables, so
+AcademicSegment.text stays directly exportable with zero conversion step.
 
-Honest limitation, not an oversight: plain Unicode has no general-purpose
-superscript/subscript for arbitrary text (SUPERSCRIPT_DIGITS only covers
-0-9), so something like an integral's upper limit being a Greek letter
-can't be rendered as a true superscript the way LaTeX's `^\pi` would --
-this formatter uses bracket-range notation for the calculus phrases
-instead (`∫[0,π]`), which is unambiguous plain text rather than a fake
-approximation of real mathematical typesetting.
+Left alone, because the guide gives no example either way: square-root
+notation (√), plus/minus (±), comparison operators (≥/≤/≈), and the
+calculus symbols (∞, ∫, ∂, Σ). Changing those would be inventing a
+representation Eagle never specified, not fixing one it did.
 
 Rules are applied in order, most-specific-phrase-first, each operating on
 the result of the previous rule -- e.g. "square root of" and "plus or
@@ -60,8 +60,8 @@ def _power_replacement(match: 're.Match') -> str:
         if sup is not None:
             return f'{base}{sup}'
     # A named exponent ("x to the power of n") that isn't a plain digit --
-    # no Unicode superscript exists for it, so fall back to explicit,
-    # unambiguous caret notation rather than a fake-looking substitution.
+    # same caret notation to_superscript already produces for a digit one,
+    # written out directly since to_superscript only accepts digit strings.
     return f'{base}^{exponent_word}'
 
 
@@ -76,14 +76,14 @@ _RULES = [
             r'\bx equals negative b plus or minus the square root of b squared minus '
             r'(?:four|4) a c all over (?:two|2) a\b', re.IGNORECASE,
         ),
-        'x = (-b ± √(b² - 4ac)) / (2a)',
+        'x = (-b ± √(b^2 - 4ac)) / (2a)',
     ),
     (
         re.compile(
             r'\b([a-zA-Z])\s+squared\s+plus\s+([a-zA-Z])\s+squared\s+equals\s+([a-zA-Z])\s+squared\b',
             re.IGNORECASE,
         ),
-        lambda m: f'{m.group(1)}² + {m.group(2)}² = {m.group(3)}²',
+        lambda m: f'{m.group(1)}^2 + {m.group(2)}^2 = {m.group(3)}^2',
     ),
 
     # --- Calculus phrases ---
@@ -96,9 +96,11 @@ _RULES = [
     (re.compile(r'\bpartial derivative\b', re.IGNORECASE), '∂'),
     (re.compile(r'\bsummation\b', re.IGNORECASE), 'Σ'),
     (re.compile(r'\binfinity\b', re.IGNORECASE), '∞'),
-    (re.compile(r'\b(?:sine|sin) of\b', re.IGNORECASE), 'sin'),
-    (re.compile(r'\b(?:cosine|cos) of\b', re.IGNORECASE), 'cos'),
-    (re.compile(r'\btangent of\b', re.IGNORECASE), 'tan'),
+    # SPELLED OUT, NOT ABBREVIATED -- Eagle's own example table lists
+    # "sine | cosine | tangent", the full word, not "sin"/"cos"/"tan".
+    (re.compile(r'\b(?:sine|sin) of\b', re.IGNORECASE), 'sine'),
+    (re.compile(r'\b(?:cosine|cos) of\b', re.IGNORECASE), 'cosine'),
+    (re.compile(r'\btangent of\b', re.IGNORECASE), 'tangent'),
 
     # --- Square root: "square root of X" -> "√(X)", X bounded to the
     #     next known stop-phrase or end of string so it doesn't swallow the
@@ -130,8 +132,10 @@ _RULES = [
     #     touched -- see module docstring. ---
     (re.compile(rf'\b({_OPERAND})\s+plus\s+({_OPERAND})\b', re.IGNORECASE), r'\1 + \2'),
     (re.compile(rf'\b({_OPERAND})\s+minus\s+({_OPERAND})\b', re.IGNORECASE), r'\1 - \2'),
-    (re.compile(rf'\b({_OPERAND})\s+(?:times|multiplied by)\s+({_OPERAND})\b', re.IGNORECASE), r'\1 × \2'),
-    (re.compile(rf'\b({_OPERAND})\s+divided by\s+({_OPERAND})\b', re.IGNORECASE), r'\1 ÷ \2'),
+    # * AND /, NOT × AND ÷ -- Eagle's own symbol table names these two
+    # exactly: "times" -> *, "divided by" -> /.
+    (re.compile(rf'\b({_OPERAND})\s+(?:times|multiplied by)\s+({_OPERAND})\b', re.IGNORECASE), r'\1 * \2'),
+    (re.compile(rf'\b({_OPERAND})\s+divided by\s+({_OPERAND})\b', re.IGNORECASE), r'\1 / \2'),
     (re.compile(rf'\b({_OPERAND})\s+over\s+({_OPERAND})\b', re.IGNORECASE), r'\1/\2'),
     (re.compile(rf'\b({_OPERAND})\s+equals\s+({_OPERAND})\b', re.IGNORECASE), r'\1 = \2'),
     (re.compile(rf'\b({_OPERAND})\s+greater than\s+({_OPERAND})\b', re.IGNORECASE), r'\1 > \2'),
@@ -147,7 +151,9 @@ _RULES = [
 
     # --- Misc symbols ---
     (re.compile(r'\bpercent\b', re.IGNORECASE), '%'),
-    (re.compile(r'\bdegrees\b', re.IGNORECASE), '°'),
+    # "degrees" DELIBERATELY LEFT AS A WORD, NOT CONVERTED TO °. Eagle's
+    # own example is literally "270 degrees" and "45-degree angle" -- the
+    # spelled word is the required form, not a symbol to convert to.
 ]
 
 

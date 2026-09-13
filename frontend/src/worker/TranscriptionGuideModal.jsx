@@ -176,11 +176,13 @@ const SECTIONS = [
         <li>
           Open the task. Check the standard banner near the top first — it
           says whether this transcript is <em>edited verbatim</em> (fillers
-          and contractions removed) or <em>strict verbatim</em> (everything
-          kept exactly as spoken), and whether the platform actually told us
-          which one or we are only assuming. An assumed standard is shown as
-          an alert, not a quiet label — read it, because applying the wrong
-          standard makes a document wrong in every line, not just a few.
+          and false starts removed, slang standardized) or <em>strict
+          verbatim</em> (everything kept exactly as spoken), and whether the
+          platform actually told us which one or we are only assuming. An
+          assumed standard is shown as an alert, not a quiet label — read
+          it, because applying the wrong standard makes a document wrong in
+          every line, not just a few. Contractions are kept exactly as
+          spoken either way — that no longer differs between the two.
         </li>
         <li>
           Press play and follow along. The turn being spoken is highlighted
@@ -289,10 +291,11 @@ const SECTIONS = [
         </P>
         <P>
           The prompt already knows this document's verbatim standard and
-          adjusts itself — it will tell your assistant to flag contractions
-          on an edited-verbatim task and explicitly NOT to on a
-          strict-verbatim one, so you do not have to remember which way the
-          rule runs.
+          adjusts itself — it will tell your assistant to flag informal
+          words like "gonna" on an edited-verbatim task and explicitly NOT
+          to on a strict-verbatim one, so you do not have to remember which
+          way the rule runs. Contractions are never flagged either way —
+          Eagle's guidelines keep them exactly as spoken on every job.
         </P>
         <P>
           <strong className="text-ink">It copies whatever is currently
@@ -359,9 +362,12 @@ const SECTIONS = [
         <Ul>
           <li><strong className="text-ink">Speaker label format</strong> — the one CRITICAL check here. A label that is not <code>Male_N</code> or <code>Female_N</code> (a name, a title, "THE COURT") blocks submission outright.</li>
           <li><strong className="text-ink">Numbers</strong> — zero to nine as words, ten and up as figures, except money, a time, a date, a percentage, a measurement (including a plain duration like "2 years" or "5 kilometers"), an age, or a citation ("Rule 8", "Section 4"), which are always figures regardless of size. A scale word riding on an already-correct figure ("50 million") is not itself a defect.</li>
-          <li><strong className="text-ink">Contractions and informal words</strong> — flagged for expansion under edited verbatim, and correctly left alone under strict verbatim; the message names which standard applies so you never have to guess which direction the rule runs today.</li>
+          <li><strong className="text-ink">Contractions</strong> — kept exactly as spoken on every job, per Eagle's General Guidelines. Never flagged for expansion, under either standard.</li>
+          <li><strong className="text-ink">Informal words</strong> — "gonna", "kinda" and similar are flagged for standardizing under edited verbatim, and correctly left alone under strict verbatim. "Yeah" is never flagged — it is the required spelling, not a defect.</li>
           <li><strong className="text-ink">Repeated words</strong> — a genuine stutter, not ordinary grammar that happens to repeat a word ("had had" as past perfect, "that that" as a demonstrative following a complementizer are both correct English, not disfluencies).</li>
           <li><strong className="text-ink">Capitalization, paragraphing, quote style</strong> — edited-verbatim only; strict verbatim explicitly forbids tidying a run-on with artificial capitals.</li>
+          <li><strong className="text-ink">Required spellings</strong> — email, all right, okay, yeah, y'all, TV, US, UK, exactly as Eagle's Writing Rules table names them, on every job.</li>
+          <li><strong className="text-ink">Bracket tags</strong> — only the agreed set is valid, including <code>[foreign]</code> for a foreign-language stretch and <code>[background]</code> for noise with no discernible words.</li>
           <li><strong className="text-ink">Timestamp continuity</strong> — one block's end time must equal the next block's start time.</li>
         </Ul>
         <P>

@@ -411,16 +411,19 @@ WHAT TO LOOK FOR, IN ORDER OF VALUE:
    variable like "K1", a musical note like "E4", a dimension like "3D",
    an exponent read aloud like "ten to the minus six" -- none of those
    are numbers being spoken, so this rule does not apply to them.
-5. Contractions ("it's", "don't", "I'm") and informal words ("yeah",
-   "gonna", "kinda") that should be expanded or replaced for a
-   professional, academic transcript -- {standard_note} A word ending in
-   's is not automatically a contraction: "Archie Cox's office" is a
-   possessive (an office belonging to Cox), not "Archie Cox is office" --
-   only flag an 's where it is genuinely short for "is" or "has" in
-   context. Likewise "cause" after "to", "will", "can", "would" or
-   another modal is the ordinary verb (to cause something), not the
-   informal "'cause" short for "because" -- only flag it where it is
-   actually standing in for "because".
+5. Informal words ("gonna", "kinda", "gotta") that should be replaced
+   with their formal equivalent for a professional transcript --
+   {standard_note} Do NOT flag "yeah" -- Eagle's own Writing Rules table
+   names it as the required correct spelling (not "yep", not "yup"), not
+   a defect to fix. Do NOT flag a contraction ("it's", "don't", "I'm")
+   at all, under either standard -- Eagle's General Guidelines are
+   explicit that contractions are kept exactly as spoken, always: "If a
+   speaker says 'cannot,' do not change it to 'can't.'" A word ending in
+   's is not automatically a contraction in the first place: "Archie
+   Cox's office" is a possessive (an office belonging to Cox), not
+   "Archie Cox is office". Likewise "cause" after "to", "will", "can",
+   "would" or another modal is the ordinary verb (to cause something),
+   not the informal "'cause" short for "because".
 6. Whether the pattern of speaker labels looks right. If one label (say
    Male_1) only ever produces short transitional lines and a different
    label (Male_2) always immediately continues with the substantive
@@ -453,24 +456,28 @@ If you find nothing at all, reply with the single word: CLEAN.
 """
 
 #: The item-5 sentence needs to say the OPPOSITE thing under strict
-#: verbatim, where every filler, contraction and repetition is required
+#: verbatim, where every filler, informal word and repetition is required
 #: to survive exactly as spoken -- flagging them there would be asking
-#: the worker to break the very standard the task is graded on.
+#: the worker to break the very standard the task is graded on. NOTE:
+#: this now governs INFORMAL WORDS ONLY (gonna/kinda-style slang) --
+#: contractions are excluded above, under both standards, per Eagle's
+#: General Guidelines.
 _STANDARD_NOTES = {
     'edited_verbatim': (
-        'flag every one you see. This document follows the edited verbatim '
-        '(professional / academic) standard.'
+        'flag every informal word you see. This document follows the '
+        'edited verbatim (professional / academic) standard.'
     ),
     'strict_verbatim': (
         'do NOT flag any of these here. This document follows the strict '
-        'verbatim standard, which requires every filler, contraction and '
+        'verbatim standard, which requires every filler, informal word and '
         'repetition to be preserved exactly as spoken -- removing one '
         'would itself be the defect.'
     ),
 }
 _STANDARD_NOTE_DEFAULT = (
-    'flag every one you see, unless you are told this document follows '
-    'the strict verbatim standard, in which case leave all of them alone.'
+    'flag every informal word you see, unless you are told this document '
+    'follows the strict verbatim standard, in which case leave all of '
+    'them alone.'
 )
 
 

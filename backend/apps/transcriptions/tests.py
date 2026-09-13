@@ -3429,20 +3429,23 @@ class AcademicMathematicsFormatterTestCase(TestCase):
         self.formatter = MathematicsFormatter()
 
     def test_pythagorean_identity(self):
+        """CARET, NOT UNICODE SUPERSCRIPT -- changed 2026-09-13. Eagle's
+        General Guidelines' own example is "x^4", not "x⁴"; see
+        symbols.py's docstring for the full reasoning."""
         text, modified = self.formatter.format_segment('x squared plus y squared equals z squared')
-        self.assertEqual(text, 'x² + y² = z²')
+        self.assertEqual(text, 'x^2 + y^2 = z^2')
         self.assertTrue(modified)
 
     def test_quadratic_formula_idiom(self):
         text, modified = self.formatter.format_segment(
             'x equals negative b plus or minus the square root of b squared minus four a c all over two a'
         )
-        self.assertEqual(text, 'x = (-b ± √(b² - 4ac)) / (2a)')
+        self.assertEqual(text, 'x = (-b ± √(b^2 - 4ac)) / (2a)')
         self.assertTrue(modified)
 
     def test_integral_phrase(self):
         text, modified = self.formatter.format_segment('the integral from zero to one of x squared d x')
-        self.assertEqual(text, 'the ∫[0,1] x² dx')
+        self.assertEqual(text, 'the ∫[0,1] x^2 dx')
         self.assertTrue(modified)
 
     def test_basic_operators_gated_on_recognized_operands(self):
@@ -3450,9 +3453,38 @@ class AcademicMathematicsFormatterTestCase(TestCase):
         self.assertEqual(text, 'x + y')
         self.assertTrue(modified)
 
+    def test_multiplication_and_division_use_eagles_own_ascii_symbols(self):
+        """* and /, NOT × and ÷ -- Eagle's own symbol table names these
+        two exactly: "times" -> *, "divided by" -> /."""
+        times, mod1 = self.formatter.format_segment('2 times 3')
+        self.assertEqual(times, '2 * 3')
+        self.assertTrue(mod1)
+        divided, mod2 = self.formatter.format_segment('10 divided by 2')
+        self.assertEqual(divided, '10 / 2')
+        self.assertTrue(mod2)
+
+    def test_degrees_stays_a_word(self):
+        """Eagle's own example is literally "270 degrees" -- the word is
+        the required form, not a degree-symbol conversion."""
+        text, modified = self.formatter.format_segment('the angle was 45 degrees')
+        self.assertEqual(text, 'the angle was 45 degrees')
+        self.assertFalse(modified)
+
+    def test_trig_functions_are_spelled_out_not_abbreviated(self):
+        """Eagle's own example table: "sine | cosine | tangent" -- the
+        full word, not "sin"/"cos"/"tan"."""
+        sine, _ = self.formatter.format_segment('the sine of x')
+        self.assertEqual(sine, 'the sine x')
+        cosine, _ = self.formatter.format_segment('the cosine of theta')
+        self.assertIn('cosine', cosine)
+        self.assertNotIn('cos ', cosine)
+
     def test_greek_letters(self):
+        """CAPITALIZED WORDS, NOT UNICODE SYMBOLS -- changed 2026-09-13.
+        Eagle's own example table: "Alpha | Beta | Sigma | Mu | Epsilon |
+        Pi | Tau" -- the spelled, capitalized word is the required form."""
         text, modified = self.formatter.format_segment('pi and theta are common in trigonometry')
-        self.assertEqual(text, 'π and θ are common in trigonometry')
+        self.assertEqual(text, 'Pi and Theta are common in trigonometry')
         self.assertTrue(modified)
 
     def test_fraction_word(self):
@@ -3537,18 +3569,24 @@ class AcademicChemistryFormatterTestCase(TestCase):
         self.formatter = ChemistryFormatter()
 
     def test_water_formula(self):
+        """UNDERSCORE, NOT UNICODE SUBSCRIPT -- changed 2026-09-13. Eagle's
+        General Guidelines' own molecule example is literally "H_2O", not
+        "H₂O"; see symbols.py's docstring for the full reasoning. Ion
+        charges (below) are unaffected -- Eagle's guide has no example for
+        those either way, so the existing Unicode notation is kept as-is,
+        deliberately."""
         text, modified = self.formatter.format_segment('H two O')
-        self.assertEqual(text, 'H₂O')
+        self.assertEqual(text, 'H_2O')
         self.assertTrue(modified)
 
     def test_carbon_dioxide_formula(self):
         text, modified = self.formatter.format_segment('C O two')
-        self.assertEqual(text, 'CO₂')
+        self.assertEqual(text, 'CO_2')
         self.assertTrue(modified)
 
     def test_sulfuric_acid_formula(self):
         text, modified = self.formatter.format_segment('H two S O four')
-        self.assertEqual(text, 'H₂SO₄')
+        self.assertEqual(text, 'H_2SO_4')
         self.assertTrue(modified)
 
     def test_sodium_cation(self):
@@ -3568,11 +3606,14 @@ class AcademicChemistryFormatterTestCase(TestCase):
 
     def test_reaction_arrow_never_invents_balancing(self):
         text, modified = self.formatter.format_segment('water and hydrogen produces oxygen')
-        self.assertEqual(text, 'H₂O + H₂ → O₂')
+        self.assertEqual(text, 'H_2O + H_2 → O_2')
         self.assertTrue(modified)
         # No stoichiometric coefficients appear anywhere -- only what was
-        # already spoken gets substituted, never invented.
-        self.assertNotRegex(text, r'\d[A-Z]')
+        # already spoken gets substituted, never invented. A digit right
+        # after an underscore ("_2O") is a legitimate subscript, not a
+        # coefficient -- the guard is for a bare leading digit like the
+        # invented "2H_2O" would be, not for ordinary subscript notation.
+        self.assertNotRegex(text, r'(?<!_)\b\d+[A-Z]')
 
     def test_bare_single_element_letter_in_prose_is_not_touched(self):
         """Explicit conservatism case: a single bare element letter with no
@@ -10934,11 +10975,19 @@ class QualityEngineTestCase(TestCase):
     def test_a_transcript_pass_is_checked_against_its_verbatim_rubric(self):
         """
         The gate used to run only the translation checks against a
-        transcript pass, so a pass that never expanded a contraction was
-        never caught here -- the rubric was enforced only at submission,
-        after a tasker had claimed the task.
+        transcript pass, so a pass that never removed a filler was never
+        caught here -- the rubric was enforced only at submission, after
+        a tasker had claimed the task.
+
+        FILLERS, NOT CONTRACTIONS -- contractions no longer illustrate
+        this. Eagle's General Guidelines keep contractions exactly as
+        spoken under every standard now, so `expand_contractions` is
+        False everywhere and can no longer be "never expanded" as a
+        catchable rubric violation; see TranscriptionStandard's own
+        docstring for the full reasoning. Filler removal is still a real,
+        standard-dependent rubric this gate must catch mid-pass.
         """
-        uncleaned = "I'm sure it's fine and we're not going to worry. " * 20
+        uncleaned = 'Um, I think it is fine and, you know, we should not worry. ' * 20
         result = make_quality_engine('eagle_standard', FakeQualityProvider()).run(
             _pairs((uncleaned, uncleaned)),
             target_language_code='en',
@@ -10946,12 +10995,12 @@ class QualityEngineTestCase(TestCase):
             transcript_standard='edited_verbatim',
         )
         self.assertIn(
-            'transcript.contractions-not-expanded',
+            'transcript.fillers-not-removed',
             {i.rule for i in result.issues},
         )
 
     def test_a_clean_edited_verbatim_pass_raises_no_rubric_finding(self):
-        cleaned = 'I am sure it is fine and we are not going to worry. ' * 20
+        cleaned = 'I am sure it is fine and we should not worry about it today. ' * 20
         result = make_quality_engine('eagle_standard', FakeQualityProvider()).run(
             _pairs((cleaned, cleaned)),
             target_language_code='en',
@@ -13102,11 +13151,18 @@ class TranscriptionStandardTestCase(TestCase):
         THE POINT OF THE MODULE. Identical text, opposite verdicts -- the
         strict-verbatim transcript is riddled with defects when graded as
         edited verbatim, and vice versa.
+
+        CONTRACTIONS NO LONGER PART OF THAT INVERSION. Eagle's General
+        Guidelines are explicit and unconditional -- contractions are kept
+        exactly as spoken, full stop -- so `expand_contractions` is now
+        False under BOTH standards, and this specific rule can no longer
+        be one of the two that flip. Fillers and slang still do; that is
+        what this test now demonstrates.
         """
         as_edited = self._rules(self.GOOD_STRICT, 'edited_verbatim')
         self.assertIn('transcript.fillers-not-removed', as_edited)
         self.assertIn('transcript.slang-not-standardized', as_edited)
-        self.assertIn('transcript.contractions-not-expanded', as_edited)
+        self.assertNotIn('transcript.contractions-not-expanded', as_edited)
 
         # The inverse claim needs a long enough sample -- see
         # test_absence_is_only_evidence_at_scale below.
@@ -13140,39 +13196,56 @@ class TranscriptionStandardTestCase(TestCase):
     def test_a_possessive_is_not_a_contraction(self):
         """
         FROM A REAL SUBMISSION: "Archie Cox's office" -- a correctly-formed
-        possessive -- was the example finding chosen for "contractions
-        remain", whose correction text reads "Expand contractions: I'm ->
+        possessive -- was once the example finding chosen for "contractions
+        remain", whose correction text read "Expand contractions: I'm ->
         I am". Taken at face value that turns a correct sentence into
         "Archie Cox is office". A possessive noun must never itself be
         the reason this rule fires.
+
+        `transcript.contractions-not-expanded` cannot fire under edited
+        verbatim at all any more (contractions are kept, per Eagle's
+        General Guidelines -- see the standard's own docstring), so the
+        possessive-vs-contraction distinction is now tested the way it
+        still matters: a possessive must not be miscounted as a
+        contraction and thereby silence the OPPOSITE finding --
+        "no contractions appear... may have been cleaned up" -- which
+        fires on a genuine, contraction-free document of this length.
         """
         text = (
             'Male_1:\n'
             '[00:00:00.000 --> 00:00:09.000]\n'
-            "They were all by Archie Cox's office in the stacks, and the "
-            "special trial judge's ruling was clear, and the Chief "
-            "Justice's position commanded four votes. "
-            'It is entirely clear that the argument proceeds in stages, '
-            'and it is written down for anyone reading it later, and it '
-            'is a matter of public record for every observer present.\n'
+            + (
+                "They were all by Archie Cox's office in the stacks, and the "
+                "special trial judge's ruling was clear, and the Chief "
+                "Justice's position commanded four votes. "
+                'It is entirely clear that the argument proceeds in stages, '
+                'and it is written down for anyone reading it later, and it '
+                'is a matter of public record for every observer present. '
+            ) * 5
+            + '\n'
         )
         rules = self._rules(text, 'edited_verbatim')
         self.assertNotIn('transcript.contractions-not-expanded', rules)
+        self.assertIn('transcript.contractions-wrongly-expanded', rules)
 
-    def test_a_pronoun_contraction_still_fires_beside_a_possessive(self):
-        """The fix narrows the host list; it must not silence genuine
-        contractions sitting in the same document as a possessive."""
+    def test_a_pronoun_contraction_is_not_miscounted_as_a_possessive(self):
+        """
+        The fix narrows the possessive host list; it must not go the other
+        way and read a genuine pronoun contraction sitting beside a
+        possessive as absent. A document with real contractions in it
+        must NOT trigger "no contractions appear... may have been cleaned
+        up" -- that finding is for a document with none at all.
+        """
         text = (
             'Male_1:\n'
             '[00:00:00.000 --> 00:00:09.000]\n'
             + "Archie Cox's office, and it's fine, and that's right, and "
-              "he's certain, and they're ready, and you're sure. " * 3
+              "he's certain, and they're ready, and you're sure. " * 15
             + '\n'
         )
-        self.assertIn(
-            'transcript.contractions-not-expanded',
-            self._rules(text, 'edited_verbatim'),
-        )
+        rules = self._rules(text, 'edited_verbatim')
+        self.assertNotIn('transcript.contractions-not-expanded', rules)
+        self.assertNotIn('transcript.contractions-wrongly-expanded', rules)
 
     def test_a_complementizer_followed_by_a_contraction_is_not_a_repeat(self):
         """
@@ -13427,6 +13500,32 @@ class TranscriptionStandardTestCase(TestCase):
                 rules = {i.rule for i in check_number_rules(text)}
                 self.assertNotIn('transcript.number-large-as-word', rules)
 
+    def test_trillion_gets_the_same_scale_word_treatment_as_billion(self):
+        """
+        Eagle's own number guideline names trillion explicitly alongside
+        million and billion ("Millions, billions, trillions +"), but the
+        word set stopped one short of it -- "12 trillion" and "several
+        trillion" got none of the exemptions "12 billion"/"several
+        billion" already had.
+        """
+        from core.services.ai_assist.quality import check_number_rules
+        for text in (
+            'There were 12 trillion cells counted.',
+            'That is equivalent to several trillion operations.',
+            'Estimates run into the trillions worldwide.',
+        ):
+            with self.subTest(text=text):
+                rules = {i.rule for i in check_number_rules(text)}
+                self.assertNotIn('transcript.number-large-as-word', rules)
+
+    def test_spelled_out_trillion_still_fires(self):
+        """The count riding on "trillion" is still a real violation, same
+        as it already was for hundred/thousand/million/billion."""
+        from core.services.ai_assist.quality import check_number_rules
+        rules = {i.rule for i in
+                 check_number_rules('There were twelve trillion cells counted.')}
+        self.assertIn('transcript.number-large-as-word', rules)
+
     def test_a_million_after_the_article_a_still_fires(self):
         """
         THE DISTINCTION THE FIX ABOVE MUST NOT ERASE. "a"/"an" are
@@ -13506,6 +13605,151 @@ class TranscriptionStandardTestCase(TestCase):
             'transcript.number-small-as-figure',
             {i.rule for i in check_number_rules(split)},
         )
+
+    def test_channel_unit_quiz_step_verse_and_size_join_the_citation_list(self):
+        """
+        FROM EAGLE'S OWN EXAMPLES, not invented: the General Guidelines
+        name every one of these directly -- "Channel 12", "Unit 20",
+        "Quiz 2" under "item in sequence", and "line 3, page 23,
+        paragraph 14, size 36, step 1, verse 2" as the capitalization
+        section's own exceptions list. Confirmed each was previously
+        mis-flagged at the LOW end specifically, the same shape "Rule 8"
+        was already protected from.
+        """
+        from core.services.ai_assist.quality import check_number_rules
+        for text in (
+            'Turn to Channel 3 now please today.',
+            'Complete Unit 2 by Friday please today.',
+            'Take Quiz 1 before Friday please today.',
+            'Go to Step 1 of the process please today.',
+            'Read Verse 2 of the chapter please today.',
+            'It comes in Size 6 please today.',
+            'See Line 3 of the transcript please today.',
+        ):
+            with self.subTest(text=text):
+                rules = {i.rule for i in check_number_rules(text)}
+                self.assertNotIn('transcript.number-small-as-figure', rules,
+                                  f'expected no finding on: {text!r}')
+
+    def test_an_ordinary_low_number_still_fires_beside_the_new_words(self):
+        """The extension must not turn into "any digit near this word is
+        fine" -- an ordinary count with none of the citation words nearby
+        is still a real violation."""
+        from core.services.ai_assist.quality import check_number_rules
+        issues = check_number_rules('I saw 7 dogs in the park today.')
+        self.assertTrue(any(
+            i.rule == 'transcript.number-small-as-figure' for i in issues))
+
+    def test_foreign_and_background_tags_are_recognised(self):
+        """
+        Eagle's Audio Rules name these two directly: "[foreign]" for a
+        foreign-language stretch inside an English recording, "[BACKGROUND]"
+        for audio that is only background noise. Both were absent from
+        ALLOWED_TAGS, so a tasker following the rule was told by this same
+        check that the tag they were instructed to use was not agreed.
+        """
+        from core.services.ai_assist.quality import check_bracket_tags
+        self.assertEqual(
+            check_bracket_tags('Male_1:\nHe said [foreign] and continued.'), [])
+        self.assertEqual(
+            check_bracket_tags('Male_1:\n[BACKGROUND] noise for a while.'), [])
+        # Case-insensitive, matching every other tag in this vocabulary.
+        self.assertEqual(
+            check_bracket_tags('Male_1:\n[Background] noise for a while.'), [])
+
+    def test_an_unrecognised_tag_still_fires(self):
+        """The addition must not widen into "any bracketed word is fine"."""
+        from core.services.ai_assist.quality import check_bracket_tags
+        issues = check_bracket_tags('Male_1:\n[mumbling] something unclear.')
+        self.assertTrue(any(
+            i.rule == 'transcript.unknown-tag' for i in issues))
+
+    def test_yeah_is_not_converted_to_yes(self):
+        """
+        Eagle's General Guidelines' Writing Rules table names "yeah" (not
+        yep, not yup) as the REQUIRED correct spelling -- it is the
+        answer, not a defect. This used to be actively rewritten to
+        "yes" under edited verbatim; verified directly against the
+        standard-policy check, not just the dict.
+        """
+        from core.services.ai_assist.quality import check_standard_policy, get_standard
+        std = get_standard('edited_verbatim')
+        text = ' '.join(['Yeah, I think that is right and it works well every time here.'] * 20)
+        issues = check_standard_policy(text, std)
+        self.assertFalse(any(i.rule == 'transcript.slang-not-standardized' for i in issues))
+
+    def test_yep_and_yup_flag_toward_yeah_via_required_spelling(self):
+        """
+        Eagle's Writing Rules table names these directly -- "yeah (not
+        yep, yup)". NOT the slang-standardization check ("yep"/"yup" were
+        never in `_SLANG`, under either the old or new behavior) --
+        `check_required_spellings`, the closed Writing-Rules list, is
+        where this lives, same as "email"/"okay"/"y'all".
+        """
+        from core.services.ai_assist.quality import check_required_spellings
+        issues = check_required_spellings("Yep, I think that is right.")
+        self.assertTrue(any(i.rule == 'transcript.required-spelling' for i in issues))
+
+    def test_gonna_is_left_alone_pending_further_evidence(self):
+        """Eagle's guide does not address "gonna"-style slang either way,
+        and the coach's own saved prompts give exactly this example
+        ("gonna -> going to") -- the fix removes only the unevidenced
+        "yeah" entry, not the whole mechanism."""
+        from core.services.ai_assist.quality import check_standard_policy, get_standard
+        std = get_standard('edited_verbatim')
+        text = ' '.join(['I am gonna go there and it works well every time here.'] * 20)
+        issues = check_standard_policy(text, std)
+        self.assertTrue(any(i.rule == 'transcript.slang-not-standardized' for i in issues))
+
+    def test_required_spellings_are_caught(self):
+        """
+        Eagle's General Guidelines' Writing Rules table, checked directly:
+        email (not e-mail), all right (not alright), okay (not O.K.),
+        yeah (not yep/yup), y'all (not ya'll), TV/US/UK (not T.V./U.S./U.K.).
+        """
+        from core.services.ai_assist.quality import check_required_spellings
+        for text, wrong in (
+            ("Please send me an e-mail about it.", 'e-mail'),
+            ("Alright, let's get started with this.", 'alright'),
+            ("Are you feeling O.K. about the results?", 'O.K.'),
+            ("Yep, I am ready to go whenever.", 'yep'),
+            ("Ya'll ready to jam tonight?", "ya'll"),
+            ("The T.V. was on in the background.", 'T.V.'),
+            ("She moved to the U.S. last year.", 'U.S.'),
+            ("He studied in the U.K. for a year.", 'U.K.'),
+        ):
+            with self.subTest(text=text):
+                issues = check_required_spellings(text)
+                self.assertTrue(issues, f'expected a finding on: {text!r}')
+                self.assertEqual(issues[0].rule, 'transcript.required-spelling')
+
+    def test_the_correct_spellings_produce_no_finding(self):
+        from core.services.ai_assist.quality import check_required_spellings
+        clean = (
+            "Please send me an email. All right, let's begin. "
+            "Are you feeling okay? Yeah, I am ready. Y'all ready to jam? "
+            "The TV was on. She moved to the US. He studied in the UK."
+        )
+        self.assertEqual(check_required_spellings(clean), [])
+
+    def test_capitalization_still_applies_under_edited_verbatim(self):
+        """
+        capitalize_sentences is now DECOUPLED from correct_grammar (see
+        TranscriptionStandard's own docstring): edited verbatim no longer
+        instructs grammar correction, but Eagle's Capitalization section
+        still separately and unconditionally requires a capitalized
+        sentence start. The split must not have silently dropped this.
+        """
+        from core.services.ai_assist.quality import get_standard
+        std = get_standard('edited_verbatim')
+        self.assertTrue(std.capitalize_sentences)
+        self.assertFalse(std.correct_grammar)
+
+    def test_strict_verbatim_still_forbids_added_capitalization(self):
+        from core.services.ai_assist.quality import get_standard
+        std = get_standard('strict_verbatim')
+        self.assertFalse(std.capitalize_sentences)
+        self.assertFalse(std.correct_grammar)
 
     def test_affirmations_are_never_treated_as_fillers(self):
         """

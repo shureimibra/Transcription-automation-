@@ -53,6 +53,13 @@ class FakeEagle(EagleIntegrationService):
         )
 
 
+#: ONE SENTENCE DELIBERATELY CARRIES A CONTRACTION ("weren't"). Every other
+#: standard/policy flag under edited-verbatim is preserve-only now (see
+#: TranscriptionStandard's own docstring), and check_standard_policy warns
+#: MEDIUM when a transcript of this length has NONE at all -- exactly what
+#: this fixture, otherwise all formal third-person narration, would
+#: trigger by accident. Real speech almost always has at least one; this
+#: keeps the fixture realistic rather than suppressing a real check.
 _TOPICS = [
     'The committee reviewed the proposal at length and reached agreement.',
     'A second witness described the sequence of events that morning.',
@@ -64,7 +71,8 @@ _TOPICS = [
     'Funding arrangements were discussed without reaching a firm conclusion.',
     'An appendix lists every source consulted during the review period.',
     'The working group will reconvene once the consultation has closed.',
-    'Members asked for clearer guidance on how objections are handled.',
+    "Members asked for clearer guidance because they weren't sure how "
+    'objections are handled.',
     'The minutes were approved and the meeting closed shortly afterwards.'
 ]
 _TOPICS_FR = [

@@ -142,13 +142,22 @@ Speed matters: 25 minutes of audio does not fit in a one-hour deadline at
 Unless told otherwise, we work to **edited verbatim**:
 
 - Remove fillers and false starts — *um, uh, you know, I mean*
-- Expand contractions — *don't* → *do not*
-- Standardise slang — *gonna* → *going to*
-- Correct grammar and obvious slips
+- Keep contractions exactly as spoken — *don't* stays *don't*, never
+  *do not* (per Eagle's General Guidelines — this changed; it used to say
+  the opposite)
+- Standardise slang — *gonna* → *going to* (but never *yeah* — that is
+  already the correct spelling, not something to fix)
+- Sentences still start with a capital, but nothing else about the
+  grammar is corrected — a run-on stays a run-on
 - Only these tags: `[inaudible]` `[unclear]` `[crosstalk]` `[pause]`
-  `[laughter]` `[applause]`
+  `[laughter]` `[applause]` `[foreign]` `[background]` — use `[foreign]`
+  for a foreign-language stretch inside an English recording, and
+  `[background]` when a section is only background noise
 - Numbers zero to nine as words; 10 and above as figures
 - Straight quotation marks
+- Required spellings: *email*, *all right*, *okay*, *y'all*, *TV*, *US*,
+  *UK* — not *e-mail*, *alright*, *O.K.*, *ya'll*, *T.V.*, *U.S.*, *U.K.*
+- Never an ellipsis (`...`), for any reason, in any job
 
 > There is a second standard, **strict verbatim**, used for legal work,
 > where every one of those corrections is itself a mistake — the record must

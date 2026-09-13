@@ -281,7 +281,11 @@ class TranscriptCheckPromptTestCase(TestCase):
         was fixed -- the same false positive must not be reintroduced by
         a worker's own assistant reading this prompt."""
         prompt = worker_prompts.build_transcript_check('edited_verbatim')
-        self.assertIn("Archie Cox's office", prompt)
+        # Checked separately, not as one unbroken phrase: the prompt's own
+        # line-wrap can split "Archie Cox's office" across a newline, same
+        # as the number-rule test above.
+        self.assertIn('Archie', prompt)
+        self.assertIn("Cox's office", prompt)
         self.assertIn('possessive', prompt)
 
     def test_it_does_not_flag_the_verb_cause_as_slang(self):
@@ -291,19 +295,38 @@ class TranscriptCheckPromptTestCase(TestCase):
         self.assertIn('ordinary verb', prompt)
         self.assertIn("'cause", prompt)
 
-    def test_edited_verbatim_is_told_to_flag_contractions(self):
+    def test_edited_verbatim_is_told_to_flag_informal_words(self):
         prompt = worker_prompts.build_transcript_check('edited_verbatim')
-        self.assertIn('flag every one you see', prompt)
+        self.assertIn('flag every informal word you see', prompt)
         self.assertIn('edited verbatim', prompt)
 
-    def test_strict_verbatim_is_told_the_opposite(self):
-        """THE RULE INVERTS. Flagging a contraction on a strict-verbatim
-        transcript would ask the worker to break the very standard the
-        task is graded on."""
+    def test_neither_standard_is_told_to_flag_contractions(self):
+        """
+        CHANGED. Eagle's General Guidelines are explicit and
+        unconditional: contractions are kept exactly as spoken, under
+        either standard -- so this prompt must never ask a worker's
+        assistant to flag one, regardless of which standard applies.
+        """
+        for name in ('edited_verbatim', 'strict_verbatim', ''):
+            prompt = worker_prompts.build_transcript_check(name)
+            self.assertIn('Do NOT flag a contraction', prompt)
+            self.assertNotIn('flag every one you see', prompt)
+
+    def test_strict_verbatim_is_told_the_opposite_for_informal_words(self):
+        """THE RULE STILL INVERTS FOR SLANG. Flagging an informal word on
+        a strict-verbatim transcript would ask the worker to break the
+        very standard the task is graded on."""
         prompt = worker_prompts.build_transcript_check('strict_verbatim')
         self.assertIn('do NOT flag any of these', prompt)
         self.assertIn('strict verbatim', prompt)
-        self.assertNotIn('flag every one you see', prompt)
+        self.assertNotIn('flag every informal word you see', prompt)
+
+    def test_yeah_is_named_as_the_correct_form_not_a_defect(self):
+        """Eagle's Writing Rules table names "yeah" as the required
+        spelling -- the prompt must not ask a worker's assistant to
+        "fix" it."""
+        prompt = worker_prompts.build_transcript_check('edited_verbatim')
+        self.assertIn('Do NOT flag "yeah"', prompt)
 
     def test_an_unknown_standard_defaults_to_the_safer_instruction(self):
         prompt = worker_prompts.build_transcript_check('')

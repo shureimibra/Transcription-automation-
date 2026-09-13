@@ -500,14 +500,51 @@ class StandardInstructionTestCase(TestCase):
 
         self.assertIn('Remove filler words', edited)
         self.assertIn('Keep every filler word', strict)
-        self.assertIn('Correct grammar', edited)
+
+    def test_neither_standard_corrects_grammar_any_more(self):
+        """
+        CHANGED 2026-09-13. Eagle's General Guidelines' Writing Rules are
+        blanket and unconditional -- "do not fix the speaker's grammar" --
+        so `correct_grammar` is now False for BOTH standards; only
+        `capitalize_sentences` (a separate flag) still tells edited
+        verbatim to capitalize sentence starts. See
+        TranscriptionStandard's own docstring for why the two were split.
+        """
+        edited = warmpool.standard_instruction(get_standard(EDITED_VERBATIM))
+        strict = warmpool.standard_instruction(get_standard(STRICT_VERBATIM))
+        self.assertIn('Correct nothing', edited)
         self.assertIn('Correct nothing', strict)
+        self.assertNotIn('Correct grammar, punctuation', edited)
 
     def test_both_carry_the_format_rules_that_hold_either_way(self):
         for name in (EDITED_VERBATIM, STRICT_VERBATIM):
             text = warmpool.standard_instruction(get_standard(name))
             self.assertIn('Male_1', text)
             self.assertIn('[inaudible]', text)
+
+    def test_the_tag_list_is_imported_not_duplicated(self):
+        """
+        This line used to be its own hand-typed copy, separate from
+        ALLOWED_TAGS in transcription.py -- and it drifted: neither
+        mentioned [foreign] or [background], which Eagle's Audio Rules
+        name directly. Built from the canonical set now, so it cannot
+        drift again.
+        """
+        from core.services.ai_assist.quality import ALLOWED_TAGS
+        text = warmpool.standard_instruction(get_standard(EDITED_VERBATIM))
+        for tag in ALLOWED_TAGS:
+            self.assertIn(f'[{tag}]', text)
+
+    def test_no_ellipsis_instruction_for_trailing_off(self):
+        """
+        Eagle's General Guidelines: "do not use ellipsis (...) in any
+        job." This used to actively instruct the model to use one for a
+        sentence that trails off -- the exact opposite.
+        """
+        for name in (EDITED_VERBATIM, STRICT_VERBATIM):
+            text = warmpool.standard_instruction(get_standard(name))
+            self.assertNotIn('Trailing off takes an ellipsis', text)
+            self.assertIn('Never use an ellipsis', text)
 
     def test_the_vocalization_rule_points_the_right_way_for_each(self):
         """

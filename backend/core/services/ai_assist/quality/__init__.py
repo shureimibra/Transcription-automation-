@@ -94,13 +94,16 @@ from .terminology import (
     run_anchor_checks,
 )
 from .transcription import (
+    ALLOWED_TAGS,
     EDITED_VERBATIM,
     STRICT_VERBATIM,
     TranscriptionStandard,
+    check_bracket_tags,
     check_capitalization,
     check_number_rules,
     check_paragraphing,
     check_quote_style,
+    check_required_spellings,
     check_speaker_labels,
     check_speaker_numbering,
     check_standard_policy,
@@ -147,9 +150,11 @@ __all__ = [
     'standard_for_project', 'PROJECT_STANDARDS',
     'TranscriptionStandard', 'EDITED_VERBATIM', 'STRICT_VERBATIM',
     'check_speaker_labels', 'check_timestamps', 'check_number_rules',
+    'check_bracket_tags',
     'check_capitalization', 'check_paragraphing', 'check_quote_style',
+    'check_required_spellings',
     'check_speaker_numbering',
-    'check_standard_policy',
+    'check_standard_policy', 'ALLOWED_TAGS',
     # prompts
     'PROMPT_VERSION',
 ]

@@ -603,21 +603,35 @@ def standard_instruction(standard) -> str:
     for enabled, when_on, when_off in rules:
         lines.append('- ' + (when_on if enabled else when_off))
 
+    # THE CANONICAL TAG VOCABULARY, imported rather than repeated. This
+    # list used to be its own hand-typed copy here, a second one in
+    # TASKER_GUIDE.md, and the checked ALLOWED_TAGS in transcription.py --
+    # three places to keep in sync, and two of them drifted (neither
+    # mentioned [foreign] or [background], which Eagle's own Audio Rules
+    # name directly, so a tasker following that rule was told by the
+    # checker that the tag they were instructed to use was not agreed).
+    # Deferred import for the same reason every other quality-package
+    # reference in this file is deferred -- see the one at the bottom of
+    # this function.
+    from core.services.ai_assist.quality import ALLOWED_TAGS
+    tag_list = ', '.join(f'[{t}]' for t in sorted(ALLOWED_TAGS))
+
     # Format rules that hold under BOTH standards. They are the most common
     # reason Eagle sends work back, and they are cheap to state.
     lines += [
         '- Never write a name, title or role as a speaker; speakers are '
         'identified only as Male_1, Female_2 and so on.',
-        '- Bracket tags, each for its own case: [inaudible] nothing audible, '
-        '[unclear] heard but unconfirmed, [crosstalk] speakers overlapping, '
-        'plus [pause], [laughter], [applause].',
-        # PUNCTUATION CARRIES MEANING HERE, so the three cases are not
-        # interchangeable and a reviewer reads them as three different
-        # events: the speaker stopped, someone cut them off, or a word broke
-        # off part-way.
-        '- Trailing off takes an ellipsis (I was going to say...); an '
-        'interruption takes an em-dash at the break; a word broken off '
-        'part-way takes a hyphen (respons-).',
+        f'- Bracket tags, ONLY from this list: {tag_list}. [foreign] marks '
+        f'a foreign-language stretch (English around it stays); '
+        f'[background] marks noise with no discernible words.',
+        # PUNCTUATION CARRIES MEANING HERE, so an interruption and a
+        # broken-off word stay distinct. NO ELLIPSIS, ANYWHERE, FOR ANY
+        # REASON, INCLUDING TRAILING OFF -- Eagle's General Guidelines:
+        # "do not use ellipsis (...) in any job." The guideline says what
+        # not to use and gives no replacement, so none is invented here.
+        '- An interruption takes an em-dash at the break; a broken-off '
+        'word takes a hyphen (respons-). Never use an ellipsis (...), for '
+        'any reason -- a trailing-off sentence is left exactly as spoken.',
         # THE GUARD COMES FIRST, AND IT IS WHY THE RULE BELOW CAN EXIST.
         #
         # The number-style rule was removed entirely this morning after the

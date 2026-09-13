@@ -58,21 +58,38 @@ class TranscriptionStandard:
 
     __slots__ = (
         'name', 'label', 'remove_fillers', 'expand_contractions',
-        'standardize_slang', 'correct_grammar', 'record_vocalizations',
-        'paragraph_monologues', 'description',
+        'standardize_slang', 'correct_grammar', 'capitalize_sentences',
+        'record_vocalizations', 'paragraph_monologues', 'description',
     )
 
     def __init__(
         self, name, label, remove_fillers, expand_contractions,
         standardize_slang, correct_grammar, record_vocalizations,
-        paragraph_monologues=False, description='',
+        capitalize_sentences=None, paragraph_monologues=False, description='',
     ):
         self.name = name
         self.label = label
         self.remove_fillers = remove_fillers
         self.expand_contractions = expand_contractions
         self.standardize_slang = standardize_slang
+        # FIXING GRAMMAR/RUN-ONS AND CAPITALIZING A SENTENCE START ARE NOT
+        # THE SAME RULE, even though one flag used to gate both. Eagle's
+        # General Guidelines say two different things about them: Writing
+        # Rules is blanket and unconditional -- "do not fix the speaker's
+        # grammar" -- while the Capitalization section separately and just
+        # as unconditionally lists "first word of a sentence or quote" as
+        # required. Reading `correct_grammar` for the capitalization check
+        # meant the only way to keep sentences capitalized under Clean Read
+        # was to also tell the model to "correct grammar, punctuation and
+        # obvious slips of the tongue" (see warmpool.py's
+        # standard_instruction) -- exactly what the guideline forbids.
+        # `correct_grammar` now means only that instruction; capitalization
+        # has its own flag below.
         self.correct_grammar = correct_grammar
+        self.capitalize_sentences = (
+            correct_grammar if capitalize_sentences is None
+            else capitalize_sentences
+        )
         self.record_vocalizations = record_vocalizations
         # Edited verbatim breaks long monologues up for readability; strict
         # verbatim must not, because paragraphing is an editorial judgement
@@ -86,51 +103,59 @@ STANDARDS: Dict[str, TranscriptionStandard] = {
     EDITED_VERBATIM: TranscriptionStandard(
         name=EDITED_VERBATIM,
         label='Edited verbatim (professional / academic)',
-        # THE TEXTBOOK DEFINITION, and it stays until evidence says
-        # otherwise.
+        # SUPERSEDED, 2026-09-13 -- CONTRACTIONS NO LONGER EXPAND. This
+        # standard used to expand every contraction here, on the strength
+        # of "the one transcript we know Eagle accepted has 8 contractions
+        # in 7,966 words". That count was wrong: re-run against the actual
+        # file (benchmark/coach_reference.txt) with this module's own
+        # (already-fixed) possessive-vs-contraction regex, the true count
+        # is 0, not 8 -- every one of the original "8" was a possessive
+        # ("plaintiff's", "court's"), not a contraction. Zero occurrences
+        # proves the document was accepted with none in it; it does not
+        # prove one was ever encountered and expanded, which is what the
+        # old claim rested on.
         #
-        # A second transcript briefly looked like counter-evidence -- it
-        # keeps 228 contractions and 39 instances of "gonna" -- and these
-        # flags were flipped to match it. That was wrong: the document was
-        # a TASKER'S SUBMISSION, not a confirmed acceptance, so it is just
-        # as likely to be an example of what gets sent back.
+        # Eagle's General Guidelines, released today and now the policy
+        # baseline for this codebase, are explicit and unconditional:
+        # "Contractions should be kept exactly as spoken... If a speaker
+        # says 'cannot,' do not change it to 'can't.'" -- the same
+        # direction the old evidence never actually supported.
         #
-        # The one transcript we know Eagle accepted has 8 contractions in
-        # 7,966 words and no slang at all, and it produces no contraction
-        # finding under these rules. That is the only ground truth we have,
-        # and it agrees with the textbook.
+        # This does NOT erase the coach's saved prompts or the tasker
+        # guide, which independently say the opposite (expand, under
+        # edited verbatim) -- see docs/COACH_PROMPTS_REFERENCE.md and the
+        # evidence audit this change is based on. That is a real, standing
+        # conflict between two real sources, not evidence vs. invention.
+        # Per explicit instruction, the newer, external General Guidelines
+        # are the authority for this implementation pass; a job-specific
+        # instruction that legitimately needs the old behavior back is a
+        # new PROJECT_STANDARDS entry (or a third TranscriptionStandard),
+        # not a reason to keep this one wrong by default for everyone.
         #
-        # SETTLED, AND THE ANSWER IS: LEAVE IT ALONE.
+        # GRAMMAR CORRECTION IS OFF for the same reason -- Writing Rules:
+        # "Do not fix the speaker's grammar" -- but sentence-start
+        # capitalization is NOT the same rule (Capitalization: "first word
+        # of a sentence or quote", stated separately and unconditionally),
+        # so it is split out to its own flag below rather than silently
+        # lost along with grammar-fixing. See TranscriptionStandard's own
+        # docstring for why the two were never the same thing.
         #
-        # The test above was "a document confirmed accepted that keeps its
-        # contractions". One arrived -- the coach supplied three accepted
-        # transcripts from three separate tasks, and the middle one keeps
-        # every contraction. It does NOT loosen this standard, because it is
-        # not an edited-verbatim document at all: it also keeps the fillers
-        # ("you know", "sort of", "I mean"), the false starts ("let me --
-        # let me"), and a mispronounced proper noun repeated a dozen times.
-        # That is strict verbatim, entire and consistent.
-        #
-        # The other two are just as consistent the other way: no fillers, no
-        # false starts, and contractions expanded so thoroughly that even
-        # "let's" is written "let us".
-        #
-        # So the corpus does not blur the two standards -- it is the
-        # cleanest evidence yet that BOTH are real and that this table has
-        # them right. What it does prove is that EAGLE PICKS PER TASK: same
-        # transcriber, three tasks, two standards. See the note on
-        # `EAGLE_TRANSCRIPTION_STANDARD`, which is a single global setting
-        # and therefore wrong for some fraction of tasks.
+        # STILL EVIDENCED, UNCHANGED: the category mapping itself (which
+        # projects land here at all) traces to the coach's own "Project ->
+        # standard mapping (as given)" list, a different question from
+        # what this standard DOES once selected -- see PROJECT_STANDARDS
+        # below, not touched by this change.
         remove_fillers=True,
-        expand_contractions=True,
+        expand_contractions=False,
         standardize_slang=True,
-        correct_grammar=True,
+        correct_grammar=False,
+        capitalize_sentences=True,
         record_vocalizations=False,
         paragraph_monologues=True,
         description=(
-            'Preserves meaning and wording while correcting grammar, '
-            'punctuation and obvious slips. Fillers and false starts are '
-            'removed; contractions expanded; slang standardized.'
+            'Preserves meaning and wording. Fillers and false starts are '
+            'removed; slang is standardized; contractions and grammar are '
+            'kept exactly as spoken, per Eagle\'s General Guidelines.'
         ),
     ),
     STRICT_VERBATIM: TranscriptionStandard(
@@ -140,6 +165,7 @@ STANDARDS: Dict[str, TranscriptionStandard] = {
         expand_contractions=False,
         standardize_slang=False,
         correct_grammar=False,
+        capitalize_sentences=False,
         record_vocalizations=True,
         paragraph_monologues=False,
         description=(
@@ -272,6 +298,18 @@ ALLOWED_TAGS = frozenset({
     'inaudible', 'unclear', 'crosstalk', 'pause', 'laughter', 'applause',
     'gavel bangs', 'door opens', 'coughs', 'clears throat', 'chuckles',
     'sigh', 'gasp',
+    # Eagle's Audio Rules name these two directly: [foreign] for a
+    # foreign-language stretch inside an otherwise-English file, and
+    # [background] for audio that is only background noise (classroom
+    # chatter, etc.) with no discernible words. Both were absent, so a
+    # tasker correctly following that rule was told by this same check
+    # that the tag they were instructed to use is "not agreed" -- the
+    # exact "checker that fires on correct work" failure this module's
+    # own comments elsewhere warn about. THE CANONICAL SOURCE: this set
+    # is the one place the tag vocabulary is defined; warmpool.py's
+    # generation prompt now imports it rather than repeating its own
+    # copy (see standard_instruction()).
+    'foreign', 'background',
 })
 _TAG_RE = re.compile(r'\[([^\]]+)\]')
 # A tag may carry a timestamp: [inaudible 00:04:12.005]
@@ -451,6 +489,10 @@ _NUMBER_WORDS = {
     'seventeen', 'eighteen', 'nineteen', 'twenty', 'thirty', 'forty',
     'fifty', 'sixty', 'seventy', 'eighty', 'ninety', 'hundred', 'thousand',
     'million', 'billion',
+    # Eagle's own number guideline names it explicitly alongside million
+    # and billion ("Millions, billions, trillions +"); the set stopped one
+    # short of that.
+    'trillion',
 }
 #: A digit touching a letter directly, either side, with no space between
 #: them: E4, A3 (musical pitch notation), 3D (dimensional shorthand), D1,
@@ -549,9 +591,20 @@ def _strip_uncheckable(text: str) -> str:
 #: "Section 4", "Part 2". Both accepted documents write these as figures,
 #: because that is how the source names them -- rewriting "Rule 8" as
 #: "Rule eight" would be wrong, not merely unusual.
+#:
+#: CHANNEL/UNIT/QUIZ/STEP/VERSE/SIZE/LINE WERE ADDED FROM EAGLE'S OWN
+#: EXAMPLES, not invented: the General Guidelines name every one of them
+#: directly -- "Channel 12", "Unit 20", "Quiz 2" under "item in sequence",
+#: and "line 3, page 23, paragraph 14, size 36, step 1, verse 2" as the
+#: capitalization section's own exceptions list. Verified against real
+#: low-number cases the old list mishandled: "Channel 3", "Unit 2", "Quiz
+#: 1", "Step 1", "Verse 2" and "Size 6" were all incorrectly flagged as
+#: needing to be spelled out before this, exactly the shape "Rule 8" was
+#: already protected from.
 _CITED_NUMBER_RE = re.compile(
     r'\b(?:Rule|Section|Article|Chapter|Part|Paragraph|Figure|Table|'
-    r'Exhibit|Amendment|Clause|Item|Page|No\.?)\s+\d+\b', re.IGNORECASE)
+    r'Exhibit|Amendment|Clause|Item|Page|No\.?|Channel|Unit|Quiz|Step|'
+    r'Verse|Size|Line)\s+\d+\b', re.IGNORECASE)
 
 
 def check_number_rules(text: str) -> List[QualityIssue]:
@@ -604,8 +657,8 @@ def check_number_rules(text: str) -> List[QualityIssue]:
     for match in _SPELLED_LARGE_RE.finditer(body):
         window = body[max(0, match.start() - 30):match.end() + 30]
         # "hundreds of people" and "a thousand times" are idiom, not counts.
-        if re.search(r'\b(?:hundreds|thousands|millions|billions)\b', window,
-                     re.IGNORECASE):
+        if re.search(r'\b(?:hundreds|thousands|millions|billions|trillions)\b',
+                     window, re.IGNORECASE):
             continue
         # "50 million", "fifty million" -- a real submission had "50
         # million Hispanics" flagged, as though "million" itself were an
@@ -617,7 +670,7 @@ def check_number_rules(text: str) -> List[QualityIssue]:
         # "a million dollars" with nothing to scale is unaffected and
         # still gets its own finding if the rubric wants one.
         word = match.group(1).lower()
-        if word in ('hundred', 'thousand', 'million', 'billion'):
+        if word in ('hundred', 'thousand', 'million', 'billion', 'trillion'):
             before = body[max(0, match.start() - 15):match.start()]
             if re.search(
                 r'(?:\d|' + '|'.join(_NUMBER_WORDS) + r')[\s-]*\Z',
@@ -658,7 +711,19 @@ _AFFIRMATION_RE = re.compile(r'\b(?:uh-huh|mm-hmm|uh-uh|mm-mm)\b', re.IGNORECASE
 _SLANG = {
     'gonna': 'going to', 'wanna': 'want to', 'gotta': 'got to',
     'kinda': 'kind of', 'sorta': 'sort of', 'dunno': "do not know",
-    'cause': 'because', 'yeah': 'yes', 'nope': 'no',
+    'cause': 'because', 'nope': 'no',
+    # "yeah" DELIBERATELY ABSENT. Eagle's General Guidelines' own Writing
+    # Rules table names "yeah" (not yep, not yup) as the REQUIRED correct
+    # spelling -- it is the answer, not a defect: "Are you free tonight?
+    # Yeah, I am." This entry used to map it to "yes", which had the
+    # standard actively rewrite a word Eagle's own table says is already
+    # correct. No evidence anywhere (Eagle's guide, the coach's saved
+    # prompts, or the tasker guide) supports this specific mapping; it
+    # was an unevidenced addition, unlike the rest of this table, which
+    # traces to the coach's explicit "gonna -> going to"-style examples.
+    # The other entries are left exactly as they were: the guide doesn't
+    # address them either way, and removing them without evidence would
+    # be the same mistake in the opposite direction.
 }
 #: "cause" is genuinely ambiguous once the apostrophe is dropped: 'cause
 #: (short for "because", a conjunction) and the ordinary verb "to cause"
@@ -1068,6 +1133,59 @@ def check_paragraphing(text):
     return []
 
 
+#: A closed, evidenced list of Writing Rules spellings Eagle's General
+#: Guidelines name explicitly as required -- each pair copied from the
+#: guideline's own worked example, not invented. Mirrors
+#: deterministic.py's check_autocorrect (built for the equivalent French
+#: problem): no judgement involved, each form is simply not the required
+#: spelling in this position. BOTH STANDARDS: this is Writing Rules, not
+#: the Clean-Read-vs-Verbatim rubric -- it holds regardless of which
+#: standard the task is under.
+_REQUIRED_SPELLINGS = (
+    (re.compile(r'\be-mail\b', re.IGNORECASE), 'email',
+     '"email" is the required spelling, not "e-mail"'),
+    (re.compile(r'\balright\b', re.IGNORECASE), 'all right',
+     '"all right" is the required spelling, not "alright"'),
+    (re.compile(r'\bO\.K\.?\b'), 'okay',
+     '"okay" is the required spelling, not "O.K."'),
+    (re.compile(r'\byep\b|\byup\b', re.IGNORECASE), 'yeah',
+     '"yeah" is the required spelling, not "yep"/"yup"'),
+    (re.compile(r"\bya['’]ll\b", re.IGNORECASE), "y'all",
+     '"y\'all" is the required spelling, not "ya\'ll"'),
+    (re.compile(r'\bT\.V\.(?!\w)'), 'TV',
+     '"TV" is the required spelling, not "T.V."'),
+    (re.compile(r'\bU\.S\.(?!\w)'), 'US',
+     '"US" is the required spelling, not "U.S."'),
+    (re.compile(r'\bU\.K\.(?!\w)'), 'UK',
+     '"UK" is the required spelling, not "U.K."'),
+)
+
+
+def check_required_spellings(text):
+    """
+    Eagle's own named Writing Rules spelling table, checked directly.
+
+    ONE FINDING PER DOCUMENT, matching this module's existing convention
+    for a systemic-not-local defect (see check_capitalization,
+    check_paragraphing): a document that writes "e-mail" throughout has
+    one habit to fix, not a finding per occurrence.
+    """
+    body = '\n'.join(_prose_blocks(text))
+    for pattern, correct, explanation in _REQUIRED_SPELLINGS:
+        match = pattern.search(body)
+        if not match:
+            continue
+        return [QualityIssue(
+            category=IssueCategory.TYPOGRAPHY, severity=Severity.MEDIUM,
+            problem=f'{explanation}.',
+            correction=f'Use "{correct}" throughout.',
+            target_span=match.group(0),
+            rule='transcript.required-spelling',
+            detector='deterministic',
+        )]
+    return []
+
+
 def check_quote_style(text):
     """
     Standard double quotation marks. BOTH standards require this.
@@ -1152,6 +1270,7 @@ def run_transcript_checks(
     issues += check_bracket_tags(text)
     issues += check_number_rules(text)
     issues += check_quote_style(text)
+    issues += check_required_spellings(text)
 
     standard = get_standard(standard_name)
     if standard is not None:
@@ -1159,7 +1278,10 @@ def run_transcript_checks(
         # Edited-verbatim only. Strict verbatim forbids both: adding
         # capitalization to tidy a run-on, and imposing paragraph breaks,
         # are an editor's reading of the speech rather than the speech.
-        if standard.correct_grammar:
+        # `capitalize_sentences`, NOT `correct_grammar` -- see
+        # TranscriptionStandard's own docstring for why sentence-start
+        # capitalization and fixing grammar/run-ons are different rules.
+        if standard.capitalize_sentences:
             issues += check_capitalization(text)
         if standard.paragraph_monologues:
             issues += check_paragraphing(text)
@@ -1184,10 +1306,11 @@ def run_transcript_content_checks(
     """
     issues = list(check_number_rules(text))
     issues += check_quote_style(text)
+    issues += check_required_spellings(text)
     standard = get_standard(standard_name)
     if standard is not None:
         issues += check_standard_policy(text, standard)
-        if standard.correct_grammar:
+        if standard.capitalize_sentences:
             issues += check_capitalization(text)
     return issues
 

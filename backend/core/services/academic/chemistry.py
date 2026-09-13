@@ -1,6 +1,9 @@
 """
-Chemistry notation: element-symbol-plus-spoken-digit -> Unicode subscript
-("H two O" -> "H₂O"), ion charge suffixes ("Na plus" -> "Na⁺"), and
+Chemistry notation: element-symbol-plus-spoken-digit -> underscore
+subscript ("H two O" -> "H_2O", matching Eagle's own "H_2O" example --
+see symbols.py's docstring for why this changed from Unicode), ion charge
+suffixes ("Na plus" -> "Na⁺", still Unicode -- see the note on
+_ion_superscript below for why that one did NOT change), and
 reaction-verb-gated arrow insertion between two recognized compound/element
 phrases. Never balances or invents stoichiometry (ticket §8) -- the arrow
 rule only ever replaces the spoken verb with "→"; it does not add
@@ -10,7 +13,7 @@ import re
 from typing import List, Tuple
 
 from .base import AcademicFormatter
-from .symbols import NUMBER_WORDS, to_subscript, to_superscript
+from .symbols import NUMBER_WORDS, to_subscript
 
 # Common element symbols as they'd appear already letter-spelled in an ASR
 # transcript of someone reading a formula aloud (ticket's own examples --
@@ -40,10 +43,10 @@ _ION_CHARGE_RULE = re.compile(
 # name. Runs BEFORE subscript formatting, matching the pre-substitution
 # spoken shape, and its own replacement already applies known formulas.
 _COMPOUND_NAMES = {
-    'water': 'H₂O',
-    'carbon dioxide': 'CO₂',
-    'oxygen': 'O₂',
-    'hydrogen': 'H₂',
+    'water': 'H_2O',
+    'carbon dioxide': 'CO_2',
+    'oxygen': 'O_2',
+    'hydrogen': 'H_2',
 }
 _COMPOUND_ALTERNATION = '|'.join(sorted(_COMPOUND_NAMES, key=len, reverse=True))
 _REACTION_VERB_RULE = re.compile(
@@ -56,11 +59,31 @@ def _digits_for(number_word: str) -> str:
     return number_word if number_word.isdigit() else NUMBER_WORDS.get(number_word.lower(), '')
 
 
+#: Unicode superscript digits, used ONLY for ion charge notation ("sodium
+#: two plus" -> "Na²⁺"). Deliberately NOT symbols.py's to_superscript,
+#: which now returns caret notation ("^2") to match Eagle's math examples
+#: -- ion charges are not addressed by Eagle's guide in either direction,
+#: so this keeps the existing, internally-consistent Unicode ion notation
+#: rather than producing a mixed "Na^2⁺" (a caret digit next to a Unicode
+#: sign character), which would be worse than either pure form and is not
+#: what any evidence asked for.
+_ION_SUPERSCRIPT_DIGITS = {
+    '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴',
+    '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹',
+}
+
+
+def _ion_superscript(digits: str):
+    if not digits or not digits.isdigit():
+        return None
+    return ''.join(_ION_SUPERSCRIPT_DIGITS[d] for d in digits)
+
+
 def _ion_charge_replacement(match: 're.Match') -> str:
     element, number_word, sign_word = match.group(1), match.group(2), match.group(3)
     sign = '⁺' if sign_word.lower() == 'plus' else '⁻'
     if number_word:
-        sup = to_superscript(_digits_for(number_word))
+        sup = _ion_superscript(_digits_for(number_word))
         if sup is not None:
             return f'{element}{sup}{sign}'
     return f'{element}{sign}'
