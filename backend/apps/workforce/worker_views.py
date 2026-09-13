@@ -35,7 +35,9 @@ from .eagle_submit import (
     SubmissionFailed, SubmissionRefused, preview_submission, submit_task,
 )
 from .models import Task, TaskEvent, ready_for_work_q
-from .permissions import IsAuthenticatedWorkerOrAdmin, is_admin, worker_profile
+from .permissions import (
+    IsAuthenticatedWorkerOrAdmin, is_admin, training_mode_active, worker_profile,
+)
 from .serializers import TaskSerializer
 from .views import AUTH_CLASSES
 
@@ -298,12 +300,19 @@ class TranslationDraftView(views.APIView):
             raise Http404
         if task.claimed_by_id == profile.id:
             return task
+        openly_claimable = (
+            task.claimed_by_id is None and task.assigned_to_id is None
+            and task.status in states.CLAIMABLE_STATES
+        )
         if must_hold:
             # Reading the pool is fine; writing to a task you do not hold
-            # is not.
+            # is not -- UNLESS training mode is on, in which case the open
+            # pool gets the same write access as the holder. See
+            # WORKFORCE_TRAINING_MODE's own docstring in settings.py.
+            if training_mode_active() and openly_claimable:
+                return task
             raise Http404
-        if (task.claimed_by_id is None and task.assigned_to_id is None
-                and task.status in states.CLAIMABLE_STATES):
+        if openly_claimable:
             return task
         raise Http404
 
@@ -394,16 +403,28 @@ class TranslationDraftView(views.APIView):
         text = _strip_markdown_emphasis(text)
 
         profile = worker_profile(request.user)
+        # True only when _task's training-mode branch is what let this
+        # request through -- not the holder, not admin, so the ONLY way it
+        # reached here at all was the open-pool allowance. Tagged on the
+        # event so this stays distinguishable from a real submission's
+        # audit trail (see WORKFORCE_TRAINING_MODE in settings.py).
+        via_training = (
+            training_mode_active() and not is_admin(request.user)
+            and task.claimed_by_id != (profile.id if profile else None)
+        )
         task.polished_text = text
         task.polished_by = profile
         task.polished_at = timezone.now()
         task.save(update_fields=['polished_text', 'polished_by',
                                  'polished_at', 'updated_at'])
 
+        event_metadata = {'characters': len(text), 'words': len(text.split())}
+        if via_training:
+            event_metadata['training_mode'] = True
         record_event(
             task, TaskEvent.TRANSLATION_POLISHED, actor=request.user,
             message='Polished translation pasted back.',
-            metadata={'characters': len(text), 'words': len(text.split())},
+            metadata=event_metadata,
         )
 
         # Hand back the gate's verdict immediately: the whole point of
@@ -478,13 +499,25 @@ class TranscriptCheckPromptView(views.APIView):
         # prompt is allowed from the open pool (see TaskMediaView._task_for)
         # so a worker can see what the check involves before claiming;
         # recording that it was actually run is not something anyone but
-        # the holder -- or an admin -- can do.
+        # the holder -- or an admin -- can do. UNLESS training mode is on,
+        # in which case the open pool gets the same write access as the
+        # holder -- see WORKFORCE_TRAINING_MODE's own docstring in
+        # settings.py, and TranslationDraftView._task for the same pattern
+        # on the translation side.
         task = Task.objects.filter(pk=pk).first()
         if task is None or task.kind != Task.TRANSCRIPTION:
             raise Http404
         profile = worker_profile(request.user)
-        if not is_admin(request.user) and (
-                profile is None or task.claimed_by_id != profile.id):
+        is_holder = profile is not None and task.claimed_by_id == profile.id
+        openly_claimable = (
+            task.claimed_by_id is None and task.assigned_to_id is None
+            and task.status in states.CLAIMABLE_STATES
+        )
+        via_training = (
+            not is_holder and not is_admin(request.user)
+            and training_mode_active() and openly_claimable
+        )
+        if not is_admin(request.user) and not is_holder and not via_training:
             raise Http404
 
         notes = str(request.data.get('notes') or '').strip()
@@ -506,10 +539,13 @@ class TranscriptCheckPromptView(views.APIView):
         task.save(update_fields=['accuracy_check_notes', 'accuracy_check_by',
                                  'accuracy_check_at', 'updated_at'])
 
+        check_metadata = {'characters': len(notes)}
+        if via_training:
+            check_metadata['training_mode'] = True
         record_event(
             task, TaskEvent.ACCURACY_CHECK_COMPLETED, actor=request.user,
             message='Accuracy-check reply pasted back.',
-            metadata={'characters': len(notes)},
+            metadata=check_metadata,
         )
 
         # Hand back the gate's verdict immediately -- the whole point of

@@ -66,6 +66,19 @@ def has_capability(user, capability) -> bool:
     return roles.can(account_role(user), capability)
 
 
+def training_mode_active() -> bool:
+    """
+    WORKFORCE_TRAINING_MODE, read once per call so a settings override in a
+    test (`override_settings`) takes effect without a process restart.
+
+    Scoped narrowly on purpose: see the setting's own docstring in
+    settings.py for exactly which two endpoints this affects and why
+    Submit-to-Eagle is deliberately not one of them.
+    """
+    from django.conf import settings
+    return bool(getattr(settings, 'WORKFORCE_TRAINING_MODE', False))
+
+
 def is_admin(user) -> bool:
     """
     ADMIN accepts either signal. The explicit role is the primary one; the

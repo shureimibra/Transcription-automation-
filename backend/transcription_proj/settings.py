@@ -439,3 +439,31 @@ EAGLE_SUBMITTER_NAME = os.environ.get('EAGLE_SUBMITTER_NAME', 'Shureimi ibrahim'
 # Turn it on if quota stops being the binding constraint.
 EAGLE_WARM_STANDARD_ON_TRANSLATION = (
     os.environ.get('EAGLE_WARM_STANDARD_ON_TRANSLATION', '') == '1')
+
+
+# TEMPORARY, FOR ONBOARDING A NEW COHORT OF TASKERS ONTO THE WORKFLOW.
+#
+# Claiming a real task spends real Eagle minutes and starts a real one-hour
+# clock -- neither is something a tasker should risk while still learning
+# which button does what. With this on, the two REQUIRED self-check writes
+# (TranslationDraftView's polish save, TranscriptCheckPromptView's accuracy-
+# check save) additionally accept a task that is unclaimed but still in the
+# open, claimable pool -- the same condition every read-only view on this
+# task already allows -- instead of requiring the caller to actually hold
+# it. Nothing else changes: editing a segment's text already worked without
+# holding (EditSegmentView/RevertSegmentView only ever required being
+# logged in), and Submit-to-Eagle is deliberately NOT included here --
+# sending an unclaimed task's work to Eagle is a real, external, billable
+# action, not a rehearsal, and the state machine's own CLAIMABLE_STATES
+# check on submit already refuses it regardless of this flag.
+#
+# Every write let through this way is tagged 'training_mode': True in its
+# TaskEvent metadata, so it stays distinguishable from a real submission's
+# audit trail. And services.claim_task clears any polished_text/
+# accuracy_check_notes left behind by a practice run the FIRST time that
+# task is ever really claimed, so a genuine worker never opens a task to
+# find someone else's rehearsal sitting in it.
+#
+# Off by default. Turn this back off once the cohort has claimed real tasks
+# a few times each -- it is an onboarding aid, not a permanent mode.
+WORKFORCE_TRAINING_MODE = _flag('WORKFORCE_TRAINING_MODE', False)

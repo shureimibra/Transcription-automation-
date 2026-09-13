@@ -519,6 +519,42 @@ class TranslationDraftTestCase(WorkerEndpointBase):
 
         self.assertEqual(response.status_code, 404)
 
+    @override_settings(WORKFORCE_TRAINING_MODE=True)
+    def test_training_mode_lets_the_open_pool_write(self):
+        """
+        See WORKFORCE_TRAINING_MODE's own docstring in settings.py. The
+        thing this must NOT do: open write access to a task someone else
+        holds -- see the next test.
+        """
+        from .models import TaskEvent
+
+        task = self.translation_task(claimed_by=None, status=states.NEW)
+        self.client.force_authenticate(self.bo_user)
+
+        response = self.client.post(
+            f'/api/v1/workforce/tasks/{task.id}/translation/',
+            {'text': 'Bonjour tout le monde. ' * 100}, format='json')
+
+        self.assertEqual(response.status_code, 200)
+        task.refresh_from_db()
+        self.assertEqual(task.polished_by_id, self.bo.id)
+        event = TaskEvent.objects.get(
+            task=task, event_type=TaskEvent.TRANSLATION_POLISHED)
+        self.assertTrue(event.metadata.get('training_mode'))
+
+    @override_settings(WORKFORCE_TRAINING_MODE=True)
+    def test_training_mode_still_refuses_a_task_someone_else_holds(self):
+        """Training mode opens the OPEN POOL, not every task -- a real
+        holder's task must stay exactly as protected as before."""
+        task = self.translation_task(claimed_by=self.ana)
+        self.client.force_authenticate(self.bo_user)
+
+        response = self.client.post(
+            f'/api/v1/workforce/tasks/{task.id}/translation/',
+            {'text': 'Bonjour'}, format='json')
+
+        self.assertEqual(response.status_code, 404)
+
     def test_saving_returns_the_gate_verdict_immediately(self):
         """The point of storing it is that it gets checked. Waiting until
         submission to find out costs the worker their hour."""
@@ -679,6 +715,37 @@ class TranscriptCheckPromptTestCase(WorkerEndpointBase):
         the check was run is not -- see the POST docstring."""
         task = self.warm_task(claimed_by=self.bo, status=states.IN_PROGRESS)
         self.client.force_authenticate(self.ana_user)
+
+        response = self.client.post(
+            f'/api/v1/workforce/tasks/{task.id}/transcript-check-prompt/',
+            {'notes': 'Nothing to report.'},
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    @override_settings(WORKFORCE_TRAINING_MODE=True)
+    def test_training_mode_lets_the_open_pool_record_a_check(self):
+        from .models import TaskEvent
+
+        task = self.warm_task(claimed_by=None, status=states.NEW)
+        self.client.force_authenticate(self.bo_user)
+
+        response = self.client.post(
+            f'/api/v1/workforce/tasks/{task.id}/transcript-check-prompt/',
+            {'notes': 'Checked against the audio -- correct.'},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        task.refresh_from_db()
+        self.assertEqual(task.accuracy_check_by_id, self.bo.id)
+        event = TaskEvent.objects.get(
+            task=task, event_type=TaskEvent.ACCURACY_CHECK_COMPLETED)
+        self.assertTrue(event.metadata.get('training_mode'))
+
+    @override_settings(WORKFORCE_TRAINING_MODE=True)
+    def test_training_mode_still_refuses_a_task_someone_else_holds(self):
+        task = self.warm_task(claimed_by=self.ana, status=states.IN_PROGRESS)
+        self.client.force_authenticate(self.bo_user)
 
         response = self.client.post(
             f'/api/v1/workforce/tasks/{task.id}/transcript-check-prompt/',

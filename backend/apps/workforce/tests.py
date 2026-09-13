@@ -150,6 +150,45 @@ class TaskServiceTestCase(TestCase):
         self.assertIsNotNone(claimed.claimed_at)
         self.assertTrue(task.events.filter(event_type=TaskEvent.TASK_CLAIMED).exists())
 
+    def test_a_first_claim_clears_any_training_mode_residue(self):
+        """
+        WORKFORCE_TRAINING_MODE (settings.py) lets a tasker save a polish/
+        accuracy-check onto a task they have not claimed, so onboarding
+        does not spend real Eagle minutes. This is the other half of that
+        feature: the FIRST real claim on a task must never hand a genuine
+        worker somebody else's rehearsal sitting in the box they are about
+        to submit from.
+        """
+        task = services.create_task(actor=self.admin_user)
+        Task.objects.filter(pk=task.id).update(
+            polished_text='Une traduction de pratique.',
+            accuracy_check_notes='Vérifié pour la pratique.',
+        )
+
+        claimed = services.claim_task(task.id, self.alice, self.alice_user)
+
+        self.assertEqual(claimed.polished_text, '')
+        self.assertIsNone(claimed.polished_by_id)
+        self.assertIsNone(claimed.polished_at)
+        self.assertEqual(claimed.accuracy_check_notes, '')
+        self.assertIsNone(claimed.accuracy_check_by_id)
+        self.assertIsNone(claimed.accuracy_check_at)
+
+    def test_a_reclaim_after_release_keeps_its_real_history(self):
+        """The clearing above must be scoped to a task's FIRST claim only
+        -- a real worker's saved progress, surviving a release and a
+        reclaim by someone else, is real work history, not a rehearsal,
+        and must not be silently destroyed."""
+        task = services.create_task(actor=self.admin_user)
+        services.claim_task(task.id, self.alice, self.alice_user)
+        Task.objects.filter(pk=task.id).update(
+            polished_text='Le vrai travail d’Alice.')
+        services.release_task(task.id, actor=self.alice_user)
+
+        claimed = services.claim_task(task.id, self.bob, self.bob_user)
+
+        self.assertEqual(claimed.polished_text, 'Le vrai travail d’Alice.')
+
     def test_a_second_worker_cannot_claim_a_held_task(self):
         task = services.create_task(actor=self.admin_user)
         services.claim_task(task.id, self.alice, self.alice_user)

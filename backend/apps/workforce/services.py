@@ -355,6 +355,38 @@ def claim_task(task_id, worker: WorkerProfile, actor: User) -> Task:
                 f'You already hold {held} tasks. Finish or release one first.',
             )
 
+        extra_fields = {'claimed_by': worker, 'claim_reserved_at': None}
+
+        # CLEAR ANY WORKFORCE_TRAINING_MODE RESIDUE, BUT ONLY ON THIS
+        # TASK'S FIRST-EVER REAL CLAIM.
+        #
+        # Training mode (see its docstring in settings.py) lets a tasker
+        # save a polish/accuracy-check onto a task they have not claimed,
+        # specifically so onboarding does not have to spend real Eagle
+        # minutes. That leaves real-looking data sitting on a real,
+        # Eagle-synced task row -- and a genuine worker who claims it for
+        # real later must never see somebody else's rehearsal sitting in
+        # the box they are about to submit from.
+        #
+        # "First-ever real claim" is the exact condition: no prior
+        # TASK_CLAIMED event means the only way polished_text or
+        # accuracy_check_notes could be non-empty is the training-mode
+        # bypass (or a deliberate admin write) -- never a previous real
+        # holder, because there was none. A release-and-reclaim, by
+        # contrast, already has a TASK_CLAIMED event on record and is left
+        # completely alone here: that data belongs to this task's real
+        # work history, not a rehearsal, and clearing it would destroy a
+        # legitimate prior worker's saved progress.
+        first_real_claim = not TaskEvent.objects.filter(
+            task=task, event_type=TaskEvent.TASK_CLAIMED,
+        ).exists()
+        if first_real_claim and (task.polished_text or task.accuracy_check_notes):
+            extra_fields.update({
+                'polished_text': '', 'polished_by': None, 'polished_at': None,
+                'accuracy_check_notes': '', 'accuracy_check_by': None,
+                'accuracy_check_at': None,
+            })
+
         return _apply_transition(
             task, states.CLAIMED, actor, TaskEvent.TASK_CLAIMED,
             metadata={'worker_code': worker.worker_code},
@@ -363,7 +395,7 @@ def claim_task(task_id, worker: WorkerProfile, actor: User) -> Task:
             # eagle_claim.py's reservation step (a local task, or a direct
             # call) never had it set in the first place, so clearing it is
             # a no-op there and the real cleanup for the reserved case.
-            extra_fields={'claimed_by': worker, 'claim_reserved_at': None},
+            extra_fields=extra_fields,
         )
 
 
