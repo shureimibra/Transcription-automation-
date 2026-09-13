@@ -30,11 +30,11 @@ import { Button } from '../components/ui/index.jsx';
  * only trusts "no findings" would still miss them. Telling them what to
  * look for by hand is the only remaining safety net for that specific gap.
  *
- * TRANSCRIPTION IS DELIBERATELY OUT OF SCOPE HERE. Its own guide is planned
- * after a comparable audit of transcription submissions -- writing one now
- * would be guessing at defects nobody has actually measured yet, which is
- * exactly the mistake TRANSLATION_POLISH_PROMPT.md's own typography section
- * refuses to make for an unmeasured language.
+ * TRANSCRIPTION IS DELIBERATELY OUT OF SCOPE HERE -- it has its own guide
+ * now, TranscriptionGuideModal.jsx, written the same way once a comparable
+ * review of transcription submissions existed to write it from. Keeping
+ * this one translation-only is not a placeholder any more; it is the same
+ * "read the job you are actually doing" design both guides share.
  */
 export default function TranslationGuideModal({ onClose }) {
   const [open, setOpen] = useState('overview');
@@ -95,8 +95,9 @@ export default function TranslationGuideModal({ onClose }) {
             For the exact wording of the assistant prompts and why each rule
             in them exists, see{' '}
             <code className="text-ink">docs/TRANSLATION_POLISH_PROMPT.md</code>.
-            A transcription version of this guide is planned once a
-            comparable review of transcription submissions is done.
+            Working a transcription task instead? Press{' '}
+            <strong className="text-ink">Full guide</strong> on that screen —
+            it has its own walkthrough, built the same way this one was.
           </p>
         </div>
 
@@ -345,9 +346,14 @@ const SECTIONS = [
         </P>
         <Ul>
           <li><strong className="text-ink">Numbers do not match</strong> — a figure in the French is not in the English, or vice versa. This is the one that <strong className="text-ink">blocks submission outright</strong>, with no override — it is also what an assistant most often breaks, by turning “one” into “1” or rewriting a date.</li>
+          <li><strong className="text-ink">Corrupted text</strong> — accented letters turned into garbled sequences ("é" became "Ã©" or similar) by a broken copy-paste. <strong className="text-ink">Also blocks submission outright</strong> — invisible to every other check, and often invisible to you too if you do not read French. Copy the text again as plain text and check the accents look right before saving.</li>
           <li><strong className="text-ink">English text remaining</strong> — a run of untranslated source survived into the French.</li>
           <li><strong className="text-ink">English word or phrase left untranslated</strong> — a shorter miss than the one above: a stray word like “I’m”, “each”, or “November” sitting in an otherwise-French sentence.</li>
+          <li><strong className="text-ink">A URL, email address, or identifier code changed</strong> — these are never translated, so the French copy must match the English exactly. An identifier flag can occasionally be a false alarm on an ordinary word; the other two are not.</li>
+          <li><strong className="text-ink">A web address in the French the English never said</strong> — your assistant sometimes helpfully supplies the website it believes is being described. Remove anything the speaker did not actually say, however plausible it looks.</li>
           <li><strong className="text-ink">Currency written in English format</strong> — a figure like “$60,000” that should read “60 000 $” in French. The number itself is right; only the formatting is not.</li>
+          <li><strong className="text-ink">A word an English spellchecker has damaged</strong> — French-specific: something like "dont" quietly autocorrected to "don't" by a checker set to English. Reads as fluent French to anyone who does not know the correct word, and a real reviewer has marked work down for exactly this.</li>
+          <li><strong className="text-ink">Tu and vous mixed in one document</strong> — French, Spanish and German each have a familiar and a polite form of "you"; a document that switches partway through reads as a mistake, not a stylistic choice, even if both forms are individually correct French.</li>
           <li><strong className="text-ink">Length anomaly</strong> — a paragraph was dropped, or padded out.</li>
           <li><strong className="text-ink">Repeated paragraph</strong> — the assistant looped and produced the same text twice.</li>
           <li><strong className="text-ink">Commentary detected</strong> — a line like “Here is the corrected version” got pasted in by mistake.</li>
