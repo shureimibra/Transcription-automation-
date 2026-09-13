@@ -418,8 +418,8 @@ class TranslationDraftView(views.APIView):
 
 class TranscriptCheckPromptView(views.APIView):
     """
-    GET /workforce/tasks/<id>/transcript-check-prompt/ -- the accuracy-check
-    prompt for a transcription task, ready to paste.
+    /workforce/tasks/<id>/transcript-check-prompt/ -- the accuracy-check
+    prompt for a transcription task, and the record that it was run.
 
     THE MISSING HALF OF worker_prompts.py. That module already closed this
     exact gap for translation -- a worker used to bring their own prompt to
@@ -430,15 +430,26 @@ class TranscriptCheckPromptView(views.APIView):
     different real word -- is exactly as real here (see
     docs/TRANSCRIPTION_QUALITY_FINDINGS_2026-09-12.md).
 
-    REPORT-ONLY, SO THERE IS NOTHING TO POST BACK. Unlike the translation
-    prompts, this hands back leads to go verify against the audio, not a
-    document to paste over the transcript -- see
+    GET IS REPORT-ONLY; POST NEVER REWRITES THE TRANSCRIPT EITHER. Unlike
+    the translation prompt, this hands back leads to go verify against the
+    audio, not a document to paste over the transcript -- see
     worker_prompts.build_transcript_check's own docstring for why a rewrite
-    variant was deliberately not built. A worker copies this prompt, pastes
+    variant was deliberately not built. A worker copies the prompt, pastes
     the transcript under it (the same server-rendered document Preview
     already shows), reads what comes back, and acts on it by editing the
     specific line after listening -- through the editing this screen
-    already offers, not through this endpoint.
+    already offers, never through this endpoint.
+
+    THE POST IS AN AUDIT TRAIL, NOT A DOCUMENT SWAP. What it stores
+    (`Task.accuracy_check_notes`) is proof the step happened and what it
+    found, for a coach reading a rejection later -- and it is what
+    `run_quality_gate` now requires before a transcription task can be
+    submitted at all: the audit-and-hand-patch loop that produced most of
+    this module's own exemptions does not scale to every niche a new
+    recording can be about, and an LLM reading the actual document does not
+    need a niche-specific rule pre-written for it. Pushing that judgment
+    onto the worker's own assistant, on the worker's own account, is what
+    keeps this off our token budget entirely.
 
     STANDARD-AWARE, so the prompt never asks a worker to "fix" a
     contraction on a strict-verbatim task, which would ask them to break
@@ -456,6 +467,58 @@ class TranscriptCheckPromptView(views.APIView):
             'transcription_standard') or {}
         return Response({
             'prompt': worker_prompts.build_transcript_check(standard.get('name', '')),
+            'accuracy_check_notes': task.accuracy_check_notes,
+            'accuracy_check_by': (task.accuracy_check_by.worker_code
+                                  if task.accuracy_check_by_id else None),
+            'accuracy_check_at': task.accuracy_check_at,
+        })
+
+    def post(self, request, pk):
+        # WRITING REQUIRES HOLDING THE TASK, unlike GET above. Reading the
+        # prompt is allowed from the open pool (see TaskMediaView._task_for)
+        # so a worker can see what the check involves before claiming;
+        # recording that it was actually run is not something anyone but
+        # the holder -- or an admin -- can do.
+        task = Task.objects.filter(pk=pk).first()
+        if task is None or task.kind != Task.TRANSCRIPTION:
+            raise Http404
+        profile = worker_profile(request.user)
+        if not is_admin(request.user) and (
+                profile is None or task.claimed_by_id != profile.id):
+            raise Http404
+
+        notes = str(request.data.get('notes') or '').strip()
+        if not notes:
+            return Response(
+                {'error': "Paste what your assistant found before saving."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if len(notes) > 20000:
+            return Response(
+                {'error': 'That is far longer than an accuracy-check reply '
+                          'should be.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        task.accuracy_check_notes = notes
+        task.accuracy_check_by = profile
+        task.accuracy_check_at = timezone.now()
+        task.save(update_fields=['accuracy_check_notes', 'accuracy_check_by',
+                                 'accuracy_check_at', 'updated_at'])
+
+        record_event(
+            task, TaskEvent.ACCURACY_CHECK_COMPLETED, actor=request.user,
+            message='Accuracy-check reply pasted back.',
+            metadata={'characters': len(notes)},
+        )
+
+        # Hand back the gate's verdict immediately -- the whole point of
+        # requiring this step is that it gets checked before anyone submits.
+        preview = preview_submission(task)
+        return Response({
+            'saved': True,
+            'findings': preview.findings,
+            'blocking': preview.blocking,
         })
 
 

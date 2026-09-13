@@ -479,10 +479,22 @@ export default function TranslationWorkspace({ task, onTaskChange }) {
           <Button
             size="sm"
             onClick={() => setShowPreview(true)}
-            disabled={notTranslatedYet && !data?.polished_text}
-            title={notTranslatedYet && !data?.polished_text
-              ? 'Save a translation first'
-              : undefined}
+            // THE SELF-CHECK IS REQUIRED, NOT ADVISORY -- see
+            // run_quality_gate's 'self-check-not-completed' finding.
+            // `polished_at` is what proves the copy/paste-through-the-
+            // worker's-own-assistant loop actually ran at least once.
+            // Skipped once delivered: that work already passed the gate,
+            // and the button now only offers to VIEW it.
+            disabled={!isDelivered(task) && (
+              (notTranslatedYet && !data?.polished_text) || !data?.polished_at
+            )}
+            title={isDelivered(task) ? undefined
+              : notTranslatedYet && !data?.polished_text
+                ? 'Save a translation first'
+                : !data?.polished_at
+                  ? 'Copy the prompt, run it through your own assistant, '
+                    + 'and save the result first'
+                  : undefined}
           >
             {isDelivered(task) ? 'View what was submitted' : 'Preview submission'}
           </Button>

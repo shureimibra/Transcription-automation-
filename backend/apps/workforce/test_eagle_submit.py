@@ -10,8 +10,10 @@ The gate tests are about money in the other direction: a rejection costs the
 purchased minutes plus the worker's hour, so the cheap deterministic checks
 have to catch a broken document before it is spent.
 """
+import itertools
 from unittest import mock
 
+from django.utils import timezone
 from django.test import TestCase, override_settings
 
 from apps.transcriptions.models import (
@@ -81,7 +83,24 @@ _TOPICS_FR = [
 ]
 
 
-def build_task(kind=Task.TRANSCRIPTION, seconds=600, segments=12, worker=None):
+#: Unique usernames for the self-check worker `build_task` invents when the
+#: caller does not supply one, so two calls in the same test never collide
+#: on User's unique username.
+_checker_seq = itertools.count(1)
+
+
+def build_task(kind=Task.TRANSCRIPTION, seconds=600, segments=12, worker=None,
+               self_checked=True):
+    """
+    self_checked=True MEANS THIS IS A NORMAL, SUBMITTABLE FIXTURE.
+
+    run_quality_gate now refuses any task where the worker's own
+    self-check step never ran (see 'self-check-not-completed'), the same
+    way it already refused an untranslated or timestamp-less document.
+    Every existing caller of this fixture wants "a good task", so that is
+    the default; a test specifically about the new gate passes
+    self_checked=False instead of tearing the field back out afterwards.
+    """
     project = Project.objects.create(name='Eagle')
     job = TranscriptionJob.objects.create(
         project=project, input_source='upload', status='completed',
@@ -135,6 +154,22 @@ def build_task(kind=Task.TRANSCRIPTION, seconds=600, segments=12, worker=None):
                 changed=True,
             )
         Task.objects.filter(pk=task.pk).update(deliverable_revision=revision)
+        task.refresh_from_db()
+
+    if self_checked:
+        checker = worker
+        if checker is None:
+            n = next(_checker_seq)
+            checker = make_worker(f'checker{n}', f'CHK-{n:03d}')[1]
+        if kind == Task.TRANSCRIPTION:
+            Task.objects.filter(pk=task.pk).update(
+                accuracy_check_notes='Checked against the audio; nothing to report.',
+                accuracy_check_by=checker, accuracy_check_at=timezone.now(),
+            )
+        else:
+            Task.objects.filter(pk=task.pk).update(
+                polished_by=checker, polished_at=timezone.now(),
+            )
         task.refresh_from_db()
 
     return task
@@ -199,6 +234,40 @@ class QualityGateTestCase(TestCase):
         task = build_task()
         preview = preview_submission(task)
         self.assertEqual(preview.content, render_for_eagle(task))
+
+    def test_a_transcription_task_is_blocked_without_the_self_check(self):
+        """
+        THE NEW GATE. A worker's own assistant, reading the actual
+        recording's subject matter, catches vocabulary and domain
+        defects no hand-maintained rule was ever written for -- and that
+        only works if the step actually ran. See
+        TranscriptCheckPromptView's own docstring.
+        """
+        task = build_task(Task.TRANSCRIPTION, seconds=600, self_checked=False)
+        findings = run_quality_gate(task, render_for_eagle(task))
+        codes = {f['code'] for f in findings}
+        self.assertIn('self-check-not-completed', codes)
+        self.assertEqual(
+            next(f for f in findings
+                 if f['code'] == 'self-check-not-completed')['severity'],
+            'critical',
+        )
+
+    def test_a_translation_task_is_blocked_without_the_self_check(self):
+        task = build_task(Task.TRANSLATION, seconds=600, self_checked=False)
+        findings = run_quality_gate(task, render_for_eagle(task))
+        codes = {f['code'] for f in findings}
+        self.assertIn('self-check-not-completed', codes)
+
+    def test_completing_the_self_check_clears_the_finding(self):
+        """The fix must not blind the check to a real one: a task WITH the
+        step completed produces no self-check finding -- covered already
+        by the "good document" tests above via self_checked's default, but
+        asserted directly here against the specific code."""
+        task = build_task(Task.TRANSCRIPTION, seconds=600, self_checked=True)
+        findings = run_quality_gate(task, render_for_eagle(task))
+        codes = {f['code'] for f in findings}
+        self.assertNotIn('self-check-not-completed', codes)
 
 
 class SubmissionOrderingTestCase(TestCase):
@@ -776,8 +845,12 @@ class SemanticAuditFindingsTestCase(TestCase):
         self.revision = AIRevision.objects.create(
             job=self.job, operation='translate', target_language='fr',
             status='completed')
+        # Not what this test class is about -- see build_task's own
+        # self_checked docstring for why a "good task" fixture sets this.
+        _, checker = make_worker('semanticchecker', 'CHK-SEM')
         Task.objects.filter(pk=self.task.pk).update(
-            job=self.job, deliverable_revision=self.revision)
+            job=self.job, deliverable_revision=self.revision,
+            polished_by=checker, polished_at=timezone.now())
         self.task.refresh_from_db()
 
     def _segment(self, start, english, french):

@@ -45,6 +45,15 @@ beforeEach(() => {
   // jsdom cannot decode audio; keep the element inert.
   window.HTMLMediaElement.prototype.play = vi.fn().mockResolvedValue(undefined);
   window.HTMLMediaElement.prototype.pause = vi.fn();
+  // THE ACCURACY CHECK CARD LOADS ON EVERY RENDER OF A TRANSCRIPTION TASK
+  // NOW, not only when its own button is clicked -- see ReviewWorkspace's
+  // checkLoad. Left unmocked, every other describe block below would hit
+  // the real (unavailable) network. A harmless "not completed yet"
+  // default here; tests specifically about the card override it.
+  vi.spyOn(submission, 'checkPrompt').mockResolvedValue({
+    prompt: '', accuracy_check_notes: '', accuracy_check_by: null,
+    accuracy_check_at: null,
+  });
 });
 
 describe('the audio boundary', () => {
@@ -217,7 +226,10 @@ describe('the transcript', () => {
     render(<ReviewWorkspace task={TASK} />);
 
     await userEvent.click(await screen.findByText('first turn'));
-    const box = screen.getByRole('textbox');
+    // Two textboxes are on screen once the Accuracy check card is showing
+    // (its own paste-back box has an accessible name); the segment editor
+    // has none, so that is what tells them apart.
+    const box = screen.getByRole('textbox', { name: '' });
     await userEvent.clear(box);
     await userEvent.type(box, 'corrected');
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
@@ -238,7 +250,8 @@ describe('the transcript', () => {
     render(<ReviewWorkspace task={TASK} />);
 
     await userEvent.click(await screen.findByText('first turn'));
-    const box = screen.getByRole('textbox');
+    // See the previous test for why this needs a name filter.
+    const box = screen.getByRole('textbox', { name: '' });
     // "first turn" -- place the cursor right after "first" (index 5), not
     // at the end, and remember it the same way onSelect does in real use.
     box.setSelectionRange(5, 5);
@@ -428,6 +441,78 @@ describe('the accuracy check prompt', () => {
   });
 });
 
+describe('the accuracy check paste-back', () => {
+  // REQUIRED, NOT OPTIONAL -- see run_quality_gate's
+  // 'self-check-not-completed' finding. This card sits after every
+  // editing tool above it (speakers, per-line correction) and before
+  // Preview/Submit: an additional checkpoint, not a replacement for any
+  // of them.
+
+  it('shows the step as required until it has been saved', async () => {
+    render(<ReviewWorkspace task={TASK} />);
+
+    expect(await screen.findByText('Required before this task can be submitted'))
+      .toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save accuracy check' })).toBeDisabled();
+  });
+
+  it('is disabled empty and enabled once something is pasted', async () => {
+    render(<ReviewWorkspace task={TASK} />);
+    await screen.findByText('first turn');
+
+    const box = screen.getByLabelText('What your assistant found');
+    const save = screen.getByRole('button', { name: 'Save accuracy check' });
+    expect(save).toBeDisabled();
+
+    await userEvent.type(box, 'Checked the names against the audio.');
+    expect(save).not.toBeDisabled();
+  });
+
+  it('saves the paste-back and shows the step as completed', async () => {
+    const save = vi.spyOn(submission, 'saveAccuracyCheck').mockResolvedValue({
+      saved: true, findings: [], blocking: false,
+    });
+    vi.spyOn(submission, 'checkPrompt')
+      .mockResolvedValueOnce({
+        prompt: '', accuracy_check_notes: '', accuracy_check_by: null,
+        accuracy_check_at: null,
+      })
+      .mockResolvedValueOnce({
+        prompt: '', accuracy_check_notes: 'Nothing to report.',
+        accuracy_check_by: 'W-01', accuracy_check_at: '2026-09-13T00:00:00Z',
+      });
+    render(<ReviewWorkspace task={TASK} />);
+    await screen.findByText('first turn');
+
+    await userEvent.type(
+      screen.getByLabelText('What your assistant found'), 'Nothing to report.');
+    await userEvent.click(screen.getByRole('button', { name: 'Save accuracy check' }));
+
+    await waitFor(() => expect(save).toHaveBeenCalledWith('task-1', 'Nothing to report.'));
+    expect(await screen.findByText('Completed by W-01')).toBeInTheDocument();
+  });
+
+  it('surfaces the error instead of losing what was typed', async () => {
+    vi.spyOn(submission, 'saveAccuracyCheck').mockRejectedValue(new Error('down'));
+    render(<ReviewWorkspace task={TASK} />);
+    await screen.findByText('first turn');
+
+    const box = screen.getByLabelText('What your assistant found');
+    await userEvent.type(box, 'Nothing to report.');
+    await userEvent.click(screen.getByRole('button', { name: 'Save accuracy check' }));
+
+    expect(await screen.findByText('down')).toBeInTheDocument();
+    expect(box).toHaveValue('Nothing to report.');
+  });
+
+  it('is not offered on a translation task', async () => {
+    render(<ReviewWorkspace task={{ ...TASK, kind: 'translation' }} />);
+    await screen.findByText('first turn');
+
+    expect(screen.queryByText('Accuracy check')).not.toBeInTheDocument();
+  });
+});
+
 describe('the full guide', () => {
   it('opens on request and closes again', async () => {
     render(<ReviewWorkspace task={TASK} />);
@@ -582,6 +667,7 @@ describe('following the audio while it plays', () => {
     render(<ReviewWorkspace task={TASK} />);
 
     await userEvent.click(await screen.findByText(/First sentence here/));
-    expect(screen.getByRole('textbox')).toBeInTheDocument();
+    // Unnamed, unlike the Accuracy check card's own paste-back textarea.
+    expect(screen.getByRole('textbox', { name: '' })).toBeInTheDocument();
   });
 });

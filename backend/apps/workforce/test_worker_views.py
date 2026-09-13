@@ -17,6 +17,7 @@ import tempfile
 from unittest import mock
 
 from django.test import TestCase, override_settings
+from django.utils import timezone
 from rest_framework.test import APITestCase
 
 from apps.transcriptions.models import Project, TranscriptionJob, TranscriptSegment
@@ -226,6 +227,11 @@ class PreviewAndSubmitTestCase(WorkerEndpointBase):
 
     def test_the_preview_shows_the_worker_exactly_what_will_be_sent(self):
         task = self.warm_task(claimed_by=self.ana, status=states.READY_TO_SUBMIT)
+        # Not what this test is about -- see run_quality_gate's
+        # 'self-check-not-completed' finding, covered on its own below.
+        task.accuracy_check_by = self.ana
+        task.accuracy_check_at = timezone.now()
+        task.save(update_fields=['accuracy_check_by', 'accuracy_check_at'])
         self.client.force_authenticate(self.ana_user)
 
         response = self.client.get(f'/api/v1/workforce/tasks/{task.id}/preview/')
@@ -618,3 +624,78 @@ class TranscriptCheckPromptTestCase(WorkerEndpointBase):
             f'/api/v1/workforce/tasks/{task.id}/transcript-check-prompt/')
 
         self.assertIn('do NOT flag any of these', response.data['prompt'])
+
+    def test_a_worker_can_record_what_their_assistant_found(self):
+        """
+        THE AUDIT TRAIL, NOT A REWRITE. Posting notes must not touch the
+        transcript itself -- only Task.accuracy_check_notes/by/at, which
+        is what run_quality_gate's 'self-check-not-completed' finding
+        checks for.
+        """
+        task = self.warm_task(claimed_by=self.ana, status=states.IN_PROGRESS)
+        self.client.force_authenticate(self.ana_user)
+
+        response = self.client.post(
+            f'/api/v1/workforce/tasks/{task.id}/transcript-check-prompt/',
+            {'notes': 'Checked "Robert Solow" against the audio -- correct.'},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data['saved'])
+        task.refresh_from_db()
+        self.assertEqual(task.accuracy_check_by_id, self.ana.id)
+        self.assertIsNotNone(task.accuracy_check_at)
+        self.assertIn('Robert Solow', task.accuracy_check_notes)
+
+    def test_saving_the_check_clears_the_submission_gate(self):
+        """The whole point of storing this: preview_submission's verdict,
+        handed back immediately, no longer carries the finding."""
+        task = self.warm_task(claimed_by=self.ana, status=states.READY_TO_SUBMIT)
+        self.client.force_authenticate(self.ana_user)
+
+        response = self.client.post(
+            f'/api/v1/workforce/tasks/{task.id}/transcript-check-prompt/',
+            {'notes': 'Nothing to report.'},
+        )
+
+        codes = {f.get('code') for f in response.data['findings']}
+        self.assertNotIn('self-check-not-completed', codes)
+
+    def test_an_empty_paste_back_is_refused(self):
+        task = self.warm_task(claimed_by=self.ana, status=states.IN_PROGRESS)
+        self.client.force_authenticate(self.ana_user)
+
+        response = self.client.post(
+            f'/api/v1/workforce/tasks/{task.id}/transcript-check-prompt/',
+            {'notes': '   '},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        task.refresh_from_db()
+        self.assertIsNone(task.accuracy_check_by_id)
+
+    def test_a_worker_cannot_record_a_check_on_another_workers_task(self):
+        """Reading the prompt is allowed from the open pool; recording that
+        the check was run is not -- see the POST docstring."""
+        task = self.warm_task(claimed_by=self.bo, status=states.IN_PROGRESS)
+        self.client.force_authenticate(self.ana_user)
+
+        response = self.client.post(
+            f'/api/v1/workforce/tasks/{task.id}/transcript-check-prompt/',
+            {'notes': 'Nothing to report.'},
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_a_translation_task_refuses_the_paste_back_too(self):
+        task = self.warm_task(claimed_by=self.ana, status=states.IN_PROGRESS)
+        task.kind = Task.TRANSLATION
+        task.save(update_fields=['kind'])
+        self.client.force_authenticate(self.ana_user)
+
+        response = self.client.post(
+            f'/api/v1/workforce/tasks/{task.id}/transcript-check-prompt/',
+            {'notes': 'Nothing to report.'},
+        )
+
+        self.assertEqual(response.status_code, 404)

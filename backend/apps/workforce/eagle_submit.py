@@ -772,6 +772,21 @@ def run_quality_gate(task: Task, content: str) -> List[Dict]:
         # discontinuous timestamp chain, a bracket tag Eagle does not
         # recognise, a numeral written the wrong way.
         findings.extend(_transcript_standard_findings(task, content))
+        # THE SELF-CHECK IS REQUIRED, NOT ADVISORY. See
+        # TranscriptCheckPromptView's own docstring for why: a hand-patched
+        # rule catches what THIS document happened to get wrong, on THIS
+        # topic; a worker's own assistant, reading the actual recording's
+        # subject matter, catches what no rule was ever written for. That
+        # is the only piece of this pipeline that scales to a niche nobody
+        # has audited yet, and it costs nothing on our own token budget --
+        # so it stops being optional the moment it exists.
+        if task.accuracy_check_by_id is None:
+            findings.append({
+                'severity': 'critical', 'code': 'self-check-not-completed',
+                'message': 'Copy the accuracy-check prompt, run it through '
+                           'your own assistant, and paste back what it '
+                           'found before submitting.',
+            })
     else:
         if 'Number Of Words' not in content:
             findings.append({'severity': 'high', 'code': 'missing-word-count',
@@ -792,6 +807,20 @@ def run_quality_gate(task: Task, content: str) -> List[Dict]:
         # not free to compute -- see _semantic_audit_findings for why this
         # costs no additional request.
         findings.extend(_semantic_audit_findings(task))
+        # THE SELF-CHECK IS REQUIRED, NOT ADVISORY -- same reasoning as the
+        # transcription branch above. `polished_by` being set is what
+        # proves the copy/paste-through-the-worker's-own-assistant loop
+        # actually ran; a task can otherwise reach here having never left
+        # the machine draft, which is exactly the vocabulary-blind spot a
+        # hand-maintained blocklist can never keep up with on its own.
+        if task.polished_by_id is None:
+            findings.append({
+                'severity': 'critical', 'code': 'self-check-not-completed',
+                'message': 'Copy the prompt and the translation into your '
+                           'own assistant, paste back what it found (or '
+                           'the corrected version), and save it before '
+                           'submitting.',
+            })
 
     # A transcript far shorter than its audio is the signature of a
     # truncated pipeline run, and it is worth stopping before it costs the

@@ -282,6 +282,27 @@ class Task(models.Model):
     )
     polished_at = models.DateTimeField(null=True, blank=True)
 
+    # A TRANSCRIPTION task's counterpart to polished_text -- and
+    # deliberately NOT the same shape.
+    #
+    # NEVER OVERWRITES THE TRANSCRIPT. TranscriptCheckPromptView hands back
+    # leads to go verify against the audio, not a document to paste over
+    # the transcript -- a worker's assistant has never heard the recording,
+    # so a rewrite from it would repeat whatever it misheard with more
+    # confidence, not less. What is stored here is an AUDIT TRAIL: proof the
+    # step happened, and a record of what it found, for a coach reviewing a
+    # rejection later. The actual correction still goes through the normal
+    # per-line editing on this screen.
+    #
+    # `accuracy_check_by` set is what run_quality_gate checks for: the whole
+    # point of storing this is that a submission is refused without it.
+    accuracy_check_notes = models.TextField(blank=True, default='')
+    accuracy_check_by = models.ForeignKey(
+        'WorkerProfile', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='accuracy_checked_tasks',
+    )
+    accuracy_check_at = models.DateTimeField(null=True, blank=True)
+
     deliverable_revision = models.ForeignKey(
         'transcriptions.AIRevision', on_delete=models.SET_NULL,
         null=True, blank=True, related_name='workforce_tasks',
@@ -457,10 +478,15 @@ class TaskEvent(models.Model):
     # assistant. Recorded so a rejection can be traced to a specific
     # version, and so "who actually did this work" has an answer.
     TRANSLATION_POLISHED = 'TRANSLATION_POLISHED'
+    # A worker pasted back what their own assistant found when asked to
+    # check a transcript against the accuracy-check prompt. The transcript
+    # itself is unaffected by this event -- see Task.accuracy_check_notes.
+    ACCURACY_CHECK_COMPLETED = 'ACCURACY_CHECK_COMPLETED'
 
     EVENT_CHOICES = [(name, name) for name in (
         TASK_CREATED, TASK_ASSIGNED, TASK_UNASSIGNED, TASK_CLAIMED,
         TASK_RELEASED, TASK_STARTED, TRANSLATION_POLISHED,
+        ACCURACY_CHECK_COMPLETED,
         TRANSCRIPTION_STARTED,
         TRANSCRIPTION_COMPLETED, AI_PROCESSING_STARTED,
         AI_PROCESSING_COMPLETED, REVIEW_STARTED, READY_FOR_SUBMISSION,

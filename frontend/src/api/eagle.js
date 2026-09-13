@@ -40,15 +40,27 @@ export const submission = {
     api.post(`/workforce/tasks/${taskId}/submit-external/`, body),
 
   /**
-   * The report-only accuracy-check prompt for a transcription task, already
-   * matched to the project's own standard (edited vs. strict verbatim) --
-   * see TranscriptCheckPromptView. A worker pastes this ahead of the
-   * document `preview` above already renders; there is no "polish" variant
-   * because a worker's assistant never hears the audio (see
-   * worker_prompts.build_transcript_check's own docstring).
+   * The accuracy-check prompt for a transcription task, already matched to
+   * the project's own standard (edited vs. strict verbatim) -- see
+   * TranscriptCheckPromptView. A worker pastes this ahead of the document
+   * `preview` above already renders; there is no "rewrite" variant because
+   * a worker's assistant never hears the audio (see
+   * worker_prompts.build_transcript_check's own docstring). Also returns
+   * whatever was already saved via `saveAccuracyCheck`, so the screen can
+   * show the step as done across a reload.
    */
   checkPrompt: (taskId) =>
     api.get(`/workforce/tasks/${taskId}/transcript-check-prompt/`),
+
+  /**
+   * Record what the worker's own assistant found -- an audit trail, NOT a
+   * document that overwrites the transcript (see TranscriptCheckPromptView
+   * for why). This is what `preview`/`submit` now require to exist before
+   * a transcription task can go out; the actual correction still happens
+   * through the normal per-line editing on this screen.
+   */
+  saveAccuracyCheck: (taskId, notes) =>
+    api.post(`/workforce/tasks/${taskId}/transcript-check-prompt/`, { notes }),
 };
 
 // Segment editing lives on the transcription API, addressed by job.

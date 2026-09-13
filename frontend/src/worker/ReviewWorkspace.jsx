@@ -97,6 +97,19 @@ function timestamp(seconds) {
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
 }
 
+/** A numbered step marker, matching TranslationWorkspace's own Step. */
+function Step({ n }) {
+  return (
+    <span
+      aria-hidden="true"
+      className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full
+                 bg-overlay text-2xs font-medium text-ink"
+    >
+      {n}
+    </span>
+  );
+}
+
 export default function ReviewWorkspace({ task, onTaskChange }) {
   const playerRef = useRef(null);
   const [playhead, setPlayhead] = useState(0);
@@ -114,6 +127,8 @@ export default function ReviewWorkspace({ task, onTaskChange }) {
   const [copyingCheck, setCopyingCheck] = useState(false);
   const [checkCopied, setCheckCopied] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
+  const [checkNotesInput, setCheckNotesInput] = useState('');
+  const [savingCheckNotes, setSavingCheckNotes] = useState(false);
 
   const jobId = task?.job;
   const load = useCallback(
@@ -159,6 +174,19 @@ export default function ReviewWorkspace({ task, onTaskChange }) {
   // is thrown away at render time. Worse, a screen full of empty dropdowns
   // reads as broken rather than as deliberate.
   const labelsSpeakers = task.kind !== 'translation';
+
+  // WHETHER THE ACCURACY CHECK HAS BEEN RUN, across a reload. Fetched
+  // alongside the prompt itself rather than only in copyAccuracyCheck's
+  // fire-and-forget call, because `preview`/`submit` now REQUIRE this step
+  // -- a worker returning to a task needs to see it is already done, not
+  // rediscover that by hitting a blocked submit.
+  const checkLoad = useCallback(
+    () => (labelsSpeakers ? submission.checkPrompt(task.id) : Promise.resolve(null)),
+    [labelsSpeakers, task.id],
+  );
+  const { data: checkStatus, refresh: refreshCheckStatus } = useAsync(
+    checkLoad, [task.id, labelsSpeakers],
+  );
 
   // DELIVERED WORK IS A RECORD, NOT A DRAFT.
   //
@@ -322,6 +350,37 @@ export default function ReviewWorkspace({ task, onTaskChange }) {
     }
   };
 
+  /**
+   * Record what the worker's own assistant found. AN AUDIT TRAIL, NOT A
+   * REWRITE -- this never touches the transcript itself; see
+   * TranscriptCheckPromptView's own docstring for why a paste-back that
+   * overwrites the document was deliberately not built for transcription
+   * the way it was for translation. What this unlocks is `preview`/
+   * `submit`: the gate now refuses a transcription task until this has run
+   * once, so saving hands back the gate's fresh verdict immediately rather
+   * than leaving the worker to discover it only inside the preview dialog.
+   */
+  const saveAccuracyCheckNotes = async () => {
+    const notes = checkNotesInput.trim();
+    if (!notes) return;
+    setSavingCheckNotes(true);
+    setError('');
+    try {
+      const result = await submission.saveAccuracyCheck(task.id, notes);
+      setCheckNotesInput('');
+      await refreshCheckStatus();
+      const count = result.findings?.length || 0;
+      setNotice(
+        `Saved. ${count} finding(s) from the automated checks`
+        + `${result.blocking ? ' -- something still blocks submission.' : '.'}`
+      );
+    } catch (err) {
+      setError(err.message || 'Could not save the accuracy-check reply.');
+    } finally {
+      setSavingCheckNotes(false);
+    }
+  };
+
   if (!jobId) {
     return (
       <Card title="Transcript">
@@ -408,6 +467,86 @@ export default function ReviewWorkspace({ task, onTaskChange }) {
         </Card>
       )}
 
+      {/* REQUIRED, NOT OPTIONAL -- see run_quality_gate's
+          'self-check-not-completed' finding. This sits AFTER every editing
+          tool above (speakers, and the per-line correction below) and
+          BEFORE Preview/Submit -- an additional checkpoint, not a
+          replacement for any of them. The tasker still owns verifying the
+          words against the audio through the normal editing; the worker's
+          own assistant is asked for what it can actually help with --
+          domain vocabulary and terminology a hand-maintained rule was
+          never written for. Hidden on a translation task and on delivered
+          work, same as the guide button below. */}
+      {labelsSpeakers && !readOnly && (
+        <Card
+          title="Accuracy check"
+          subtitle={
+            checkStatus?.accuracy_check_by
+              ? `Completed by ${checkStatus.accuracy_check_by}`
+              : 'Required before this task can be submitted'
+          }
+        >
+          <ol className="space-y-3 text-xs text-ink-dim">
+            <li className="flex gap-2">
+              <Step n={1} />
+              <div className="flex-1">
+                <p>
+                  Copy the prompt and the transcript together, and paste
+                  them into your own assistant.
+                </p>
+                <Button size="sm" variant="primary" className="mt-2"
+                        loading={copyingCheck} onClick={copyAccuracyCheck}>
+                  {checkCopied ? 'Copied' : 'Copy accuracy check'}
+                </Button>
+              </div>
+            </li>
+            <li className="flex gap-2">
+              <Step n={2} />
+              <p className="flex-1">
+                Check anything it flags against the audio and fix it through
+                the normal editing below — it has not heard this recording,
+                so treat what it says as leads, not answers.
+              </p>
+            </li>
+            <li className="flex gap-2">
+              <Step n={3} />
+              <p className="flex-1">
+                Paste what it found into the box below and save, as a record
+                that the check was run.
+              </p>
+            </li>
+          </ol>
+
+          <div className="mt-4">
+            <label htmlFor="accuracy-check-notes"
+                   className="text-2xs font-medium text-ink-mute">
+              What your assistant found
+            </label>
+            <textarea
+              id="accuracy-check-notes"
+              value={checkNotesInput}
+              onChange={(e) => setCheckNotesInput(e.target.value)}
+              rows={5}
+              placeholder="Paste your assistant's reply here…"
+              className="mt-1 w-full rounded-lg border border-edge bg-canvas px-3 py-2
+                         font-mono text-xs text-ink placeholder:text-ink-mute"
+            />
+            <div className="mt-2 flex items-center gap-3">
+              <Button size="sm" variant="primary" onClick={saveAccuracyCheckNotes}
+                      loading={savingCheckNotes} disabled={!checkNotesInput.trim()}>
+                Save accuracy check
+              </Button>
+              <span className="text-2xs text-ink-mute">
+                {checkStatus?.accuracy_check_by
+                  ? `Already saved by ${checkStatus.accuracy_check_by} — `
+                    + 'pasting again replaces it'
+                  : 'Not completed yet'}
+              </span>
+            </div>
+          </div>
+        </Card>
+      )}
+
       <Card
         title="Transcript"
         subtitle={`${rows.length} turns · click any line to hear it`}
@@ -416,16 +555,6 @@ export default function ReviewWorkspace({ task, onTaskChange }) {
             {labelsSpeakers && (
               <Button size="sm" variant="ghost" onClick={() => setShowGuide(true)}>
                 Full guide
-              </Button>
-            )}
-            {/* NOT OFFERED ON A TRANSLATION TASK -- see labelsSpeakers.
-                TranscriptCheckPromptView 404s there for the same reason: a
-                transcription accuracy check has nothing to say about a
-                document with no audio-derived words to mishear. */}
-            {labelsSpeakers && (
-              <Button size="sm" variant="secondary" loading={copyingCheck}
-                      onClick={copyAccuracyCheck}>
-                {checkCopied ? 'Copied' : 'Copy accuracy check'}
               </Button>
             )}
             <Button size="sm" onClick={() => setShowPreview(true)}>

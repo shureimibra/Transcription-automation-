@@ -387,8 +387,46 @@ describe('the full guide', () => {
   });
 });
 
+describe('the self-check is required before preview', () => {
+  // See run_quality_gate's 'self-check-not-completed' finding: the same
+  // requirement the server now enforces is surfaced earlier here, as a
+  // disabled button rather than a dialog the worker has to open just to
+  // be told why they cannot submit.
+
+  it('disables Preview submission until a polished version is saved', async () => {
+    render(<TranslationWorkspace task={TASK} />);
+    await screen.findByText('Plusieurs fois par seconde');
+
+    expect(screen.getByRole('button', { name: 'Preview submission' })).toBeDisabled();
+  });
+
+  it('enables it once the paste-back has been saved', async () => {
+    vi.spyOn(translation, 'get').mockResolvedValue(
+      { ...DRAFT, polished_at: '2026-01-01T00:00:00Z', polished_by: 'W-01' });
+    render(<TranslationWorkspace task={TASK} />);
+    await screen.findByText('Plusieurs fois par seconde');
+
+    expect(screen.getByRole('button', { name: 'Preview submission' })).not.toBeDisabled();
+  });
+
+  it('leaves the view-only button enabled on delivered work regardless', async () => {
+    render(<TranslationWorkspace
+      task={{ ...TASK, status: 'submitted', submitted_at: '2026-01-01T00:00:00Z' }} />);
+    await screen.findByText('Plusieurs fois par seconde');
+
+    expect(screen.getByRole('button', { name: 'View what was submitted' }))
+      .not.toBeDisabled();
+  });
+});
+
 describe('submitting', () => {
   it('blocks Submit when the preview was refused outright', async () => {
+    // Not what this test is about -- the Preview button itself is now also
+    // disabled without a saved self-check (see the describe block below),
+    // and this test wants the dialog open regardless to check what happens
+    // once Eagle's own preview is refused.
+    vi.spyOn(translation, 'get').mockResolvedValue(
+      { ...DRAFT, polished_at: '2026-01-01T00:00:00Z' });
     vi.spyOn(submission, 'preview').mockRejectedValue(
       Object.assign(new Error('This task has not been translated yet.'), { status: 409 })
     );
@@ -404,6 +442,9 @@ describe('submitting', () => {
   });
 
   it('submits a clean document', async () => {
+    // See the previous test for why this is needed to reach the dialog.
+    vi.spyOn(translation, 'get').mockResolvedValue(
+      { ...DRAFT, polished_at: '2026-01-01T00:00:00Z' });
     vi.spyOn(submission, 'preview').mockResolvedValue({
       content: 'Translation Job: x\n\nTranslation :\n\nBonjour\n\n(Number Of Words: 1)',
       findings: [], blocking: false, word_count: 1,
