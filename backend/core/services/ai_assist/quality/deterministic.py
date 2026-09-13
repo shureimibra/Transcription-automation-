@@ -177,12 +177,25 @@ _NUMBER_WORDS = {
     'sixty': 60, 'seventy': 70, 'eighty': 80, 'ninety': 90,
     'hundred': 100, 'thousand': 1000, 'million': 1000000,
     'billion': 1000000000,
+    # "trillion" WAS MISSING. A real submission spoke "75 trillion" /
+    # "70 trillion" (US long-term fiscal figures) and had both flagged
+    # CRITICAL, in both directions -- see _DIGIT_SCALE_RE and
+    # _forgive_cross_scale_notation below for the fuller story.
+    'trillion': 1000000000000,
     # French
     'zéro': 0, 'un': 1, 'une': 1, 'deux': 2, 'trois': 3, 'quatre': 4,
     'cinq': 5, 'sept': 7, 'huit': 8, 'neuf': 9, 'dix': 10, 'onze': 11,
     'douze': 12, 'treize': 13, 'quatorze': 14, 'quinze': 15, 'seize': 16,
     'vingt': 20, 'trente': 30, 'quarante': 40, 'cinquante': 50,
     'soixante': 60, 'cent': 100, 'mille': 1000,
+    # 'milliard' IS NOT 'billion': French for 10^9 is milliard, not the
+    # false-friend "billion" (which in French traditionally means 10^12).
+    # The same real submission above translated "75/70 trillion" as
+    # "75 000/70 000 milliards" -- the correct, idiomatic French way to
+    # say a number this size -- and both forms are needed: the singular
+    # is vanishingly rare in real prose (a coefficient of exactly one
+    # milliard), but costs nothing to also recognise.
+    'milliard': 1000000000, 'milliards': 1000000000,
 }
 _WORD_RE = re.compile(r"[A-Za-zÀ-ÿ]+", re.UNICODE)
 
@@ -236,7 +249,8 @@ _FRACTIONS = {'half': Decimal('0.5'), 'quarter': Decimal('0.25')}
 #: by a round power of ten -- there is no precision question here the way
 #: there is with thirds, so nothing is invented by combining them.
 _DIGIT_SCALE_RE = re.compile(
-    r'([\d][\d,. ]*)\s*(hundred|thousand|million|billion)\b',
+    r'([\d][\d,. ]*)\s*(hundred|thousand|million|billion|trillion'
+    r'|milliard|milliards)\b',
     re.IGNORECASE,
 )
 
@@ -442,6 +456,63 @@ def _forgive_elided_decade_expansions(
     return remaining
 
 
+def _true_scale_values(text: str) -> set:
+    """Every "<digits> <scale word>" phrase in `text`, resolved to the
+    real value it names -- on EITHER language's text, unlike
+    spelled_number_values's use of the same _DIGIT_SCALE_RE, which is
+    only ever called on the source. See _forgive_cross_scale_notation,
+    the one caller that needs both sides resolved the same way."""
+    values = set()
+    for match in _DIGIT_SCALE_RE.finditer(text or ''):
+        base = _to_decimal(match.group(1))
+        scale = _NUMBER_WORDS.get(match.group(2).lower())
+        if base is not None and scale is not None:
+            values.add(base * Decimal(scale))
+    return values
+
+
+def _forgive_cross_scale_notation(
+    source: str, target: str,
+    missing: List[Decimal], added: List[Decimal],
+) -> Tuple[List[Decimal], List[Decimal]]:
+    """
+    "75 trillion" in the source, "75 000 milliards" in the target -- the
+    same quantity, each written the way its own language actually says a
+    number this size. FROM A REAL SUBMISSION: US long-term fiscal
+    figures, "75/70 trillion" translated as "75 000/70 000 milliards",
+    correctly. It was blocked CRITICAL in both directions: the source's
+    bare 70 read as dropped (the target has no literal "70" left, only
+    "70 000"), and the target's 75000/70000 read as invented (neither
+    figure is literally in the source's digits, only "75"/"70").
+
+    _forgive_digit_scale_expansions/spelled_number_values already forgive
+    the SIBLING shape -- a scale word surviving in the source only, fully
+    written out as bare digits in the target ("$360 million" ->
+    "360 000 000", no scale word left). This is the case neither of those
+    covers: a scale word survives on BOTH sides, just a different one
+    with a compensating coefficient, so the bare digit tokens never
+    match on their own.
+
+    Forgiven only when the TRUE VALUES the two phrases resolve to are
+    actually equal -- proof of a correct conversion between two
+    languages' conventions for a large number, not a blanket exemption
+    for any digit that happens to sit next to a scale word.
+    """
+    shared = _true_scale_values(source) & _true_scale_values(target)
+    if not shared:
+        return missing, added
+    remaining_missing, remaining_added = list(missing), list(added)
+    for text, remaining in ((source, remaining_missing), (target, remaining_added)):
+        for match in _DIGIT_SCALE_RE.finditer(text or ''):
+            base = _to_decimal(match.group(1))
+            scale = _NUMBER_WORDS.get(match.group(2).lower())
+            if base is None or scale is None:
+                continue
+            if base * Decimal(scale) in shared and base in remaining:
+                remaining.remove(base)
+    return remaining_missing, remaining_added
+
+
 def check_numbers(
     source: str, target: str, segment_index: Optional[int] = None
 ) -> List[QualityIssue]:
@@ -489,6 +560,10 @@ def check_numbers(
     # quantity once the target legitimately expands it to 1970. See
     # _forgive_elided_decade_expansions.
     missing = _forgive_elided_decade_expansions(source, missing, target_set)
+    # "75 trillion" -> "75 000 milliards" -- a scale word survives on
+    # BOTH sides, with a different, compensating coefficient. See
+    # _forgive_cross_scale_notation.
+    missing, added = _forgive_cross_scale_notation(source, target, missing, added)
 
     issues = []
     if missing:

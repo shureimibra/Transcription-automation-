@@ -75,16 +75,22 @@ _TOPICS = [
     'objections are handled.',
     'The minutes were approved and the meeting closed shortly afterwards.'
 ]
+#: TYPOGRAPHIC APOSTROPHES (') THROUGHOUT, NOT STRAIGHT ONES (') --
+#: deliberate, since check_typography's fr.apostrophe rule flags the
+#: straight form and this is supposed to be a "good document" fixture.
+#: A hand-typed straight apostrophe here is exactly the kind of
+#: unrealistic-fixture gap that rule exists to catch on a real
+#: submission -- see typography.py's own docstring for the evidence.
 _TOPICS_FR = [
     'Le comité a examiné la proposition en détail et est parvenu à un accord.',
     'Un deuxième témoin a décrit la suite des événements ce matin-là.',
-    "Le rapport expose la méthodologie utilisée tout au long de l'étude.",
+    'Le rapport expose la méthodologie utilisée tout au long de l’étude.',
     'Plusieurs participants ont exprimé des inquiétudes sur le calendrier.',
     'Les conclusions ont été diffusées à chaque service avant publication.',
-    "Une dernière section résume les recommandations pour l'année à venir.",
-    "Le président a remercié chacun d'être venu dans un délai aussi court.",
+    'Une dernière section résume les recommandations pour l’année à venir.',
+    'Le président a remercié chacun d’être venu dans un délai aussi court.',
     'Les modalités de financement ont été évoquées sans conclusion ferme.',
-    "Une annexe recense chaque source consultée pendant la période d'examen.",
+    'Une annexe recense chaque source consultée pendant la période d’examen.',
     'Le groupe de travail se réunira de nouveau à la clôture de la consultation.',
     'Les membres ont demandé des orientations plus claires sur les objections.',
     'Le procès-verbal a été approuvé et la séance levée peu après.'

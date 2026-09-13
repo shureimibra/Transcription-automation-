@@ -162,6 +162,14 @@ class FrenchTypographyRules(DefaultTypographyRules):
     _PERCENT_NO_SPACE = re.compile(r'\d%')
     # Straight ASCII quotes around a phrase, where guillemets belong.
     _ASCII_QUOTES = re.compile(r'"[^"]{2,}"')
+    # A straight apostrophe doing elision work -- aujourd'hui, j'ai, l'assurance
+    # -- where French style requires the typographic one. FROM A REAL
+    # SELF-CHECK REPORT: a document used the straight form throughout ("today's
+    # / I don't / it's" rendered "aujourd'hui / je n'ai pas / c'est"), cited
+    # against the OQLF's own style guide. Anchored on a letter on both sides so
+    # this does not also fire on a straight quote used as an actual quotation
+    # mark, which _ASCII_QUOTES above already covers separately.
+    _ASCII_APOSTROPHE = re.compile(r"[A-Za-zÀ-ÿ]'[A-Za-zÀ-ÿ]")
     # A decimal point between digits: French writes 3,14 not 3.14. Excludes
     # dotted version/section numbers by requiring exactly one dot group.
     _DECIMAL_POINT = re.compile(r'(?<!\d\.)\b\d+\.\d+\b(?!\.\d)')
@@ -200,6 +208,18 @@ class FrenchTypographyRules(DefaultTypographyRules):
                 problem='Straight ASCII quotation marks in French text.',
                 correction='Use guillemets with inner spacing: « ... ».',
                 rule='typography.fr.guillemets',
+                segment_index=segment_index, detector='deterministic',
+            ))
+
+        if self._ASCII_APOSTROPHE.search(text) and '’' not in text:
+            issues.append(QualityIssue(
+                category=IssueCategory.TYPOGRAPHY, severity=Severity.LOW,
+                problem='Straight ASCII apostrophes in French text.',
+                correction=(
+                    'Use the typographic apostrophe throughout: '
+                    'aujourd’hui, j’ai.'
+                ),
+                rule='typography.fr.apostrophe',
                 segment_index=segment_index, detector='deterministic',
             ))
 

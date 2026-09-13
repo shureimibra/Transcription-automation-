@@ -10110,6 +10110,43 @@ class QualityDeterministicCheckTestCase(TestCase):
         self.assertTrue(any(i.rule == 'numeric.missing-from-target' for i in issues))
         self.assertTrue(any(i.rule == 'numeric.absent-from-source' for i in issues))
 
+    def test_a_cross_scale_conversion_is_not_a_dropped_or_invented_figure(self):
+        """
+        FROM A REAL SUBMISSION: "75 trillion" / "70 trillion" (US
+        long-term fiscal figures) correctly translated as "75 000
+        milliards" / "70 000 milliards" -- the idiomatic French way to
+        say a number this size -- was blocked BOTH ways at once: 70 read
+        as dropped (the target has no bare "70", only "70 000"), and
+        75000/70000 read as invented (neither is literally in the
+        source's digits, only "75"/"70"). Distinct from
+        test_a_digit_riding_on_a_bare_scale_word_is_not_invented above:
+        there, the target drops its scale word entirely and spells the
+        value out in full digits; here, BOTH sides keep a scale word,
+        just a different one with a compensating coefficient.
+        """
+        from core.services.ai_assist.quality import check_numbers
+        self.assertEqual(check_numbers(
+            'the US is currently estimated at about 75 trillion dollars '
+            'of long-term deficit, 70 trillion of that comes from health '
+            'care',
+            'les Etats-Unis sont actuellement estimes a environ 75 000 '
+            'milliards de dollars de deficit a long terme, 70 000 '
+            'milliards proviennent des soins de sante',
+        ), [])
+
+    def test_a_wrong_cross_scale_conversion_still_blocks(self):
+        """The forgiveness recognises the SPECIFIC value "75 trillion"
+        resolves to, not just the shape "digits next to a scale word on
+        both sides" -- a genuinely different figure is still a real
+        defect."""
+        from core.services.ai_assist.quality import check_numbers
+        issues = check_numbers(
+            'a deficit of 75 trillion dollars',
+            'un deficit de 60 000 milliards de dollars',
+        )
+        self.assertTrue(any(i.rule == 'numeric.missing-from-target' for i in issues))
+        self.assertTrue(any(i.rule == 'numeric.absent-from-source' for i in issues))
+
     def test_an_elided_decade_inherits_its_century(self):
         """
         FROM A REAL SUBMISSION: "the 1960s and 70s" correctly translated
@@ -10778,6 +10815,33 @@ class QualityTypographyTestCase(TestCase):
             'fr.nbsp' in i.rule
             for i in check_typography('Voici le resultat : parfait', 'fr')
         ))
+
+    def test_french_requires_a_typographic_apostrophe(self):
+        """
+        FROM A REAL SELF-CHECK REPORT: a document used the straight
+        apostrophe throughout an elision -- "today's / I don't / it's"
+        rendered "aujourd'hui / je n'ai pas / c'est" -- cited against the
+        OQLF's own style guide. Mirrors the guillemets check right next
+        to it: a document that already uses the typographic form
+        produces no finding.
+        """
+        from core.services.ai_assist.quality import check_typography
+        issues = check_typography("aujourd'hui, je n'ai pas le temps", 'fr')
+        self.assertTrue(any('fr.apostrophe' in i.rule for i in issues))
+        self.assertFalse(any(
+            'fr.apostrophe' in i.rule
+            for i in check_typography('aujourd’hui, je n’ai pas le temps', 'fr')
+        ))
+
+    def test_a_straight_quote_used_as_a_quotation_mark_is_not_an_apostrophe_finding(self):
+        """The apostrophe check must not double-fire on the SAME
+        character the guillemets check already covers -- it is anchored
+        on a letter on both sides, which a quotation mark's straight
+        quote is not."""
+        from core.services.ai_assist.quality import check_typography
+        issues = check_typography('il a dit "bonjour" a tout le monde', 'fr')
+        self.assertFalse(any('fr.apostrophe' in i.rule for i in issues))
+        self.assertTrue(any('fr.guillemets' in i.rule for i in issues))
 
     def test_french_decimal_point_is_numeric_not_cosmetic(self):
         from core.services.ai_assist.quality import check_typography
