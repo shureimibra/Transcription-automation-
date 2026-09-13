@@ -176,6 +176,7 @@ _NUMBER_WORDS = {
     'nineteen': 19, 'twenty': 20, 'thirty': 30, 'forty': 40, 'fifty': 50,
     'sixty': 60, 'seventy': 70, 'eighty': 80, 'ninety': 90,
     'hundred': 100, 'thousand': 1000, 'million': 1000000,
+    'billion': 1000000000,
     # French
     'zéro': 0, 'un': 1, 'une': 1, 'deux': 2, 'trois': 3, 'quatre': 4,
     'cinq': 5, 'sept': 7, 'huit': 8, 'neuf': 9, 'dix': 10, 'onze': 11,
@@ -196,6 +197,32 @@ _WORD_RE = re.compile(r"[A-Za-zÀ-ÿ]+", re.UNICODE)
 #: as a number would forgive real defects by accident.
 _ROMAN_ORDINAL_RE = re.compile(r'\b([IVXLCDM]{1,7})(?:e|er|ere|eme|ème)\b')
 _ROMAN_VALUES = {'I': 1, 'V': 5, 'X': 10, 'L': 50, 'C': 100, 'D': 500, 'M': 1000}
+
+#: "two and a half million" = 2,500,000 exactly; "one and a quarter
+#: million" = 1,250,000 exactly. A real submission had both flagged as
+#: BLOCKING invented numbers, because neither digit string appears
+#: anywhere in the source -- the source spells the whole compound out as
+#: words, and the plain word-by-word scan above only ever catches "two",
+#: "million" and "one" separately, never the combination.
+#:
+#: Restricted to halves and quarters specifically, and to that exact
+#: shape ("<count> and a <fraction> <scale>"). Unlike "two thirds"
+#: (0.666...), a half and a quarter are EXACT binary fractions, so
+#: converting this phrase into a single figure invents no precision at
+#: all -- which is precisely the distinction the "SAME FORM AND THE SAME
+#: PRECISION" worker-prompt rule draws (born from "16 and 2 thirds
+#: percent" becoming the invented "16,67"). That rule is about a
+#: fraction that CANNOT be carried into a figure exactly; it was never
+#: meant to catch one that can. Not extended to the bare "half a
+#: million" / "a quarter million" forms (different word order, and not
+#: what this document actually used) -- add that shape if a real
+#: submission ever needs it.
+_HALF_QUARTER_SCALE_RE = re.compile(
+    r'\b(' + '|'.join(_NUMBER_WORDS) + r')\s+and\s+a\s+'
+    r'(half|quarter)\s+(hundred|thousand|million|billion)\b',
+    re.IGNORECASE,
+)
+_FRACTIONS = {'half': Decimal('0.5'), 'quarter': Decimal('0.25')}
 
 
 def _roman_value(token: str):
@@ -237,6 +264,13 @@ def spelled_number_values(text: str) -> set:
         value = _roman_value(match.group(1))
         if value is not None:
             values.add(Decimal(value))
+    # "two and a half million" -> 2500000, "one and a quarter million" ->
+    # 1250000. See _HALF_QUARTER_SCALE_RE for why only these two fractions.
+    for match in _HALF_QUARTER_SCALE_RE.finditer(text or ''):
+        count_word, fraction_word, scale_word = (g.lower() for g in match.groups())
+        whole = Decimal(_NUMBER_WORDS[count_word])
+        scale = Decimal(_NUMBER_WORDS[scale_word])
+        values.add((whole + _FRACTIONS[fraction_word]) * scale)
     return values
 
 
@@ -739,7 +773,18 @@ _LEAKED_TERMS_RE = {
         r"\byou['’]re\b|\ball right\b|\bunited states\b|\bU\.S\.(?!\w)|"
         r"\ball\b|\beach\b|\banyone\b|\bone\b|\bthey\b|\bcanadian\b|"
         r"\bjanuary\b|\bfebruary\b|\bmarch\b|\bapril\b|\bjune\b|\bjuly\b|"
-        r"\baugust\b|\bseptember\b|\boctober\b|\bnovember\b|\bdecember\b",
+        r"\baugust\b|\bseptember\b|\boctober\b|\bnovember\b|\bdecember\b|"
+        # Added from a real submission that leaked all four repeatedly
+        # (Some x4, Very x2, Instead x2, Federal x1 in one document) --
+        # moved out of the LLM-based semantic audit and into this free,
+        # reliable check for the same reason the words above already are:
+        # the semantic pass is intermittent, not systematic, and none of
+        # these four have any competing reading in French.
+        r"\bsome\b|\bvery\b|\binstead\b|\bfederal\b|"
+        # Added from a real submission that leaked all four repeatedly
+        # (There's x2, We're x4, Let's x5, Just x3 in one document) --
+        # same family as It's/That's/you're above, just not yet covered.
+        r"\bthere['’]s\b|\bwe['’]re\b|\blet['’]s\b|\bjust\b",
         re.IGNORECASE,
     ),
 }

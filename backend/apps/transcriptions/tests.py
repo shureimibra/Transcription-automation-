@@ -9997,6 +9997,50 @@ class QualityDeterministicCheckTestCase(TestCase):
         self.assertTrue(any(i.rule == 'numeric.missing-from-target' for i in issues))
         self.assertTrue(any(i.rule == 'numeric.absent-from-source' for i in issues))
 
+    def test_two_and_a_half_million_is_not_an_invented_figure(self):
+        """
+        A REAL SUBMISSION HAD THIS BLOCKED, TWICE, on two separate ASR
+        passes of the same recording: "two and a half million dollars"
+        and "one and a quarter million" translated correctly to "2 500
+        000 $" and "1 250 000 $" -- exact, correct arithmetic -- but
+        neither digit string appears anywhere in the source, so a literal
+        value comparison called both invented and blocked the submission.
+        """
+        from core.services.ai_assist.quality import check_numbers
+        self.assertEqual(check_numbers(
+            'these co-ops handled over two and a half million dollars in '
+            'sales every year and returned over one and a quarter '
+            'million to their members',
+            'ces coopératives géraient plus de 2 500 000 $ de ventes '
+            'chaque année et reversaient plus de 1 250 000 $ à leurs '
+            'membres',
+        ), [])
+
+    def test_a_third_is_not_forgiven_the_same_way(self):
+        """
+        THE DISTINCTION THE FORGIVENESS ABOVE MUST NOT ERASE. "16 and 2
+        thirds percent" becoming "16,67 pour cent" is the original real
+        submission this whole numeric check was calibrated against --
+        two thirds is a repeating decimal, so turning it into "16,67"
+        invents precision the source never had. A half or a quarter is
+        exact; a third is not, and forgiving one must not forgive both.
+        """
+        from core.services.ai_assist.quality import check_numbers
+        issues = check_numbers(
+            'a tax of 16 and 2 thirds percent', 'une taxe de 16,67 pour cent')
+        self.assertTrue(any(i.rule == 'numeric.absent-from-source' for i in issues))
+
+    def test_a_genuinely_wrong_half_million_still_blocks(self):
+        """The forgiveness recognises the SPECIFIC value "three and a
+        half million" spells out -- 3500000 -- not just the shape of the
+        phrase. A different figure entirely is still a real defect."""
+        from core.services.ai_assist.quality import check_numbers
+        issues = check_numbers(
+            'they raised three and a half million dollars',
+            'ils ont levé 4 500 000 $',
+        )
+        self.assertTrue(any(i.rule == 'numeric.absent-from-source' for i in issues))
+
     def test_a_dropped_url_is_reported(self):
         from core.services.ai_assist.quality import check_verbatim_tokens
         issues = check_verbatim_tokens(
@@ -10184,6 +10228,51 @@ class QualityDeterministicCheckTestCase(TestCase):
             self.assertTrue(
                 any(i.rule == 'leakage.common-word' for i in issues),
                 f'expected a finding on: {target!r}')
+
+    def test_some_very_instead_and_federal_leak(self):
+        """
+        FROM A REAL SUBMISSION: all four leaked repeatedly (Some x4, Very
+        x2, Instead x2, Federal x1 in one document) and were only being
+        caught by the separate LLM-based semantic audit -- intermittent,
+        not systematic, per the same finding this whole curated list
+        exists to work around. Moved into this free, reliable check.
+        """
+        from core.services.ai_assist.quality import check_common_word_leakage
+
+        cases = [
+            "Some d'entre eux ont été changés par ce qu'ils ont vu.",
+            "Very coûteux, mais ça vaut le prix.",
+            "Instead, c'étaient des représentations assez sélectives.",
+            "Les politiciens et bureaucrates Federal et provinciaux.",
+        ]
+        for target in cases:
+            issues = check_common_word_leakage(target, 'fr')
+            self.assertTrue(
+                any(i.rule == 'leakage.common-word' for i in issues),
+                f'expected a finding on: {target!r}')
+
+    def test_theres_were_lets_and_just_leak(self):
+        """
+        FROM A REAL SUBMISSION: all four leaked repeatedly (There's x2,
+        We're x4, Let's x5, Just x3 in one document) -- the same family
+        as It's/That's/you're already covered, just not yet in the list.
+        """
+        from core.services.ai_assist.quality import check_common_word_leakage
+
+        cases = [
+            "There's aucune réflexion, aucune ombre.",
+            "We're allons commencer, tout d'abord, de ce côté.",
+            "Let's essayer de moderniser un peu tout ça.",
+            "Tout cela est Just en utilisant une lumière.",
+        ]
+        for target in cases:
+            issues = check_common_word_leakage(target, 'fr')
+            self.assertTrue(
+                any(i.rule == 'leakage.common-word' for i in issues),
+                f'expected a finding on: {target!r}')
+        # "juste" (a real French word) must not collide with "just".
+        self.assertEqual(check_common_word_leakage(
+            "Je suis désolé, chacun juste après.", 'fr'), [])
 
     def test_united_states_and_its_abbreviation_leak(self):
         from core.services.ai_assist.quality import check_common_word_leakage
