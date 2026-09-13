@@ -10041,6 +10041,103 @@ class QualityDeterministicCheckTestCase(TestCase):
         )
         self.assertTrue(any(i.rule == 'numeric.absent-from-source' for i in issues))
 
+    def test_a_digit_riding_on_a_bare_scale_word_is_not_invented(self):
+        """
+        FROM A REAL SUBMISSION: "$360 million" correctly written out in
+        full as "360 000 000 $" was reported as an invented number,
+        because extract_numbers only ever sees the source's bare "360" --
+        it has no idea a scale word sits right next to it. Broader than
+        the half/quarter-fraction case above: here the source already IS
+        a figure, not a phrase spelled entirely in words.
+        """
+        from core.services.ai_assist.quality import check_numbers
+        self.assertEqual(check_numbers(
+            'the co-op raised over $360 million in sales last year',
+            'la cooperative a genere plus de 360 000 000 $ de ventes '
+            'l\'an dernier',
+        ), [])
+
+    def test_a_wrong_multiplier_on_a_scale_word_still_blocks(self):
+        """The forgiveness above must not blind the check to a real
+        defect: a figure that does not match ANY multiple of the source's
+        360 by a round scale is still an invented number."""
+        from core.services.ai_assist.quality import check_numbers
+        issues = check_numbers(
+            'the co-op raised over $360 million in sales',
+            'la cooperative a genere plus de 36 000 000 $ de ventes',
+        )
+        self.assertTrue(any(i.rule == 'numeric.missing-from-target' for i in issues))
+        self.assertTrue(any(i.rule == 'numeric.absent-from-source' for i in issues))
+
+    def test_an_elided_decade_inherits_its_century(self):
+        """
+        FROM A REAL SUBMISSION: "the 1960s and 70s" correctly translated
+        as "les annees 1960 et 1970" was reported BOTH ways at once --
+        1970 as an invented number (the source only ever spells "70") and
+        70 as a dropped one (a correct, fully-expanded target has no bare
+        70 left for the diff to find). The second decade in a list like
+        this always inherits its century from the first.
+        """
+        from core.services.ai_assist.quality import check_numbers
+        self.assertEqual(check_numbers(
+            'throughout the 1960s and 70s, sovereigntist tests reshaped '
+            'the parades',
+            'tout au long des annees 1960 et 1970, les tests '
+            'souverainistes ont transforme les defiles',
+        ), [])
+
+    def test_an_elided_decade_wrong_century_still_blocks(self):
+        """The century-inheritance forgiveness is anchored to the ACTUAL
+        expanded value appearing in the target -- a mistranslated century
+        is still a real, reportable defect."""
+        from core.services.ai_assist.quality import check_numbers
+        issues = check_numbers(
+            'throughout the 1960s and 70s, things changed',
+            'tout au long des annees 1960 et 2070, les choses ont change',
+        )
+        self.assertTrue(any(i.rule == 'numeric.absent-from-source' for i in issues))
+
+    def test_a_french_approximate_count_noun_is_not_a_changed_number(self):
+        """
+        French idiomatically renders an approximate count with a noun
+        built from the cardinal ("une vingtaine" = about twenty, "une
+        centaine" = about a hundred) rather than repeating the figure.
+        Forgiven the same way a spelled-out cardinal already is -- this
+        list is used only to excuse an apparent mismatch, never to accuse.
+        """
+        from core.services.ai_assist.quality import check_numbers
+        self.assertEqual(check_numbers(
+            '20 people attended the meeting',
+            'une vingtaine de personnes ont assiste a la reunion',
+        ), [])
+        self.assertEqual(check_numbers(
+            'about a hundred volunteers showed up',
+            'une centaine de benevoles se sont presentes',
+        ), [])
+
+    def test_a_bare_monarch_ordinal_is_recognised_as_a_number(self):
+        """
+        FROM A REAL SUBMISSION: "Edward VI" -- a monarch's ordinal written
+        as a bare roman numeral with none of the "e/er/eme" century
+        suffix _ROMAN_ORDINAL_RE demands -- was not recognised as the
+        value 6 at all, because that suffix is how French spells a
+        CENTURY, not how either language numbers a monarch.
+        """
+        from core.services.ai_assist.quality import check_numbers
+        self.assertEqual(check_numbers(
+            'Edward VI signed the decree in 1552',
+            'Edouard 6 a signe le decret en 1552',
+        ), [])
+
+    def test_a_bare_capital_letter_is_not_read_as_a_monarch_ordinal(self):
+        """The monarch pattern requires a preceding name so an unrelated
+        capitalized initial is not misread as a regnal number and used to
+        forgive an unrelated missing figure."""
+        from core.services.ai_assist.quality import check_numbers
+        issues = check_numbers('12 patients enrolled in the trial',
+                                'aucun patient n\'a ete inclus')
+        self.assertTrue(any(i.rule == 'numeric.missing-from-target' for i in issues))
+
     def test_a_dropped_url_is_reported(self):
         from core.services.ai_assist.quality import check_verbatim_tokens
         issues = check_verbatim_tokens(
@@ -10273,6 +10370,89 @@ class QualityDeterministicCheckTestCase(TestCase):
         # "juste" (a real French word) must not collide with "just".
         self.assertEqual(check_common_word_leakage(
             "Je suis désolé, chacun juste après.", 'fr'), [])
+
+    def test_a_fourth_audit_rounds_leaked_words_are_caught(self):
+        """
+        FROM A FOURTH AUDIT ROUND of real submissions (roughly 25
+        documents read start to finish). Each of these leaked bare into
+        an otherwise correctly-translated French sentence, and each was
+        checked for a competing French reading before being added --
+        "museum"/"arctic"/"anthropology"/"resettlement" are near-misses of
+        a real French word (muséum, arctique, anthropologie,
+        réinstallation) that differ from it by an accent or a letter, and
+        the rest have no French cognate at all.
+        """
+        from core.services.ai_assist.quality import check_common_word_leakage
+
+        cases = [
+            "Whether ou non cela se produit.",
+            "La Earth est notre seule planete.",
+            "Here's le probleme avec cette approche.",
+            "Where's-il maintenant, personne ne le sait.",
+            "What's ce que vous en pensez ?",
+            "Brain storming avant la reunion.",
+            "Two des objectifs declares du plan.",
+            "Three exemples suffiront pour ce cours.",
+            "Maybe demain, on verra bien.",
+            "Le Judge a rendu sa decision.",
+            "Le Sailor a quitte le port.",
+            "L'heritage British de ce pays.",
+            "Il travaille pour la City depuis des annees.",
+            "On m'emmenait souvent au Museum local.",
+            "Nevertheless, mon frere adorait cet endroit.",
+            "La relocalisation forcee dans l'Arctic central.",
+            "La Resettlement des ports isoles.",
+            "Apparently, personne n'etait au courant.",
+            "Again et encore, la meme histoire se repete.",
+            "First de tous, il faut se preparer.",
+            "Nobody ne s'attendait a ce resultat.",
+            "We'll voir ce que ca donne.",
+            "Le King a rendu visite au village.",
+            "Les communautes English et les communautes francophones.",
+            "She a explique la situation en detail.",
+            "Nor est-ce vraiment une surprise.",
+            "Can tu m'aider avec ce dossier ?",
+            "Did tu deja visite cet endroit ?",
+            "La cote Northern est plus rude que le sud.",
+            "Stand up et applaudissez bien fort.",
+            "un programme en Anthropology appliquee.",
+        ]
+        for target in cases:
+            issues = check_common_word_leakage(target, 'fr')
+            self.assertTrue(
+                any(i.rule == 'leakage.common-word' for i in issues),
+                f'expected a finding on: {target!r}')
+
+    def test_capitalized_region_leaks_but_lowercase_region_does_not(self):
+        """
+        FROM A REAL SUBMISSION: "Kivillic Region" was left untranslated as
+        "region de Kivillic Region". But lowercase "region" is one accent
+        away from the real French word "region" -- wait, "région" -- and a
+        translator dropping just that one accent in ordinary prose is far
+        more plausible than the same slip on a rarer word like "museum",
+        so this entry is checked case-SENSITIVELY: capital R only.
+        """
+        from core.services.ai_assist.quality import check_common_word_leakage
+
+        self.assertTrue(any(
+            i.rule == 'leakage.common-word' for i in check_common_word_leakage(
+                "maintenant appelee la region de Kivillic Region.", 'fr')))
+        self.assertEqual(check_common_word_leakage(
+            "la region de Kivillic du Nunavut.", 'fr'), [])
+
+    def test_a_real_french_word_does_not_collide_with_the_new_entries(self):
+        """None of the new entries should fire on the correct French word
+        it is one letter or accent away from."""
+        from core.services.ai_assist.quality import check_common_word_leakage
+
+        self.assertEqual(check_common_word_leakage(
+            "Le musee accueille un million de visiteurs par an.", 'fr'), [])
+        self.assertEqual(check_common_word_leakage(
+            "La relocalisation forcee dans l'Arctique central.", 'fr'), [])
+        self.assertEqual(check_common_word_leakage(
+            "Un programme en anthropologie appliquee.", 'fr'), [])
+        self.assertEqual(check_common_word_leakage(
+            "La reinstallation des ports isoles a Terre-Neuve.", 'fr'), [])
 
     def test_united_states_and_its_abbreviation_leak(self):
         from core.services.ai_assist.quality import check_common_word_leakage

@@ -224,6 +224,59 @@ _HALF_QUARTER_SCALE_RE = re.compile(
 )
 _FRACTIONS = {'half': Decimal('0.5'), 'quarter': Decimal('0.25')}
 
+#: "$360 million" = 360000000. A real submission had "360" (the source's
+#: literal digits) reported missing and "360000000" (the target's, once
+#: written out in full as "360 000 000") reported invented, because
+#: extract_numbers only ever sees the bare digit token -- it has no idea
+#: a bare scale WORD sits right next to it. Broader than
+#: _HALF_QUARTER_SCALE_RE above: that one exists for a fraction spelled
+#: entirely in words ("two and a half million"); this one is for a digit
+#: that already IS a figure, riding on one scale word ("$360 million",
+#: "12 thousand", "1.5 billion"). Both directions are exact multiplication
+#: by a round power of ten -- there is no precision question here the way
+#: there is with thirds, so nothing is invented by combining them.
+_DIGIT_SCALE_RE = re.compile(
+    r'([\d][\d,. ]*)\s*(hundred|thousand|million|billion)\b',
+    re.IGNORECASE,
+)
+
+#: French approximate-count nouns: "une vingtaine" (about twenty), "une
+#: trentaine" (about thirty), and so on. These are how French idiomatically
+#: renders an approximate English count ("a dozen", "a score of") and carry
+#: the same base value as the cardinal they are built from -- they are not
+#: exact synonyms of it, but forgiving them the same way spelled-out
+#: cardinals are already forgiven is the right call for the same reason:
+#: this set is used only to excuse an apparent mismatch, never to accuse.
+_FRENCH_APPROX_COUNT_NOUNS = {
+    'huitaine': 8, 'dizaine': 10, 'douzaine': 12, 'quinzaine': 15,
+    'vingtaine': 20, 'trentaine': 30, 'quarantaine': 40,
+    'cinquantaine': 50, 'soixantaine': 60, 'centaine': 100,
+}
+
+#: "the 1960s and 70s": the second decade is written as a bare two digits,
+#: inheriting its century from the first. A translator who correctly
+#: expands it to "1970" produces a value (1970) that never appeared in the
+#: source's literal digits (which only ever spell "70"), and the source's
+#: bare "70" then never appears in a target that expanded it -- so the
+#: SAME correct translation was reported as both an invented 1970 and a
+#: dropped 70, in both directions, on a real submission. Matched only in
+#: the specific "<decade>s and/et <two digits>s" shape: outside a list of
+#: decades, a bare two-digit number has no century to inherit and this
+#: must not guess one.
+_ELIDED_DECADE_RE = re.compile(
+    r'\b(\d{3})0s\b\s*(?:,\s*)?(?:and|et)\s+(\d{2})s\b', re.IGNORECASE,
+)
+
+#: "Edward VI", "Louis XIV": a monarch's ordinal, bare, with none of the
+#: French "e/er/eme" suffix _ROMAN_ORDINAL_RE demands -- that suffix is how
+#: French spells a CENTURY ("le XIXe siecle"), not how either language
+#: numbers a monarch, which is written as a plain trailing numeral in both.
+#: A real submission had "Edward VI" reported as a dropped 6 because the
+#: source's only spelling of the value is this bare roman numeral. Anchored
+#: to "capitalized word immediately followed by the numeral" so a random
+#: capital "I" is not read as one -- a name has to precede it.
+_MONARCH_ORDINAL_RE = re.compile(r"\b[A-ZÀ-Þ][\wà-ÿ'’-]+\s+([IVXLCDM]{1,7})\b")
+
 
 def _roman_value(token: str):
     """Classical Roman numeral to int, or None if it is not one."""
@@ -259,8 +312,16 @@ def spelled_number_values(text: str) -> set:
     for word in _WORD_RE.findall((text or '').lower()):
         if word in _NUMBER_WORDS:
             values.add(Decimal(_NUMBER_WORDS[word]))
+        elif word in _FRENCH_APPROX_COUNT_NOUNS:
+            values.add(Decimal(_FRENCH_APPROX_COUNT_NOUNS[word]))
     # Roman ordinals, which is how French writes a century.
     for match in _ROMAN_ORDINAL_RE.finditer(text or ''):
+        value = _roman_value(match.group(1))
+        if value is not None:
+            values.add(Decimal(value))
+    # "Edward VI", "Louis XIV" -- a bare monarch ordinal, not a century.
+    # See _MONARCH_ORDINAL_RE.
+    for match in _MONARCH_ORDINAL_RE.finditer(text or ''):
         value = _roman_value(match.group(1))
         if value is not None:
             values.add(Decimal(value))
@@ -271,6 +332,22 @@ def spelled_number_values(text: str) -> set:
         whole = Decimal(_NUMBER_WORDS[count_word])
         scale = Decimal(_NUMBER_WORDS[scale_word])
         values.add((whole + _FRACTIONS[fraction_word]) * scale)
+    # "$360 million" -> 360000000, digit riding on a bare scale word. See
+    # _DIGIT_SCALE_RE.
+    for match in _DIGIT_SCALE_RE.finditer(text or ''):
+        digits, scale_word = match.group(1), match.group(2).lower()
+        count = _to_decimal(digits)
+        if count is not None:
+            values.add(count * Decimal(_NUMBER_WORDS[scale_word]))
+    # "the 1960s and 70s" -> also forgive 1970 (what a correct expansion
+    # writes) and 70 (what the source literally spells). See
+    # _ELIDED_DECADE_RE.
+    for match in _ELIDED_DECADE_RE.finditer(text or ''):
+        first_decade = int(match.group(1)) * 10
+        century = (first_decade // 100) * 100
+        second_digits = int(match.group(2))
+        values.add(Decimal(century + second_digits))
+        values.add(Decimal(second_digits))
     return values
 
 
@@ -304,6 +381,65 @@ def _forgive_hour_conversions(
             remaining_missing.remove(value)
             remaining_added.remove(pair)
     return remaining_missing, remaining_added
+
+
+def _forgive_digit_scale_expansions(
+    source: str, missing: List[Decimal], target_values: set,
+) -> List[Decimal]:
+    """
+    "$360 million" in the source, correctly written out in full as
+    "360 000 000" in the target, merges into a SINGLE grouped number under
+    extract_numbers -- there is no separate "360" token left in the target
+    to match against, because writing it out in full was the translator's
+    job. The source's bare 360 then reads as a dropped quantity even
+    though nothing was dropped.
+
+    _DIGIT_SCALE_RE (used in spelled_number_values, above) already forgives
+    the other direction -- the fully-expanded value being reported as
+    INVENTED, since it is not literally present in the source's digits.
+    This is the missing half of the same real bug: the source's bare count
+    also has to stop reading as missing, but only once, and only when the
+    target actually contains the expanded value -- proof the translator
+    legitimately expanded it, not a blanket exemption for every small
+    number that happens to precede a scale word.
+    """
+    remaining = list(missing)
+    for match in _DIGIT_SCALE_RE.finditer(source or ''):
+        base = _to_decimal(match.group(1))
+        if base is None or base not in remaining:
+            continue
+        scale = Decimal(_NUMBER_WORDS[match.group(2).lower()])
+        if base * scale in target_values:
+            remaining.remove(base)
+    return remaining
+
+
+def _forgive_elided_decade_expansions(
+    source: str, missing: List[Decimal], target_values: set,
+) -> List[Decimal]:
+    """
+    The missing half of the same asymmetry _forgive_digit_scale_expansions
+    exists for, on "the 1960s and 70s". spelled_number_values(source)
+    already forgives the target's 1970 from being reported as INVENTED
+    (see _ELIDED_DECADE_RE): the source itself proves 1970 is what "70s"
+    means here. But the source's bare 70 still reads as dropped, because
+    a target that correctly expanded it to "1970" contains no literal 70
+    of its own for the multiset diff to find.
+
+    Only forgiven when the target actually contains the expanded year --
+    the same proof-of-legitimate-expansion guard as the digit-scale case,
+    not a blanket exemption for every bare two-digit number that happens
+    to follow a decade.
+    """
+    remaining = list(missing)
+    for match in _ELIDED_DECADE_RE.finditer(source or ''):
+        first_decade = int(match.group(1)) * 10
+        century = (first_decade // 100) * 100
+        second_digits = Decimal(int(match.group(2)))
+        expanded = Decimal(century) + second_digits
+        if second_digits in remaining and expanded in target_values:
+            remaining.remove(second_digits)
+    return remaining
 
 
 def check_numbers(
@@ -345,6 +481,14 @@ def check_numbers(
     added = [v for v in dict.fromkeys(added) if v not in source_set]
 
     missing, added = _forgive_hour_conversions(missing, added)
+    # "$360 million" -> the source's bare 360 is not a dropped quantity
+    # once the target legitimately writes it out in full as 360 000 000.
+    # See _forgive_digit_scale_expansions.
+    missing = _forgive_digit_scale_expansions(source, missing, target_set)
+    # "the 1960s and 70s" -> the source's bare 70 is not a dropped
+    # quantity once the target legitimately expands it to 1970. See
+    # _forgive_elided_decade_expansions.
+    missing = _forgive_elided_decade_expansions(source, missing, target_set)
 
     issues = []
     if missing:
@@ -784,7 +928,65 @@ _LEAKED_TERMS_RE = {
         # Added from a real submission that leaked all four repeatedly
         # (There's x2, We're x4, Let's x5, Just x3 in one document) --
         # same family as It's/That's/you're above, just not yet covered.
-        r"\bthere['’]s\b|\bwe['’]re\b|\blet['’]s\b|\bjust\b",
+        r"\bthere['’]s\b|\bwe['’]re\b|\blet['’]s\b|\bjust\b|"
+        # Added from a fourth audit round of real submissions, roughly 25
+        # documents read start to finish. Each of these was confirmed
+        # leaking, and each was checked for a competing French reading
+        # before being added:
+        #   - "museum"/"arctic"/"anthropology"/"region"/"resettlement" are
+        #     all near-misses of a real French word (musee/muséum,
+        #     arctique, anthropologie, région, réinstallation) but differ
+        #     from it by an accent or a letter, so the bare English
+        #     spelling is never itself valid French.
+        #   - "british"/"english"/"canadian"/"northern"/"north"/"king" are
+        #     ordinary adjectives/nouns with no French cognate at all
+        #     (britannique, anglais, canadien, nordique/du nord, roi).
+        #   - "city" collides with nothing: French is "cite" or "ville",
+        #     never bare "city". Left in untranslated 4 times in one
+        #     document ("la City", "notable de la City").
+        #   - "two"/"three"/"first"/"again"/"nobody"/"she"/"nor"/"can"/
+        #     "did"/"thank"/"maybe"/"judge"/"sailor"/"brain"/"whether"/
+        #     "earth"/"apparently"/"nevertheless" have no plausible French
+        #     reading either; each was seen leaking bare into otherwise
+        #     correctly-translated French sentences.
+        #   - "here's"/"where's"/"what's"/"we'll" are contractions, same
+        #     family as I'm/I've/It's/That's above.
+        #   - "stand up" is a two-word phrase, kept as one alternative
+        #     rather than two separate word matches.
+        #
+        # DELIBERATELY NOT ADDED, from the same audit round:
+        #   - "Canada's" -- a real leak ("la geographie de Canada's"), but
+        #     "Canada's History" is also the actual name of a real
+        #     magazine correctly left untranslated in the same document.
+        #     A blanket match would misfire on the title. Needs the
+        #     semantic layer, not a blocklist entry.
+        #   - "Court" -- common French word meaning "short"; blocklisting
+        #     it would fire on correct French text constantly.
+        #   - "Germany"/"England"/"London" -- country/city proper nouns
+        #     are a different, much broader family than a short common
+        #     word, and carry their own naming conventions (some texts
+        #     correctly keep a place name in English). Same reasoning
+        #     that already excludes "Germany".
+        #   - "DNA" -- an acronym, not a common word; a different problem
+        #     from the rest of this list.
+        #   - plain "and" -- too generic and too high-volume a false-
+        #     positive risk to add without a narrower shape.
+        r"\bwhether\b|\bearth\b|\bhere['’]s\b|\bwhere['’]s\b|\bwhat['’]s\b|"
+        r"\bbrain\b|\btwo\b|\bthree\b|\bmaybe\b|\bjudge\b|\bsailor\b|"
+        r"\bbritish\b|\bcity\b|\bmuseum\b|\bnevertheless\b|\barctic\b|"
+        r"\bresettlement\b|\bapparently\b|\bagain\b|\bfirst\b|\bnobody\b|"
+        r"\bwe['’]ll\b|\bking\b|\benglish\b|\bshe\b|\bnor\b|\bcan\b|\bdid\b|"
+        r"\bnorthern\b|\bnorth\b|\bthank\b|\bstand up\b|\banthropology\b|"
+        # "Region" is checked case-SENSITIVELY here (capital R only) via an
+        # inline flag override, unlike every other alternative in this
+        # pattern. Lowercase "region" is one accent away from the real
+        # French word "région", and a translator dropping just that one
+        # accent in ordinary running prose is far more plausible than the
+        # same slip on a rarer word like "museum". The real leak that
+        # motivated adding this was always capitalized ("Kivillic
+        # Region"), so restricting to that case loses nothing evidenced
+        # while avoiding a misread of accent-dropped French.
+        r"\b(?-i:Region)\b",
         re.IGNORECASE,
     ),
 }
