@@ -79,10 +79,10 @@ WHAT YOU MUST NOT DO — these cause automatic rejection:
   citation is copied across unchanged.
 - Do not add explanatory notes, translator's notes, or footnotes.
 - Do not introduce square brackets. If the source already contains a
-  bracketed tag such as [inaudible] or [crosstalk], keep it, translated:
-  [inaudible] becomes [inaudible] in French usage, [incompréhensible] where
-  that is what the document uses. Never invent one, and never delete one
-  the source gave you.
+  bracketed tag such as [inaudible], [crosstalk], [foreign] or
+  [background], keep it, translated: [inaudible] becomes [inaudible] in
+  French usage, [incompréhensible] where that is what the document uses.
+  Never invent one, and never delete one the source gave you.
 - Do not add any website, domain name, URL, email address, book title,
   citation or reference that is not already in the text. If the speaker
   describes something without naming it, leave it undescribed. Supplying
