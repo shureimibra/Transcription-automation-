@@ -102,6 +102,7 @@ from .transcription import (
     check_capitalization,
     check_number_rules,
     check_paragraphing,
+    check_punctuation_style,
     check_quote_style,
     check_required_spellings,
     check_speaker_labels,
@@ -152,7 +153,7 @@ __all__ = [
     'check_speaker_labels', 'check_timestamps', 'check_number_rules',
     'check_bracket_tags',
     'check_capitalization', 'check_paragraphing', 'check_quote_style',
-    'check_required_spellings',
+    'check_required_spellings', 'check_punctuation_style',
     'check_speaker_numbering',
     'check_standard_policy', 'ALLOWED_TAGS',
     # prompts

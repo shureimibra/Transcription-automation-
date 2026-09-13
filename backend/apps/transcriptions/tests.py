@@ -13732,6 +13732,51 @@ class TranscriptionStandardTestCase(TestCase):
         )
         self.assertEqual(check_required_spellings(clean), [])
 
+    def test_exclamation_mark_is_flagged(self):
+        """Eagle's General Guidelines' Punctuation section: no exclamation
+        marks, narrow brand-name exception left to the tasker to judge."""
+        from core.services.ai_assist.quality import check_punctuation_style
+        issues = check_punctuation_style("That is incredible! I did not expect that.")
+        self.assertTrue(any(i.rule == 'transcript.exclamation-mark' for i in issues))
+
+    def test_no_exclamation_mark_produces_no_finding_for_that_rule(self):
+        from core.services.ai_assist.quality import check_punctuation_style
+        issues = check_punctuation_style("That is incredible. I did not expect that.")
+        self.assertFalse(any(i.rule == 'transcript.exclamation-mark' for i in issues))
+
+    def test_sentence_initial_so_comma_is_flagged(self):
+        """Eagle's Punctuation section: no comma after a sentence-opening
+        "So." Checked at a real sentence boundary, not mid-sentence."""
+        from core.services.ai_assist.quality import check_punctuation_style
+        issues = check_punctuation_style("We finished the review. So, we moved on to the next step.")
+        self.assertTrue(any(i.rule == 'transcript.so-comma' for i in issues))
+
+    def test_so_comma_is_not_flagged_mid_sentence(self):
+        """"...and so, in the end..." is a real, correctly-placed comma --
+        this rule is about a sentence-OPENING "So," only."""
+        from core.services.ai_assist.quality import check_punctuation_style
+        issues = check_punctuation_style(
+            "We tried every option, and so, in the end, we chose this one."
+        )
+        self.assertFalse(any(i.rule == 'transcript.so-comma' for i in issues))
+
+    def test_punctuation_style_fires_under_either_standard(self):
+        """These are Eagle's general Punctuation rules, not part of the
+        Clean-Read-vs-Verbatim rubric -- both standards get them, same as
+        check_required_spellings and check_quote_style."""
+        from core.services.ai_assist.quality import run_transcript_checks
+        text = (
+            "Male_1:\n"
+            "00:00:01 --> 00:00:05\n"
+            "That is incredible! So, we moved on.\n"
+        )
+        for standard_name in ('edited_verbatim', 'strict_verbatim'):
+            with self.subTest(standard=standard_name):
+                issues = run_transcript_checks(text, standard_name)
+                rules = {i.rule for i in issues}
+                self.assertIn('transcript.exclamation-mark', rules)
+                self.assertIn('transcript.so-comma', rules)
+
     def test_capitalization_still_applies_under_edited_verbatim(self):
         """
         capitalize_sentences is now DECOUPLED from correct_grammar (see

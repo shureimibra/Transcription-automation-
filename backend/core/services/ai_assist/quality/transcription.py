@@ -1186,6 +1186,63 @@ def check_required_spellings(text):
     return []
 
 
+#: Sentence-initial "So," -- General Guidelines' Punctuation section: no
+#: comma after a sentence-opening "So." Matched only at a genuine sentence
+#: boundary (block start, or straight after another sentence's terminal
+#: punctuation) so a mid-sentence "...and so, in the end..." is left alone
+#: -- that comma is a real one, not this rule.
+_SENTENCE_INITIAL_SO_RE = re.compile(r'(?:\A|(?<=[.!?])\s+)[Ss]o,(?=\s)')
+
+#: General Guidelines' Punctuation section: no exclamation marks, with a
+#: named, narrow exception for a brand's own stylized name (its own
+#: example: Yahoo!). This check cannot tell a brand name from genuine
+#: emphasis -- it flags MEDIUM, a backstop a tasker judges, not a CRITICAL
+#: gate, exactly like the informal-word and required-spelling checks above.
+_EXCLAMATION_RE = re.compile(r'!')
+
+
+def check_punctuation_style(text):
+    """
+    Two General Guidelines Punctuation rules with no standard-conditioned
+    exception, so both fire under either standard: no exclamation marks
+    (narrow brand-name exception left to the tasker), no comma after a
+    sentence-initial "So."
+
+    ONE FINDING PER RULE PER DOCUMENT -- matches check_required_spellings
+    and check_capitalization: a document that does either wrongly has one
+    habit to fix, not one finding per instance.
+    """
+    issues = []
+    body = '\n'.join(_prose_blocks(text))
+
+    bang = _EXCLAMATION_RE.search(body)
+    if bang:
+        issues.append(QualityIssue(
+            category=IssueCategory.TYPOGRAPHY, severity=Severity.MEDIUM,
+            problem='An exclamation mark is used.',
+            correction=(
+                'Eagle\'s guideline does not use exclamation marks, except '
+                'for a brand\'s own stylized name (e.g. "Yahoo!"). If this '
+                'one is not that, replace it with a period.'
+            ),
+            target_span=body[max(0, bang.start() - 25):bang.end() + 10].strip()[:60],
+            rule='transcript.exclamation-mark',
+            detector='deterministic',
+        ))
+
+    so_comma = _SENTENCE_INITIAL_SO_RE.search(body)
+    if so_comma:
+        issues.append(QualityIssue(
+            category=IssueCategory.TYPOGRAPHY, severity=Severity.LOW,
+            problem='A sentence-initial "So" is followed by a comma.',
+            correction='Drop the comma after a sentence-opening "So."',
+            target_span=body[max(0, so_comma.start() - 10):so_comma.end() + 20].strip()[:60],
+            rule='transcript.so-comma',
+            detector='deterministic',
+        ))
+    return issues
+
+
 def check_quote_style(text):
     """
     Standard double quotation marks. BOTH standards require this.
@@ -1271,6 +1328,7 @@ def run_transcript_checks(
     issues += check_number_rules(text)
     issues += check_quote_style(text)
     issues += check_required_spellings(text)
+    issues += check_punctuation_style(text)
 
     standard = get_standard(standard_name)
     if standard is not None:
@@ -1307,6 +1365,7 @@ def run_transcript_content_checks(
     issues = list(check_number_rules(text))
     issues += check_quote_style(text)
     issues += check_required_spellings(text)
+    issues += check_punctuation_style(text)
     standard = get_standard(standard_name)
     if standard is not None:
         issues += check_standard_policy(text, standard)
