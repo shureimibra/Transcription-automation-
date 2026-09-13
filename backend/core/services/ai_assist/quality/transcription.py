@@ -470,6 +470,40 @@ _SMALL_DIGIT_RE = re.compile(r'(?<![\d:.\-/A-Za-z])([0-9])(?![\d:.\-/%A-Za-z])')
 _EXPONENT_PHRASE_RE = re.compile(
     r'\bto\s+the(?:\s+(?:minus|negative))?\s*\Z', re.IGNORECASE,
 )
+
+#: A digit inside a spoken mathematical expression, not a count: "2 pi r
+#: equals 1" and "2 pi I" (Euler's identity, read aloud twice in the same
+#: lecture series), "1 over alpha" (a fraction named the way a speaker
+#: says it), "a 3, 4, 5 triangle" (a named Pythagorean triple). Five real
+#: instances across four documents in one lecture series had a digit here
+#: flagged as though it were an ordinary count that needed spelling out --
+#: writing "two pi r" or "one over alpha" garbles the notation being
+#: recited, the same call _EXPONENT_PHRASE_RE already makes for "ten to
+#: the minus six".
+#:
+#: Anchored on the specific math vocabulary next to the digit ("pi", a
+#: digit-over-word fraction shape) or on three digits chained by commas
+#: (a triple), not on "any digit near a letter" -- that would swallow
+#: ordinary prose ("I bought 2 or 3 apples" is not a formula).
+_MATH_NOTATION_RE = re.compile(
+    r'\bpi\b|\d\s+over\s+\w|\w\s+over\s+\d|\d\s*,\s*\d\s*,\s*\d',
+    re.IGNORECASE,
+)
+
+#: Quantifiers that make a following bare scale word an approximation,
+#: not a stated count: "several hundred days" -- the singular counterpart
+#: of the "hundreds of days" plural idiom already exempted below. A real
+#: submission had exactly this flagged as though "hundred" were an
+#: unconverted count; nobody writes "several 100 days".
+#:
+#: DELIBERATELY EXCLUDES "a"/"an". "A million dollars" is the shape the
+#: scale-word exemption above already discusses and leaves un-exempted on
+#: purpose -- "a" reads as the exact count one, not an approximation, and
+#: widening this set to include it would silently reverse that existing,
+#: deliberate call rather than fix the new defect this was written for.
+_APPROXIMATE_QUANTIFIER_RE = re.compile(
+    r'\b(?:some|several|many|few)[\s-]*\Z', re.IGNORECASE,
+)
 _SPELLED_LARGE_RE = re.compile(
     r'\b(' + '|'.join(sorted(_NUMBER_WORDS, key=len, reverse=True)) + r')\b',
     re.IGNORECASE,
@@ -548,6 +582,11 @@ def check_number_rules(text: str) -> List[QualityIssue]:
         before = body[max(0, match.start() - 20):match.start()]
         if _EXPONENT_PHRASE_RE.search(before):
             continue
+        # "2 pi r equals 1", "1 over alpha", "a 3, 4, 5 triangle" -- a
+        # digit inside spoken mathematical notation, not a count. See
+        # _MATH_NOTATION_RE.
+        if _MATH_NOTATION_RE.search(window):
+            continue
         issues.append(QualityIssue(
             category=IssueCategory.TYPOGRAPHY, severity=Severity.MEDIUM,
             problem=(
@@ -584,6 +623,11 @@ def check_number_rules(text: str) -> List[QualityIssue]:
                 r'(?:\d|' + '|'.join(_NUMBER_WORDS) + r')[\s-]*\Z',
                 before, re.IGNORECASE,
             ):
+                continue
+            # "several hundred days" -- the singular counterpart of the
+            # "hundreds of days" plural idiom exempted above. See
+            # _APPROXIMATE_QUANTIFIER_RE for why "a"/"an" stay excluded.
+            if _APPROXIMATE_QUANTIFIER_RE.search(before):
                 continue
         issues.append(QualityIssue(
             category=IssueCategory.TYPOGRAPHY, severity=Severity.MEDIUM,

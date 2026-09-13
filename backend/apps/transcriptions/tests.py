@@ -13407,6 +13407,75 @@ class TranscriptionStandardTestCase(TestCase):
                  check_number_rules('There were fifty million Hispanics counted.')}
         self.assertIn('transcript.number-large-as-word', rules)
 
+    def test_an_approximate_scale_word_is_not_spelled_out(self):
+        """
+        FROM A REAL SUBMISSION: "several hundred days" and, separately in
+        another document, "several hundred thousand pounds" flagged
+        "hundred" as an unconverted count. It is not -- "several" makes
+        this the singular counterpart of the "hundreds of days" plural
+        idiom, which was already exempt; nobody writes "several 100
+        days".
+        """
+        from core.services.ai_assist.quality import check_number_rules
+        for text in (
+            'That is equivalent to several hundred days.',
+            'I will settle on several hundred thousand pounds for this one.',
+            'Some hundred volunteers showed up.',
+            'It has happened many thousand times before.',
+        ):
+            with self.subTest(text=text):
+                rules = {i.rule for i in check_number_rules(text)}
+                self.assertNotIn('transcript.number-large-as-word', rules)
+
+    def test_a_million_after_the_article_a_still_fires(self):
+        """
+        THE DISTINCTION THE FIX ABOVE MUST NOT ERASE. "a"/"an" are
+        deliberately excluded from the approximate-quantifier set: "a
+        million dollars" reads as the exact count one million, not an
+        approximation, and this is the existing, pre-fix behaviour the
+        scale-word exemption already documented on purpose. Confirmed on
+        a real submission where "a billion pounds" was flagged and left
+        that way.
+        """
+        from core.services.ai_assist.quality import check_number_rules
+        for text in ('It cost a billion pounds.', 'She raised a million dollars.'):
+            with self.subTest(text=text):
+                rules = {i.rule for i in check_number_rules(text)}
+                self.assertIn('transcript.number-large-as-word', rules)
+
+    def test_a_digit_inside_spoken_math_notation_is_not_a_count(self):
+        """
+        FROM FIVE REAL INSTANCES across four documents in one lecture
+        series: "2 pi r equals 1" and "2 pi I" (Euler's identity, read
+        aloud), "1 over alpha" (a fraction named the way a speaker says
+        it), and "a 3, 4, 5 triangle" (a named Pythagorean triple) all had
+        a digit flagged as an ordinary count needing to be spelled out.
+        Writing "two pi r" or "one over alpha" garbles the notation being
+        recited -- the same call _EXPONENT_PHRASE_RE already makes for
+        "ten to the minus six".
+        """
+        from core.services.ai_assist.quality import check_number_rules
+        for text in (
+            'You write 2 pi I, and you get the value.',
+            'A radius is 2 pi r, you cancel the r, and you get pie.',
+            'some analog of Eulers formula with 2 pi r equals 1.',
+            'Sometimes people write 1 over alpha, it does not matter.',
+            'It is a 3, 4, 5 triangle. That is 100%.',
+        ):
+            with self.subTest(text=text):
+                rules = {i.rule for i in check_number_rules(text)}
+                self.assertNotIn('transcript.number-small-as-figure', rules,
+                                  f'expected no finding on: {text!r}')
+
+    def test_an_ordinary_count_near_math_words_still_fires(self):
+        """The math-notation exemption must not blind the check to a real
+        one: an ordinary spoken count is still a real violation even when
+        a word like "over" happens to be nearby for an unrelated reason."""
+        from core.services.ai_assist.quality import check_number_rules
+        issues = check_number_rules('I saw 7 dogs in the park today.')
+        self.assertTrue(any(
+            i.rule == 'transcript.number-small-as-figure' for i in issues))
+
     def test_a_citation_is_recognised_even_split_across_a_block_boundary(self):
         """
         A REAL, PRE-EXISTING BUG, UNRELATED TO THIS SESSION'S OTHER FIXES:
