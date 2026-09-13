@@ -164,6 +164,31 @@ Unless told otherwise, we work to **edited verbatim**:
 > be word-for-word. **Do not switch standards on your own judgement.** Your
 > administrator sets it.
 
+### The required accuracy check
+
+Before you can submit, there is one more step — a card labeled **Accuracy
+check**, between the speaker list and the transcript.
+
+1. Click **Copy accuracy check**. It copies a prompt together with the
+   transcript, ready to paste into your own AI assistant.
+2. Paste it in, read what comes back, and check anything it flags against
+   the audio through the normal editing above — it has never heard this
+   recording, so treat what it says as leads, not verdicts.
+3. Paste what it found into the box under **What your assistant found**,
+   and press **Save accuracy check**.
+
+> **This is required, not optional.** Submit stays blocked — a critical
+> finding reading *"Copy the accuracy-check prompt, run it through your own
+> assistant, and paste back what it found before submitting"* — until this
+> is saved once per task. It comes after every editing tool above and
+> before Preview: one more pass, not a replacement for listening to the
+> audio yourself.
+
+What it actually buys: a hand-maintained rule only catches what this
+platform has already been taught to look for. Your own assistant, reading
+the real subject matter of *this* recording, catches the specific name or
+term nobody wrote a rule for yet.
+
 ---
 
 ## 7. Translation tasks
@@ -280,6 +305,9 @@ free.
 - **Release** anything you cannot finish
 - **Submit on time.** Good-enough submitted beats perfect late
 - **Fix the specific thing flagged**, then re-check
+- **Run the accuracy check on transcription tasks.** Copy → your own
+  assistant → paste back → save — it is required, not optional; Submit
+  stays blocked without it
 - **Tell your administrator** about a task that will not process, an
   audio that will not play, or minutes running out
 
@@ -308,6 +336,7 @@ free.
 | Task vanished from the queue | Someone else took it — on our side or on Eagle | Normal. Pick another |
 | Claim says not enough minutes | Account balance too low | Tell your administrator |
 | Preview shows an error | Not ready to submit | Read the message; usually the translation did not finish |
+| "self-check-not-completed", Submit blocked | The accuracy/polish check has not been saved yet | Copy the prompt into your own assistant, paste back what it found, and save it |
 | Deadline nearly up | — | Submit what you have, now |
 
 A task disappearing is normal and constant. Eagle's pool is shared with
