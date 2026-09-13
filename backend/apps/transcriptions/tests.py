@@ -13368,6 +13368,43 @@ class TranscriptionStandardTestCase(TestCase):
             self._rules(text, 'edited_verbatim'),
         )
 
+    def test_the_noun_cause_is_not_slang_after_a_determiner_or_before_of_for(self):
+        """
+        THE SAME AMBIGUITY, A SECOND SHAPE THE MODAL/INFINITIVE LIST DIDN'T
+        COVER: "cause" as an ordinary noun -- "the cause of the accident",
+        "no cause for alarm", "the root cause", "a just cause". Confirmed
+        these were flagged as informal '"cause"-for-"because"' before this
+        fix, same root cause (no pun intended) as the verb-form bug: the
+        bare "cause" spelling is shared with the real conjunction.
+        """
+        for phrase in (
+            'the cause of the accident is still unknown',
+            'there is no cause for alarm here',
+            'the root cause was never actually found',
+            'that was a just cause worth fighting for',
+            'we studied the probable cause of the failure',
+        ):
+            with self.subTest(phrase=phrase):
+                text = (
+                    'Male_1:\n[00:00:00.000 --> 00:00:09.000]\n'
+                    + (phrase + '. ') * 20 + '\n'
+                )
+                rules = self._rules(text, 'edited_verbatim')
+                self.assertNotIn('transcript.slang-not-standardized', rules)
+
+    def test_a_genuine_because_cause_still_fires_beside_a_noun_use(self):
+        """The noun-form exclusion must not swallow a real 'cause sitting
+        in the same document as the noun."""
+        text = (
+            'Male_1:\n[00:00:00.000 --> 00:00:09.000]\n'
+            + ('We found the cause of the delay, cause nobody had checked. ') * 20
+            + '\n'
+        )
+        self.assertIn(
+            'transcript.slang-not-standardized',
+            self._rules(text, 'edited_verbatim'),
+        )
+
     def test_speaker_labels_must_be_gender_numbered_under_both(self):
         text = self.GOOD_EDITED.replace('Male_1:', 'THE COURT:')
         for standard in ('edited_verbatim', 'strict_verbatim'):
@@ -13560,6 +13597,29 @@ class TranscriptionStandardTestCase(TestCase):
             'some analog of Eulers formula with 2 pi r equals 1.',
             'Sometimes people write 1 over alpha, it does not matter.',
             'It is a 3, 4, 5 triangle. That is 100%.',
+        ):
+            with self.subTest(text=text):
+                rules = {i.rule for i in check_number_rules(text)}
+                self.assertNotIn('transcript.number-small-as-figure', rules,
+                                  f'expected no finding on: {text!r}')
+
+    def test_alphanumeric_notation_is_not_a_spoken_count(self):
+        """
+        _SMALL_DIGIT_RE excludes a digit directly touching a letter, either
+        side, with no space -- CONFIRMED ALREADY LIVE (commit 47f4cfd), but
+        with no dedicated regression test anywhere before this one. FROM A
+        REAL 19-DOCUMENT REVIEW, five separate confirmed instances: musical
+        pitch (E4, A3), dimensional shorthand (3D), variable/identifier
+        labels (K1, K2), and an exponent phrase (10 to the minus 6, via
+        _EXPONENT_PHRASE_RE) all had the bare digit flagged as an
+        unconverted spoken count before this exemption existed.
+        """
+        from core.services.ai_assist.quality import check_number_rules
+        for text in (
+            'The note E4 was played, then A3, in that same measure.',
+            'We modeled it in 3D space for the demonstration today.',
+            'Let K1 and K2 denote the two constants used throughout.',
+            'The result is on the order of 10 to the minus 6, small.',
         ):
             with self.subTest(text=text):
                 rules = {i.rule for i in check_number_rules(text)}

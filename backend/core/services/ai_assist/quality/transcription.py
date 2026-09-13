@@ -741,9 +741,31 @@ _CAUSE_VERB_PRECEDERS = (
     'to ', 'will ', 'would ', 'can ', 'could ',
     'may ', 'might ', 'must ', 'should ', 'shall ',
 )
+#: The SAME ambiguity has a second, more common shape this list didn't
+#: cover: "cause" as an ordinary NOUN ("the cause of the accident", "no
+#: cause for alarm", "the root cause", "a just cause"). Confirmed live:
+#: check_standard_policy flagged every one of these as informal before
+#: this list existed. The conjunction "'cause" is never preceded by a
+#: determiner or a noun-modifying adjective either -- "he left, the
+#: 'cause nobody agreed" is not English -- so the same exclusion
+#: mechanism as the verb form closes this off too.
+_CAUSE_NOUN_PRECEDERS = (
+    'the ', 'a ', 'an ', 'no ', 'any ', 'some ', 'this ', 'that ',
+    'these ', 'those ', 'its ', 'his ', 'her ', 'their ', 'our ', 'my ',
+    'your ', 'root ', 'main ', 'real ', 'true ', 'actual ', 'likely ',
+    'possible ', 'probable ', 'underlying ', 'primary ', 'leading ',
+    'exact ', 'just ', 'good ', 'common ', 'proximate ',
+)
+#: And the noun reads just as reliably the other direction: "cause OF"
+#: and "cause FOR" are essentially always the noun ("cause of death",
+#: "cause for alarm/concern/celebration") -- the conjunction "'cause" is
+#: never itself followed by "of" or "for".
+_CAUSE_NOUN_FOLLOWERS_RE = r'(?!\s+(?:of|for)\b)'
 _SLANG_RE = re.compile(
     r'\b(' + '|'.join(k for k in _SLANG if k != 'cause') + r')\b'
-    r'|' + ''.join(f'(?<!{w})' for w in _CAUSE_VERB_PRECEDERS) + r'\bcause\b',
+    r'|' + ''.join(
+        f'(?<!{w})' for w in _CAUSE_VERB_PRECEDERS + _CAUSE_NOUN_PRECEDERS
+    ) + r'\bcause\b' + _CAUSE_NOUN_FOLLOWERS_RE,
     re.IGNORECASE,
 )
 
