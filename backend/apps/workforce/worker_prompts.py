@@ -197,21 +197,38 @@ STRUCTURE:
 
 _POLISH = """\
 You are a professional {target} translator preparing a document for
-submission to a transcription and translation marketplace. The text below
-is a machine-produced {target} translation of an {source} audio transcript.
-Your job is to bring it to professional publication standard.
+submission to a transcription and translation marketplace. Below is the
+{source} source, then a machine-produced {target} translation of it. Your
+job is to bring the {target} translation to professional publication
+standard AND make it actually match what the {source} source says.
+
+READ THE WHOLE OF BOTH DOCUMENTS BEFORE REWRITING. A dropped sentence, a
+wrong number, or a term that reads perfectly well in {target} but means
+the wrong thing are only visible next to the source -- none of them look
+wrong if you only ever read the {target} text on its own.
 
 {must_not}
 
 {what_to_fix}
 
+RESEARCH EVERY PROPER NAME, CASE CITATION, STATUTE AND INSTITUTION. Where
+one is garbled or unfamiliar, a moment's research usually identifies what
+it almost certainly is -- use the correct form rather than transcribing
+the corruption or guessing. If you genuinely cannot identify it, leave it
+exactly as the source states it rather than inventing a plausible-looking
+substitute.
+
 {typography}
 
 {structure}
 
-Reply with the corrected {target} text only.
+Reply with the corrected {target} text only -- nothing else: no source
+text, no commentary, no note about what you changed.
 
-Here is the text:
+--- SOURCE ({source}) ---
+{source_text}
+
+--- TRANSLATION ({target}) ---
 """
 
 _TRANSLATE = """\
@@ -297,7 +314,11 @@ that cost a submission:
   7. Anything that reads as translated rather than written. Literal
      renderings of idioms, and phrases a native speaker would not say.
 
-If you find nothing at all, reply with the single word: CLEAN.
+If you find nothing at all, reply with exactly two things and nothing
+else: the word CLEAN alone on the first line, then the {target}
+translation exactly as given above, unchanged, starting on the next
+line -- so there is something ready to paste back either way, not just
+a verdict.
 
 --- SOURCE ({source}) ---
 {source_text}
@@ -316,9 +337,17 @@ def build(source_language: str, target_language: str, source_text: str = '') -> 
     """
     The three prompts for this task, ready to paste.
 
-    `review` embeds the source, because a comparison needs both documents
-    and a worker pasting two blocks in the right order is a step that goes
-    wrong. The other two are headers the worker pastes their text under.
+    `polish` and `review` both embed the source now, because a defect
+    class neither can see without it -- a dropped sentence, a wrong
+    number, a term that reads fine in {target} but means something the
+    source never said -- is invisible from the {target} text alone,
+    whether the assistant is fixing it (polish) or only reporting it
+    (review). See docs/TRANSLATION_POLISH_PROMPT.md's "Why the source is
+    embedded now" section for the real document this was confirmed
+    against: 3 of 38 real defects survived a source-blind polish pass, and
+    all 3 trace to exactly this gap. `translate` is the one prompt that
+    never had a "target text to compare" problem in the first place, since
+    its whole job starts from the source.
     """
     source = _language(source_language, 'English')
     target = _language(target_language, 'the target language')
@@ -334,11 +363,13 @@ def build(source_language: str, target_language: str, source_text: str = '') -> 
             target, _TYPOGRAPHY_DEFAULT.format(**parts)),
         'structure': _STRUCTURE,
     }
+    cleaned_source_text = (source_text or '').strip()
     return {
         'translate': _TRANSLATE.format(**parts, **sections),
-        'polish': _POLISH.format(**parts, **sections),
-        'review': _REVIEW.format(source_text=(source_text or '').strip(),
-                                 **parts, **sections),
+        'polish': _POLISH.format(
+            source_text=cleaned_source_text, **parts, **sections),
+        'review': _REVIEW.format(
+            source_text=cleaned_source_text, **parts, **sections),
     }
 
 

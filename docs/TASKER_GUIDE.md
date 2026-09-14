@@ -205,20 +205,31 @@ deliverable is prose. That is correct, not a bug.
 2. **Play the audio and follow along.** The English and French sit side by
    side and the current line is highlighted. You are listening for one
    thing: does the English match what you hear?
-3. **Copy the body text** (not the header — the platform owns that).
-4. **Open `TRANSLATION_POLISH_PROMPT.md`**, copy the prompt, paste it into
-   your own Gemini, then paste the French underneath it.
-5. **Copy the result back** into the platform and save.
+3. **Press `Copy prompt + translation`** (or `Copy a check instead` if the
+   draft already looks fine — see below). One click copies the whole
+   thing — the prompt, the English source and the French draft, all
+   correctly ordered — nothing to open, find, or assemble by hand.
+4. **Paste it into your own assistant** (Gemini or similar).
+5. **Paste what comes back** into the Polished French box and save.
 6. **Let the check run.** It will flag problems.
 7. **Fix what is flagged**, then preview and submit.
+
+`Copy prompt + translation` rewrites the French, against Eagle's rules and
+against the actual English — it now sees both, so it can restore a
+dropped sentence or a wrong term, not just fix fluency. `Copy a check
+instead` never rewrites; it only reports problems (or replies CLEAN, and
+hands back the draft unchanged either way, ready to save). Use check when
+you already suspect the draft is fine and just want a second opinion; use
+polish when you know it needs real work.
 
 ### When the ENGLISH is wrong
 
 This is the case that catches people out. If you hear the speaker say
 "Kuwait" and the English line says "Kuwara", the French will have inherited
 that mistake — it will confidently say the wrong thing. **Polishing the
-French cannot fix it.** Your assistant only ever sees the French and has no
-way to know it is wrong.
+French cannot fix it**, even now that your assistant sees the English too
+— it corrects the French to match what the source says, not what the
+speaker actually said, and the source itself is what's wrong here.
 
 The repair has to happen upstream:
 
@@ -236,8 +247,12 @@ French is not worth the minutes.
 
 ### Splitting a long one
 
-A 20-minute task is about 3,900 words. If your assistant truncates or
-stalls, split the text in half:
+A 20-minute task is about 3,900 words of English — and since
+`Copy prompt + translation` and `Copy a check instead` both now paste the
+English and French together, the actual paste is roughly double that.
+That size alone is not the risk — it is well within what any current
+assistant accepts. What can still happen on a long task is the *reply*
+stalling or trailing off. If that happens, split the text in half:
 
 - Split **at a paragraph break**, never mid-sentence
 - No overlap, no gap — the second half starts exactly where the first ended
@@ -251,13 +266,18 @@ These are mechanical. They do not need anyone to read French:
 | Flag | What happened |
 |---|---|
 | **Numbers do not match** | A figure in the French is not in the English. **Blocks submission.** |
+| **Corrupted text** | Accented letters garbled by a broken copy-paste (é → Ã©). **Also blocks submission** — invisible to every other check, and often to you too if you don't read French. |
 | English text remaining | Something was not translated |
+| A URL, email or identifier changed | These are never translated; the French must match the English exactly |
+| A web address not in the source | Your assistant supplied one that sounds plausible but the speaker never said |
 | Length anomaly | A paragraph was dropped, or padded out |
 | Repeated paragraph | The assistant looped |
 | Commentary detected | A "Here is the corrected version" line got pasted in |
 | Decimal point | `3.14` should be `3,14` — a French reader reads a point as a thousands separator, so this changes the number |
-| Straight quotes | Should be `« … »` |
+| Straight quotes / apostrophes | Should be `« … »` and `’`, not `"..."` or `'` |
 | `50%` | French writes `50 %` |
+| Spellchecker damage | An English spellchecker altered a French word (`dont` → `don't`) |
+| tu/vous mixed | The document addresses its audience both ways partway through |
 
 **Numbers is the serious one.** It is the only check that blocks outright,
 and it is what an assistant most often breaks — turning "one" into "1", or

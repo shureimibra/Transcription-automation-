@@ -192,6 +192,44 @@ class WorkerPromptTestCase(TestCase):
         self.assertIn('2. Untranslated English.', review)
         self.assertIn('3. Inventions.', review)
 
+    def test_the_polish_prompt_now_carries_the_source_too(self):
+        """
+        THE GAP A REAL SIDE-BY-SIDE COMPARISON EXPOSED: a document polished
+        with the OLD, source-blind prompt still had a dropped sentence and
+        a proper name normalized to the wrong one of two forms the source
+        actually used at different points -- both invisible from reading
+        the French alone, both only catchable next to the source. Polish
+        gets the same source-embedding review already had.
+        """
+        polish = self.prompts['polish']
+        self.assertIn('16 and 2 thirds percent', polish)
+        self.assertIn('SOURCE (English)', polish)
+
+    def test_the_polish_prompt_asks_for_name_research(self):
+        """
+        THE OTHER HALF OF THE SAME REAL COMPARISON: a corrupted case name
+        ("St Edmund and St Edmund", almost certainly "Steadman and
+        Steadman") survived a polish pass unresearched. Source-awareness
+        alone would not have fixed this one -- it needed the explicit
+        instruction to research rather than transcribe a corruption,
+        borrowed from the review prompt's own equivalent rule.
+        """
+        polish = self.prompts['polish']
+        self.assertIn('RESEARCH EVERY PROPER NAME', polish)
+
+    def test_a_clean_check_hands_back_something_to_paste(self):
+        """
+        THE OTHER HALF OF THE PROBLEM THIS SESSION SURFACED: a worker
+        reading "CLEAN" had nowhere to get the draft back from except
+        asking their assistant a second, separate question, or copying it
+        by hand from the on-screen table. The instruction now asks for
+        both in one reply.
+        """
+        review = self.prompts['review']
+        self.assertIn('CLEAN', review)
+        self.assertIn('unchanged', review)
+        self.assertIn('ready to paste back either way', review)
+
     def test_nothing_may_be_reordered_however_much_is_rewritten(self):
         """
         The prompts ask for fluency rewriting, which is the whole point of
@@ -208,11 +246,17 @@ class WorkerPromptTestCase(TestCase):
     def test_the_prompts_end_where_the_worker_pastes(self):
         # The text is appended by the caller, so each prompt has to finish
         # on its handover line rather than trailing off mid-sentence.
-        for name in ('translate', 'polish'):
-            self.assertTrue(self.prompts[name].rstrip().endswith('Here is the text:'),
-                            f'{name} does not end at the paste point')
-        self.assertTrue(
-            self.prompts['review'].rstrip().endswith('--- TRANSLATION (French) ---'))
+        # `translate` starts from the source and pastes the source itself
+        # under a plain header; `polish` and `review` both now carry the
+        # source embedded IN the prompt (see build's own docstring), so
+        # both end on the same "--- TRANSLATION ---" handover line -- only
+        # the French gets appended by the caller either way.
+        self.assertTrue(self.prompts['translate'].rstrip().endswith('Here is the text:'),
+                        'translate does not end at the paste point')
+        for name in ('polish', 'review'):
+            self.assertTrue(
+                self.prompts[name].rstrip().endswith('--- TRANSLATION (French) ---'),
+                f'{name} does not end at the paste point')
 
     def test_an_unmapped_language_still_produces_something_usable(self):
         prompts = worker_prompts.build('en', 'xx')

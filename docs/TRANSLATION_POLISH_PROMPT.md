@@ -9,9 +9,12 @@ That draft is good but not final. Closing the last gap on our own API would
 cost more per month than the whole operation earns, so that step is yours —
 and it is the reason a task takes twenty minutes rather than five.
 
-**How to use it:** copy everything between the two `====` lines, paste it
-into a new chat, then paste the French body underneath it. Full step-by-step
-in `TASKER_GUIDE.md`.
+**How to use it:** on the actual screen, press **Copy prompt + translation**
+— it copies this prompt with your task's real English source and French
+draft already built in, ready to paste as one block. The version below is
+the same prompt with placeholders where that real text goes, kept here so
+the wording itself is reviewable outside the app. Full step-by-step in
+`TASKER_GUIDE.md`.
 
 ---
 
@@ -20,9 +23,15 @@ in `TASKER_GUIDE.md`.
 ```
 ====================== COPY FROM HERE ======================
 You are a professional French translator preparing a document for
-submission to a transcription and translation marketplace. The text below
-is a machine-produced French translation of an English audio transcript.
-Your job is to bring it to professional publication standard.
+submission to a transcription and translation marketplace. Below is the
+English source, then a machine-produced French translation of it. Your
+job is to bring the French translation to professional publication
+standard AND make it actually match what the English source says.
+
+READ THE WHOLE OF BOTH DOCUMENTS BEFORE REWRITING. A dropped sentence, a
+wrong number, or a term that reads perfectly well in French but means the
+wrong thing are only visible next to the source — none of them look wrong
+if you only ever read the French text on its own.
 
 WHAT YOU MUST NOT DO — these cause automatic rejection:
 - Do not add any commentary, preamble, heading, or closing remark.
@@ -113,6 +122,13 @@ WHAT TO FIX:
    "a₀ + a₁z + a₂z² + ...", not a wall of French words. Use superscripts,
    subscripts and symbols like "x²" and "H₂O"; never LaTeX or markup.
 
+RESEARCH EVERY PROPER NAME, CASE CITATION, STATUTE AND INSTITUTION. Where
+one is garbled or unfamiliar, a moment's research usually identifies what
+it almost certainly is — use the correct form rather than transcribing
+the corruption or guessing. If you genuinely cannot identify it, leave it
+exactly as the source states it rather than inventing a plausible-looking
+substitute.
+
 FRENCH TYPOGRAPHY — apply all of these:
 - Narrow non-breaking space before ; : ! and ?
 - Guillemets with inner spacing for quotations: « comme ceci »
@@ -131,9 +147,14 @@ STRUCTURE:
   paragraphs. Do not merge everything into one block and do not add
   headings that are not in the input.
 
-Reply with the corrected French text only.
+Reply with the corrected French text only — nothing else: no source text,
+no commentary, no note about what you changed.
 
-Here is the text:
+--- SOURCE (English) ---
+[the task's real English source goes here]
+
+--- TRANSLATION (French) ---
+[the task's real French draft goes here]
 ======================= COPY TO HERE ========================
 ```
 
@@ -208,11 +229,62 @@ the domain from the document and apply that field's conventions** — which is
 the same approach the platform's own quality engine takes: domain is
 discovered per document, never hardcoded.
 
+## Why the source is embedded now — a real side-by-side comparison
+
+Older versions of this prompt gave the assistant only the French, on the
+reasoning that a fluency/terminology polish is a French-language problem.
+It is not, entirely: a real polish pass was compared line-by-line against
+the same document's check-prompt findings (which has always carried the
+source), and the comparison found real, structural blind spots — 35 of 38
+flagged issues were fixed cleanly, but the 3 that were not all trace to
+the same cause:
+
+- **A dropped identifying phrase** ("in the mid-1970s, the House of Lords
+  ...") survived the polish pass untouched. There was nothing wrong with
+  the French sentence on its own — it read fine — so a source-blind
+  assistant had no way to notice a clause was simply missing.
+- **A statute cited in two different forms** at two different points in
+  the source ("Succession Law Reform Act" and "Successional Reform Act")
+  was normalized to one form throughout — plausible on its own, but wrong
+  at the specific occurrence that used the other form, because nothing
+  in the French alone could say which form belonged where.
+- **A corrupted case name** ("St Edmund and St Edmund", almost certainly
+  Steadman v Steadman, an actual House of Lords case) survived unresearched
+  — the missing RESEARCH EVERY PROPER NAME instruction above, not the
+  missing source, though having the source is what makes a corrupted name
+  worth researching in the first place rather than reading as ordinary
+  prose.
+
+None of these are catchable by making the polish instructions stricter
+about French alone — they are only visible next to the source, which is
+exactly the class of defect the check prompt has always been built to
+catch (`docs/TRANSLATION_POLISH_PROMPT.md`'s sibling, the review prompt,
+already embedded the source for this reason). Polish now gets the same
+treatment: same source-embedding, plus the same instruction to research a
+garbled or unfamiliar name rather than transcribing the corruption.
+
+The review/check prompt changed too, in one more way: on a clean document
+it used to reply with only the word CLEAN, which left a worker with
+nothing to paste back except by asking their assistant a second, separate
+question. It now replies with CLEAN plus the translation, unchanged,
+ready to paste straight into the Polished French box either way.
+
 ## Long documents
 
-A twenty-minute task is roughly **3,900 words / 23,000 characters**. If your
-assistant truncates or slows down, split the body in half and run the prompt
-twice, then join the two outputs with a blank line between them.
+A twenty-minute task is roughly **3,900 words of English**, and French
+usually runs 10-20% longer for the same content — so the polish/review
+paste, now carrying both languages, is roughly **8,000-9,000 words**
+total. That is not actually the risk it sounds like: it is the same size
+the review/check prompt has always sent (it has always embedded the
+source), and it is a small fraction of any current assistant's context
+window — an outright "too long, rejected" input is not a realistic
+failure mode at this size.
+
+What can still happen is the REPLY stalling or truncating on a very long
+single-turn request — and the reply is still just the French, unchanged
+in size by any of this. If that happens, split the body in half and run
+the prompt twice, then join the two outputs with a blank line between
+them.
 
 Split **at a paragraph break**, never mid-sentence, and make sure the second
 half starts where the first ended — no overlap and no gap. Terminology

@@ -143,8 +143,11 @@ export default function TranslationWorkspace({ task, onTaskChange }) {
     const text = kind === 'translate'
       ? (data?.source || []).map((row) => row.text).filter(Boolean).join('\n\n')
       : body;
-    // `review` already carries the English inside it, so it needs only the
-    // French appended -- pasting two blocks in the right order by hand is a
+    // `polish` and `review` BOTH already carry the English inside them now
+    // -- a defect class neither could see without it (a dropped sentence,
+    // a wrong number, a term that reads fine but means the wrong thing) is
+    // invisible from the French alone. Either way only the French needs
+    // appending here -- pasting two blocks in the right order by hand is a
     // step that goes wrong.
     const payload = prompt ? `${prompt}${text}` : text;
     if (!payload.trim()) {
@@ -154,9 +157,16 @@ export default function TranslationWorkspace({ task, onTaskChange }) {
     try {
       await navigator.clipboard.writeText(payload);
       setCopied(kind);
-      setNotice(kind === 'review'
-        ? 'Prompt and both versions copied. Your assistant will reply CLEAN if it finds nothing.'
-        : 'Prompt and text copied. Paste it straight into your assistant.');
+      setNotice(
+        kind === 'review'
+          ? 'Prompt, English and French copied. Your assistant will reply '
+            + 'CLEAN plus the draft ready to paste back if it finds '
+            + 'nothing, or a list of fixes if it does.'
+          : kind === 'polish'
+            ? 'Prompt, English and French copied. Paste it straight into '
+              + 'your assistant.'
+            : 'Prompt and text copied. Paste it straight into your assistant.'
+      );
       setTimeout(() => setCopied(false), 2500);
     } catch {
       // Clipboard can be refused. The text is on screen and selectable, so

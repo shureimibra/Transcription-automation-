@@ -193,9 +193,12 @@ const SECTIONS = [
           is actually said?
         </li>
         <li>
-          Press <Btn>Copy prompt + translation</Btn>. This copies the review
-          prompt AND the French together, ready to paste — you do not need a
-          prompt of your own, and you should not write one.
+          Press <Btn>Copy prompt + translation</Btn>. This copies the polish
+          prompt together with the English source AND the French, ready to
+          paste — you do not need a prompt of your own, and you should not
+          write one. Your assistant sees both languages, so it can restore a
+          dropped sentence or a wrong term, not just tidy the French in
+          isolation.
         </li>
         <li>Paste it into your own assistant (Gemini or similar).</li>
         <li>
@@ -251,16 +254,30 @@ const SECTIONS = [
     id: 'check-instead',
     label: 'Scenario: the draft already looks right',
     body: (
-      <P>
-        Use <Btn>Copy a check instead</Btn> rather than the polish button. It
-        asks your assistant to compare the French against the English and
-        report problems — it replies <Btn>CLEAN</Btn> if it finds nothing,
-        rather than rewriting a translation that did not need it. Asking an
-        assistant to “polish” a document that is already fine tends to
-        produce changes for the sake of changes; asking it to check gives you
-        a second opinion you can weigh against what the platform’s own gate
-        found.
-      </P>
+      <>
+        <P>
+          Use <Btn>Copy a check instead</Btn> rather than the polish button. It
+          asks your assistant to compare the French against the English and
+          report problems, never to rewrite. Asking an assistant to “polish”
+          a document that is already fine tends to produce changes for the
+          sake of changes; asking it to check gives you a second opinion you
+          can weigh against what the platform’s own gate found.
+        </P>
+        <P>
+          If it finds nothing, it replies with the word <Btn>CLEAN</Btn> on
+          its own first line, then the French translation, unchanged, right
+          below it — so there is always something ready to paste back,
+          whether or not anything needed fixing. Paste only the part{' '}
+          <strong className="text-ink">below</strong> the CLEAN line into
+          Polished French — the word CLEAN itself is a verdict for you to
+          read, not French text to submit, and pasting it in as-is would show
+          up as a stray English word on the checks. If it finds real
+          problems instead, you have its list — either ask the same
+          assistant to now give you the corrected French incorporating
+          exactly those fixes, or switch to <Btn>Copy prompt + translation</Btn>{' '}
+          and let the polish prompt do that in one step.
+        </P>
+      </>
     ),
   },
   {
@@ -314,9 +331,14 @@ const SECTIONS = [
     body: (
       <>
         <P>
-          A 20-minute task is roughly 3,900 words. If your assistant
-          truncates its reply or stalls, split the text in half rather than
-          fighting with a single giant paste.
+          A 20-minute task is roughly 3,900 words of English, and both
+          <Btn>Copy prompt + translation</Btn> and <Btn>Copy a check instead</Btn>{' '}
+          now paste the English and French together, so the actual paste
+          runs closer to double that. That size on its own is not the
+          problem — it is well inside what any current assistant accepts.
+          What can still happen on a long task is the reply itself
+          truncating or stalling. If that happens, split the text in half
+          rather than fighting with a single giant paste.
         </P>
         <Ul>
           <li>Split at a paragraph break — never mid-sentence.</li>
