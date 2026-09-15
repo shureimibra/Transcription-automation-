@@ -45,6 +45,22 @@ class WorkerPromptTestCase(TestCase):
                 # The value rule, which the form rule sits beside.
                 self.assertIn('Do not invent, remove, or alter any number', text)
 
+    def test_every_prompt_asks_what_a_quantity_covers(self):
+        """
+        FROM A FAILED REVIEW: "un montant supplementaire de 100 $ en
+        revenus d'interets, en revenus de dividendes et en gains en
+        capital" was marked down because a single $100 amount cannot
+        naturally be all three income types at once -- the source may
+        mean $100 of each. check_numbers verifies a VALUE survives, not
+        what it applies to, so this has to live in the prompt rather than
+        a deterministic check (which would flag ordinary shared totals,
+        "$100 in fees and taxes", just as often as real splits).
+        """
+        for name, text in self.prompts.items():
+            with self.subTest(prompt=name):
+                self.assertIn('ONE QUANTITY PRECEDES SEVERAL CATEGORIES', text)
+                self.assertIn('shared total', text)
+
     def test_every_prompt_forbids_leaving_source_text_untranslated(self):
         # A HIGH finding seen on a real task: a run of English carried
         # straight into the French. It does not block submission, so the
@@ -192,6 +208,14 @@ class WorkerPromptTestCase(TestCase):
         self.assertIn('2. Untranslated English.', review)
         self.assertIn('3. Inventions.', review)
 
+    def test_the_check_prompt_asks_what_a_quantity_covers_too(self):
+        """The check prompt only reports, so it has no VERIFY AGAINST
+        AUDIO line of its own -- an unclear quantity split is just another
+        finding for a human to read, same as any other item on the
+        numbered list."""
+        review = self.prompts['review']
+        self.assertIn('Also\n     check what a quantity COVERS', review)
+
     def test_the_polish_prompt_now_carries_the_source_too(self):
         """
         THE GAP A REAL SIDE-BY-SIDE COMPARISON EXPOSED: a document polished
@@ -246,6 +270,18 @@ class WorkerPromptTestCase(TestCase):
         polish = self.prompts['polish']
         self.assertIn('exactly one real, well-known match', polish)
         self.assertIn('use the correct form', polish)
+
+    def test_the_polish_prompt_extends_audio_verification_to_quantity_scope(self):
+        """
+        Same mechanism as the garbled-name case, same VERIFY AGAINST AUDIO
+        line -- a single figure in front of a list of categories can be
+        just as unsettleable from text alone as a mangled name, and for
+        the same reason: only the audio can say which reading the speaker
+        meant.
+        """
+        polish = self.prompts['polish']
+        self.assertIn('THE SAME LIMIT APPLIES TO WHAT A QUANTITY COVERS', polish)
+        self.assertIn('name the spot on the VERIFY AGAINST AUDIO line', polish)
 
     def test_the_no_extra_content_rule_no_longer_contradicts_verify_against_audio(self):
         """

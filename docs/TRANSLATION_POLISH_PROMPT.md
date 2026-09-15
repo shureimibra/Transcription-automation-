@@ -54,6 +54,13 @@ WHAT YOU MUST NOT DO — these cause automatic rejection:
   NEVER "16,67" - the arithmetic is right and the translation is wrong,
   because it states a precision the speaker did not. A decade, a year or a
   citation is copied across unchanged.
+- WHEN ONE QUANTITY PRECEDES SEVERAL CATEGORIES, PRESERVE THE SOURCE'S OWN
+  READING, NOT WHICHEVER IS EASIER TO WRITE. "$100 in interest, dividend,
+  and capital gains income" is ambiguous only if you read it quickly -
+  check whether the source states or implies one amount split across all
+  three, or that same amount applying to each one separately, and
+  translate whichever reading the source actually supports. Never turn a
+  shared total into a per-category amount, or the reverse.
 - Do not add explanatory notes, translator's notes, or footnotes.
 - Do not introduce square brackets. If the source already contains a
   bracketed tag such as [inaudible], [crosstalk], [foreign] or
@@ -152,6 +159,13 @@ both. It is a limit on confidence: a plausible research match is not
 the same as a confirmed one, and only a human who can actually listen
 closes that gap.
 
+THE SAME LIMIT APPLIES TO WHAT A QUANTITY COVERS. If a single figure
+precedes a list of categories and the source itself does not settle
+whether it is one amount split across them or that amount applying to
+each one separately, that is also a question only the audio can answer.
+Translate the number and the categories without resolving the split, and
+name the spot on the VERIFY AGAINST AUDIO line the same way.
+
 FRENCH TYPOGRAPHY — apply all of these:
 - Narrow non-breaking space before ; : ! and ?
 - Guillemets with inner spacing for quotations: « comme ceci »
@@ -210,6 +224,7 @@ None of it is stylistic preference.
 | Nothing dropped or padded | `check_length_anomaly` — flags a paragraph that vanished |
 | No English left behind | `check_source_leakage` — flags surviving source text |
 | Numbers unchanged | `check_numbers` — **CRITICAL**, blocks submission outright |
+| Quantity's scope across categories preserved | Not automatically checkable — see below |
 | No repeated paragraph | `check_duplication` — the signature of a model looping |
 | No invented references | `entity.invented-reference` — **HIGH**. Added after a real run supplied `planethunters.org`, a site the speaker never named |
 | French only | `language.foreign-word` — **MEDIUM**. Added after a real run wrote Spanish `decir` where French needs `dire`. Quoted titles are exempt |
@@ -491,6 +506,29 @@ so a rule that flagged the pair would be wrong about half the time. It is in
 the prompt instead, and the check prompt asks for a list of every official
 name with each form it appears in — which is a job for a reader, not a
 regex.
+
+## What another failed review flagged: what a number covers
+
+> « un montant supplémentaire de 100 $ en revenus d'intérêts, en revenus de
+> dividendes et en gains en capital » ... *A single $100 amount cannot
+> naturally be described as simultaneously being all three types of
+> income. The source may mean $100 of each type.*
+
+A single figure sitting in front of a list of categories is ambiguous in
+exactly the way a garbled name is: readable, plausible, and impossible to
+settle from the target text alone. This is not automatically checkable
+either — `check_numbers` verifies a value survives, not what it applies
+to, and a rule guessing at "one figure, several nouns" would flag ordinary
+shared totals ("$100 in fees and taxes" is usually one $100) as often as
+real splits.
+
+The fix borrows the same two-part answer VERIFY AGAINST AUDIO already
+gives a garbled name: check the source for which reading it actually
+supports — most of the time that settles it outright, since the source
+sits right there in the same prompt. If the source itself does not settle
+it, that is a question only the audio can answer, same as an unconfirmable
+name, so it goes on the same line rather than getting silently resolved
+one way or the other.
 
 ## What three accepted documents taught us
 

@@ -98,6 +98,13 @@ WHAT YOU MUST NOT DO — these cause automatic rejection:
   NEVER "16,67" — the arithmetic is right and the translation is wrong,
   because it states a precision the speaker did not. A decade, a year or a
   citation is copied across unchanged.
+- WHEN ONE QUANTITY PRECEDES SEVERAL CATEGORIES, PRESERVE THE SOURCE'S OWN
+  READING, NOT WHICHEVER IS EASIER TO WRITE. "$100 in interest, dividend,
+  and capital gains income" is ambiguous only if you read it quickly --
+  check whether the source states or implies one amount split across all
+  three, or that same amount applying to each one separately, and
+  translate whichever reading the source actually supports. Never turn a
+  shared total into a per-category amount, or the reverse.
 - Do not add explanatory notes, translator's notes, or footnotes.
 - Do not introduce square brackets. If the source already contains a
   bracketed tag such as [inaudible], [crosstalk], [foreign] or
@@ -259,6 +266,13 @@ both, as instructed above. It is a limit on confidence: a plausible
 research match is not the same as a confirmed one, and only a human who
 can actually listen closes that gap.
 
+THE SAME LIMIT APPLIES TO WHAT A QUANTITY COVERS. If a single figure
+precedes a list of categories and the source itself does not settle
+whether it is one amount split across them or that amount applying to
+each one separately, that is also a question only the audio can answer.
+Translate the number and the categories without resolving the split, and
+name the spot on the VERIFY AGAINST AUDIO line the same way.
+
 {typography}
 
 {structure}
@@ -338,7 +352,12 @@ that cost a submission:
      a digit that is part of Unicode notation standing in for spoken
      technical language (rule 6 -- "x squared" rendered as "x²") is not an
      invented number. Flag it only if the underlying quantity changed, not
-     because the digit itself is not literally spoken in the source.
+     because the digit itself is not literally spoken in the source. Also
+     check what a quantity COVERS: when one figure precedes a list of
+     categories, does the translation preserve whether the source meant a
+     shared total or a separate amount per category? Flag it if this is
+     unclear, or if the translation resolved it in a way the source does
+     not actually support.
   2. Untranslated {source}. Any word or passage left in {source} that is
      not a proper noun, brand, acronym or conventional title — including a
      pronoun, contraction or quantifier ("I'm", "it's", "all", "each",
