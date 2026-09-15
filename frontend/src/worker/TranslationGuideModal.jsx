@@ -202,11 +202,18 @@ const SECTIONS = [
         </li>
         <li>Paste it into your own assistant (Gemini or similar).</li>
         <li>
-          Paste what comes back into the <em>Polished French</em> box and
-          press <Btn>Save polished version</Btn>. Paste the text only — if
-          your assistant added a line like “Here is the corrected version”,
-          leave it out. That exact sentence is what the commentary check
-          looks for.
+          <strong className="text-ink">Look for a line reading exactly{' '}
+          <code>VERIFY AGAINST AUDIO:</code> at the end of the reply</strong>,
+          before you do anything else with it — see{' '}
+          <em>“VERIFY AGAINST AUDIO”</em> below for what it means and why it
+          is there.
+        </li>
+        <li>
+          Paste what comes back — not that line — into the{' '}
+          <em>Polished French</em> box and press{' '}
+          <Btn>Save polished version</Btn>. If your assistant added a line
+          like “Here is the corrected version”, leave that out too. That
+          exact sentence is what the commentary check looks for.
         </li>
         <li>
           Read what gets flagged. Fix anything shown (see{' '}
@@ -276,6 +283,42 @@ const SECTIONS = [
           assistant to now give you the corrected French incorporating
           exactly those fixes, or switch to <Btn>Copy prompt + translation</Btn>{' '}
           and let the polish prompt do that in one step.
+        </P>
+      </>
+    ),
+  },
+  {
+    id: 'verify-audio',
+    label: 'VERIFY AGAINST AUDIO',
+    body: (
+      <>
+        <P>
+          Sometimes a <Btn>Copy prompt + translation</Btn> reply ends with a
+          line reading exactly <code>VERIFY AGAINST AUDIO:</code>, followed
+          by one or more specific spots.{' '}
+          <strong className="text-ink">This is not part of the
+          translation — never paste it into Polished French.</strong> It
+          means your assistant researched a name or detail to a plausible
+          match, not a certain one, and is handing you the one step
+          research can never do on its own: confirming what the recording
+          actually contains.
+        </P>
+        <P>
+          This exists because of a real, live disagreement: a garbled
+          “Alino... JoJo Scanlon” was correctly researched to Samuel A.
+          Alito Jr. and Diarmuid F. O’Scannlain, but two different
+          assistants disagreed about whether “Jr.” and the exact circuit
+          number belonged in the translation — and neither had heard the
+          audio, so neither could actually settle it. A plausible research
+          match is not the same thing as a confirmed one.
+        </P>
+        <P>
+          <strong className="text-ink">What to do:</strong> click the line
+          to hear the spot named, use what you actually hear, and save
+          that — not either assistant’s guess. If you have no time left to
+          listen, submit the translation as given (the uncertain detail was
+          already left out of it, not guessed into it) rather than stall
+          the deadline over it.
         </P>
       </>
     ),

@@ -122,12 +122,25 @@ WHAT TO FIX:
    "a₀ + a₁z + a₂z² + ...", not a wall of French words. Use superscripts,
    subscripts and symbols like "x²" and "H₂O"; never LaTeX or markup.
 
-RESEARCH EVERY PROPER NAME, CASE CITATION, STATUTE AND INSTITUTION. Where
-one is garbled or unfamiliar, a moment's research usually identifies what
-it almost certainly is — use the correct form rather than transcribing
-the corruption or guessing. If you genuinely cannot identify it, leave it
-exactly as the source states it rather than inventing a plausible-looking
-substitute.
+RESEARCH EVERY PROPER NAME, CASE CITATION, STATUTE AND INSTITUTION — BUT
+ONLY GO AS FAR AS RESEARCH CAN ACTUALLY SETTLE. Where a garbled name
+points to exactly one real, well-known match, use the correct form —
+that is a correction, not a guess. But where research only gets you to
+a PLAUSIBLE match rather than a certain one, or where using the correct
+form means adding specific detail the garbled source gives no trace of
+at all (a middle initial, "Jr.", an exact ordinal circuit number,
+"published" versus "forthcoming"), that is a question only the audio
+can answer, and you were never given the audio. In that case:
+- Use the name or term WITHOUT the uncertain extra detail in the
+  translation itself — the correct core identification, not the
+  specific detail you cannot confirm.
+- After the full translation, add one line reading exactly
+  VERIFY AGAINST AUDIO: followed by each such spot and why you were
+  unsure, one per line. Write NONE if there is nothing to flag.
+This is not permission to stop researching or correcting — keep doing
+both. It is a limit on confidence: a plausible research match is not
+the same as a confirmed one, and only a human who can actually listen
+closes that gap.
 
 FRENCH TYPOGRAPHY — apply all of these:
 - Narrow non-breaking space before ; : ! and ?
@@ -147,8 +160,9 @@ STRUCTURE:
   paragraphs. Do not merge everything into one block and do not add
   headings that are not in the input.
 
-Reply with the corrected French text only — nothing else: no source text,
-no commentary, no note about what you changed.
+Reply with the corrected French text, then the VERIFY AGAINST AUDIO line
+described above, and nothing else — no source text, no other commentary,
+no note about what you changed beyond that one line.
 
 --- SOURCE (English) ---
 [the task's real English source goes here]
@@ -268,6 +282,40 @@ it used to reply with only the word CLEAN, which left a worker with
 nothing to paste back except by asking their assistant a second, separate
 question. It now replies with CLEAN plus the translation, unchanged,
 ready to paste straight into the Polished French box either way.
+
+## VERIFY AGAINST AUDIO — a limit added right after the source-embedding change, from a real disagreement it caused
+
+Giving polish the source (above) fixed one real gap and immediately
+surfaced a second one, live, on a real task under a real deadline. The
+garbled source said a judge's name mangled past recognition — "Alino...
+JoJo Scanlon" — and research correctly identified the real people:
+Samuel A. Alito Jr. and Diarmuid F. O'Scannlain. One assistant, asked to
+polish, wrote the full researched form, "Jr." and Ninth Circuit and all.
+A second assistant, asked to audit that result, called the added detail
+an unconfirmed invention — the garbled fragment has no trace of "Jr." or
+an ordinal circuit number, so where did they come from? — and argued for
+keeping the fuller version anyway, on the theory that a formal bio
+paragraph plausibly says exactly that.
+
+**Both assistants were guessing, in opposite directions, and neither had
+heard the audio.** There was no way to settle it from text alone — and
+worse, a worker relaying between them nearly submitted whichever
+answer came from whichever assistant they asked second, which is not a
+process, it's a coin flip with your deadline riding on it.
+
+The fix is not "trust the more detailed guess" or "trust the more
+conservative one." It's to stop treating a plausible research match as
+equivalent to a confirmed one. Polish now distinguishes the two: an
+unambiguous correction (there is only one real "Vaughan lecture" the
+garbled "bond lecture" could be) still gets made outright, in the
+translation itself. Anything past that — genuinely uncertain, or adding
+specific detail the source gives no trace of — gets the core correction
+made conservatively in the text, and the uncertain part named separately
+under a `VERIFY AGAINST AUDIO:` line, for a human who can actually
+listen to settle. See `worker_prompts.py`'s `_POLISH` for the exact
+wording, and `TASKER_GUIDE.md` for what to do with that line if you see
+one: it is not part of the translation — do not paste it into Polished
+French. Listen to the spots it names, then decide, then save.
 
 ## Long documents
 

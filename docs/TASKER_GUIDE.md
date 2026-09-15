@@ -210,9 +210,12 @@ deliverable is prose. That is correct, not a bug.
    thing — the prompt, the English source and the French draft, all
    correctly ordered — nothing to open, find, or assemble by hand.
 4. **Paste it into your own assistant** (Gemini or similar).
-5. **Paste what comes back** into the Polished French box and save.
-6. **Let the check run.** It will flag problems.
-7. **Fix what is flagged**, then preview and submit.
+5. **Check for a `VERIFY AGAINST AUDIO:` line at the end of the reply**
+   (see below) before doing anything else with it.
+6. **Paste the translation** — not that line — into the Polished French
+   box and save.
+7. **Let the check run.** It will flag problems.
+8. **Fix what is flagged**, then preview and submit.
 
 `Copy prompt + translation` rewrites the French, against Eagle's rules and
 against the actual English — it now sees both, so it can restore a
@@ -221,6 +224,24 @@ instead` never rewrites; it only reports problems (or replies CLEAN, and
 hands back the draft unchanged either way, ready to save). Use check when
 you already suspect the draft is fine and just want a second opinion; use
 polish when you know it needs real work.
+
+### `VERIFY AGAINST AUDIO:` — read this before you save
+
+Sometimes your assistant's reply ends with a line reading exactly
+`VERIFY AGAINST AUDIO:`, followed by one or more specific spots. **This
+is not part of the translation — never paste it into Polished French.**
+It means your assistant found a name or detail it could only get to a
+plausible research match on, not a certain one, and is handing the last
+step back to you: the one thing research can never settle is what the
+recording actually contains, and you're the one who can listen.
+
+This exists because of a real, live disagreement: a garbled "Alino...
+JoJo Scanlon" got correctly researched to Samuel A. Alito Jr. and
+Diarmuid F. O'Scannlain, but two different assistants disagreed on
+whether the "Jr." and the exact circuit number belonged in the
+translation or not — and neither had heard the audio, so neither could
+actually say. Listen to the specific spot named, use what you actually
+hear, and save that — not either assistant's guess.
 
 ### When the ENGLISH is wrong
 

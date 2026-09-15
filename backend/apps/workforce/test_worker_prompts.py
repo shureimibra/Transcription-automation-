@@ -217,6 +217,36 @@ class WorkerPromptTestCase(TestCase):
         polish = self.prompts['polish']
         self.assertIn('RESEARCH EVERY PROPER NAME', polish)
 
+    def test_the_polish_prompt_flags_uncertain_corrections_for_audio_verification(self):
+        """
+        FROM A REAL, LIVE DISAGREEMENT this exact rule was written to
+        resolve: one assistant researched a garbled "Alino... JoJo
+        Scanlon" into the confident, detailed "Samuel A. Alito Jr. ...
+        Diarmuid F. O'Scannlain... Ninth Circuit"; a second assistant,
+        asked to audit that result, called the added detail an
+        unconfirmed invention and argued for keeping it anyway on the
+        grounds that a formal bio plausibly said it. BOTH were guessing
+        -- neither had heard the audio, and there was no way to settle it
+        from text alone. The fix is not "trust the first assistant" or
+        "trust the second" -- it is "don't let either guess become the
+        submitted text unmarked."
+        """
+        polish = self.prompts['polish']
+        self.assertIn('VERIFY AGAINST AUDIO', polish)
+        self.assertIn('ONLY GO AS FAR AS RESEARCH CAN ACTUALLY SETTLE', polish)
+        # The exact detail class the real disagreement was about.
+        self.assertIn('"Jr."', polish)
+        self.assertIn('published" versus "forthcoming', polish)
+
+    def test_the_polish_prompt_still_requires_researching_the_clear_cases(self):
+        """The new limit must not regress into never correcting anything
+        -- an unambiguous match (the original evidence: "bond lecture" is
+        certainly "Vaughan lecture", there is no second reading) still
+        gets fixed outright, not flagged."""
+        polish = self.prompts['polish']
+        self.assertIn('exactly one real, well-known match', polish)
+        self.assertIn('use the correct form', polish)
+
     def test_a_clean_check_hands_back_something_to_paste(self):
         """
         THE OTHER HALF OF THE PROBLEM THIS SESSION SURFACED: a worker
