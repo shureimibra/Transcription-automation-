@@ -38,7 +38,7 @@ from typing import Dict, List, Optional
 
 from django.db import transaction
 
-from core.services.ai_assist.quality import EDITED_VERBATIM
+from core.services.ai_assist.quality import EDITED_VERBATIM, standard_for_project
 
 from . import services, states
 from .eagle import (
@@ -349,14 +349,29 @@ def render_for_eagle(task: Task) -> str:
     return rendered.decode('utf-8')
 
 
-# Which of Eagle's two rubrics our transcripts are written to. A setting
-# rather than a constant because the platform sends both kinds of work, and
-# a transcript that is flawless under one is a guaranteed rejection under
-# the other -- fillers removed is correct for edited verbatim and a defect
-# for strict verbatim.
+# Which of Eagle's two rubrics our transcripts are written to. Resolved
+# PER TASK, not a fixed setting -- the platform sends both kinds of work,
+# and a transcript that is flawless under one is a guaranteed rejection
+# under the other: fillers removed is correct for edited verbatim and a
+# defect for strict verbatim.
+#
+# CONFIRMED LIVE AS A REAL BUG, NOT A HYPOTHETICAL: this used to ignore
+# `task` entirely and always return the global settings default, while
+# TaskSerializer.get_transcription_standard (the on-screen banner) and
+# warmpool._warm_transcription (the standard pass that actually writes the
+# transcript) both already resolved the standard per task from
+# `task.project`. Found on a real strict-verbatim (legal/court) task whose
+# standard pass correctly preserved every filler, whose banner correctly
+# said "Strict verbatim" -- and whose Preview gate, using this function,
+# still said "6 filler words remain, Edited verbatim removes them" and
+# would have told a worker to strip content a legal transcript is required
+# to keep. Now resolved exactly the same way as the other two call sites,
+# so a task's banner, its standard pass, and its submission gate can never
+# disagree about which document it is supposed to be.
 def transcription_standard_for(task: Task) -> str:
     from django.conf import settings
-    return getattr(settings, 'EAGLE_TRANSCRIPTION_STANDARD', EDITED_VERBATIM)
+    fallback = getattr(settings, 'EAGLE_TRANSCRIPTION_STANDARD', EDITED_VERBATIM)
+    return standard_for_project(getattr(task, 'project', '') or '', fallback)
 
 
 def _transcript_standard_findings(task: Task, content: str) -> List[Dict]:

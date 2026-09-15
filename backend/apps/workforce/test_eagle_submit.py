@@ -544,9 +544,9 @@ class CoachStandardGateTestCase(TestCase):
     submission to leave without them having run.
     """
 
-    def gate(self, content, kind=Task.TRANSCRIPTION):
+    def gate(self, content, kind=Task.TRANSCRIPTION, project=''):
         return eagle_submit.run_quality_gate(
-            Task(kind=kind, duration_seconds=None), content)
+            Task(kind=kind, duration_seconds=None, project=project), content)
 
     def codes(self, content, **kw):
         return {f['code'] for f in self.gate(content, **kw)}
@@ -592,6 +592,27 @@ class CoachStandardGateTestCase(TestCase):
                 'Um, I was, you know, going there.\n'
                 '[END OF RECORDING --> 00:00:04.000]'
             )
+        self.assertNotIn('transcript.fillers-not-removed', codes)
+
+    def test_the_project_decides_the_standard_not_the_global_setting(self):
+        """
+        A REAL BUG, CONFIRMED ON A REAL STRICT-VERBATIM (LEGAL) TASK.
+        transcription_standard_for used to ignore `task` entirely and
+        always return the global default -- so a legal-dictation task,
+        whose standard pass correctly preserved every filler and whose
+        on-screen banner correctly said "Strict verbatim", still had its
+        Preview gate tell a worker to strip fillers a legal transcript is
+        required to keep. The global setting is only ever the FALLBACK
+        for a task with no project label -- see standard_for_project --
+        so a project that resolves to strict verbatim must win even
+        while the platform-wide default stays edited verbatim.
+        """
+        codes = self.codes(
+            'Male_1:\n[00:00:01.000 --> 00:00:04.000]\n'
+            'Um, I was, you know, going there.\n'
+            '[END OF RECORDING --> 00:00:04.000]',
+            project='legal dictation',
+        )
         self.assertNotIn('transcript.fillers-not-removed', codes)
 
     def test_the_checks_do_not_run_on_a_translation(self):
