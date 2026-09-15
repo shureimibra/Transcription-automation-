@@ -298,19 +298,22 @@ class WorkerPromptTestCase(TestCase):
         reply ends with a VERIFY AGAINST AUDIO footer, and every CLEAN
         check reply starts with a verdict word -- both read as ordinary
         text, so copying the whole assistant reply (the natural instinct)
-        pastes them straight into the submission along with the real
-        document. Both prompts now wrap ONLY the document in unambiguous
-        markers and say explicitly what must never be pasted.
+        risked pasting them straight into the submission along with the
+        real document. Both prompts wrap the document in unambiguous
+        markers so the save path (strip_reply_scaffolding) has something
+        reliable to find it by -- and now explicitly tell the worker they
+        do NOT need to hand-select around those markers, since that
+        turned out not to hold up against a worker's own assistant UI
+        offering one copy button for its whole reply.
         """
         polish = self.prompts['polish']
         self.assertIn('=== TRANSLATION START ===', polish)
         self.assertIn('=== TRANSLATION END ===', polish)
-        self.assertIn('ONLY the text between', polish)
-        self.assertIn('must never be\npasted into the submission', polish)
+        self.assertIn('do not need to select just part', polish)
+        self.assertIn('paste your whole\nanswer, markers and all', polish)
 
         review = self.prompts['review']
-        self.assertIn('is a verdict, not part of the document', review)
-        self.assertIn('must never\nbe pasted into the submission', review)
+        self.assertIn('do not need to select just part', review)
 
     def test_nothing_may_be_reordered_however_much_is_rewritten(self):
         """
@@ -457,3 +460,107 @@ class TranscriptCheckPromptTestCase(TestCase):
     def test_an_unknown_standard_defaults_to_the_safer_instruction(self):
         prompt = worker_prompts.build_transcript_check('')
         self.assertIn('unless you are told', prompt)
+
+
+class ReplyScaffoldingTestCase(TestCase):
+    """
+    strip_reply_scaffolding -- recovering the document from a worker's
+    assistant's WHOLE raw reply.
+
+    WHY THIS REPLACED "just don't paste the footer": that instruction
+    depended on a worker hand-selecting text around markers, and a real
+    worker's assistant UI (Gemini's canvas view) turned out to offer one
+    copy button for its entire reply -- markers, footer and all. This is
+    what actually stands between that one-click copy and a leaked footer
+    reaching Eagle, so every real reply shape the prompts ask for (and a
+    few they do not, since a worker's own assistant will not always obey
+    exactly) needs to come out clean here.
+    """
+
+    def test_the_documented_shape_round_trips_clean(self):
+        """The exact shape _POLISH's own reply instruction asks for."""
+        raw = (
+            '=== TRANSLATION START ===\n'
+            'Le mandataire agit pour le mandant.\n'
+            '=== TRANSLATION END ===\n'
+            'VERIFY AGAINST AUDIO: NONE'
+        )
+        document, verify_note = worker_prompts.strip_reply_scaffolding(raw)
+        self.assertEqual(document, 'Le mandataire agit pour le mandant.')
+        self.assertEqual(verify_note, '')
+
+    def test_a_real_verify_note_survives_instead_of_vanishing(self):
+        """
+        THE ONE CASE THAT MUST NEVER SILENTLY DISAPPEAR: stripping the
+        footer out of the saved document is only safe because the caller
+        is required to still surface it. Losing this would quietly
+        recreate the exact Alito/O'Scannlain-style problem
+        VERIFY AGAINST AUDIO was built to prevent.
+        """
+        raw = (
+            '=== TRANSLATION START ===\n'
+            'Le juge Alito a écrit l\'opinion majoritaire.\n'
+            '=== TRANSLATION END ===\n'
+            'VERIFY AGAINST AUDIO: whether "Jr." belongs after Alito -- '
+            'the source never says it.'
+        )
+        document, verify_note = worker_prompts.strip_reply_scaffolding(raw)
+        self.assertEqual(document, 'Le juge Alito a écrit l\'opinion majoritaire.')
+        self.assertIn('Jr.', verify_note)
+
+    def test_a_clean_verdict_with_markers_is_stripped_too(self):
+        """The exact shape _REVIEW's CLEAN branch asks for."""
+        raw = (
+            'CLEAN\n\n'
+            '=== TRANSLATION START ===\n'
+            'Bonjour tout le monde.\n'
+            '=== TRANSLATION END ===\n'
+        )
+        document, verify_note = worker_prompts.strip_reply_scaffolding(raw)
+        self.assertEqual(document, 'Bonjour tout le monde.')
+        self.assertEqual(verify_note, '')
+
+    def test_no_markers_at_all_is_the_ordinary_case_and_is_untouched(self):
+        """Most replies will not need any of this -- an assistant that
+        just returns clean prose must pass through byte-for-byte."""
+        document, verify_note = worker_prompts.strip_reply_scaffolding(
+            'Le mandataire agit pour le mandant.')
+        self.assertEqual(document, 'Le mandataire agit pour le mandant.')
+        self.assertEqual(verify_note, '')
+
+    def test_a_trailing_footer_with_no_markers_is_still_pulled_out(self):
+        """An assistant that ignores the marker instruction but still
+        appends the footer -- the pre-marker shape this session started
+        with -- must still not leak into the saved document."""
+        raw = (
+            'Le mandataire agit pour le mandant.\n'
+            'VERIFY AGAINST AUDIO: the spelling of the witness\'s name.'
+        )
+        document, verify_note = worker_prompts.strip_reply_scaffolding(raw)
+        self.assertEqual(document, 'Le mandataire agit pour le mandant.')
+        self.assertIn('witness', verify_note)
+
+    def test_an_unmatched_stray_marker_does_not_survive_into_the_document(self):
+        """DEFENSIVE: a truncated paste or a half-followed instruction
+        should not leave a literal marker line sitting in what gets
+        saved and eventually submitted."""
+        document, _ = worker_prompts.strip_reply_scaffolding(
+            '=== TRANSLATION START ===\nBonjour.')
+        self.assertNotIn('TRANSLATION START', document)
+        self.assertIn('Bonjour.', document)
+
+    def test_a_genuine_document_that_happens_to_start_with_the_word_clean(self):
+        """The CLEAN-stripping must not eat real content: only a bare
+        CLEAN verdict on its own first line is a verdict at all."""
+        document, _ = worker_prompts.strip_reply_scaffolding(
+            'Clean water access remains a major policy challenge.')
+        self.assertEqual(
+            document, 'Clean water access remains a major policy challenge.')
+
+    def test_case_and_spacing_variations_in_the_markers_still_match(self):
+        """A worker's own assistant will not always reproduce whitespace
+        or capitalisation exactly -- this only has to recognise its own
+        vocabulary, not demand an exact byte match."""
+        raw = '===  translation start  ===\nBonjour.\n=== TRANSLATION END ===\n'
+        document, _ = worker_prompts.strip_reply_scaffolding(raw)
+        self.assertEqual(document, 'Bonjour.')

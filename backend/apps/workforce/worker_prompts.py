@@ -17,17 +17,23 @@ EVERY RULE HERE CORRESPONDS TO A REAL DEFECT OR A REAL CHECK. None of it is
 stylistic preference:
 
   * no commentary            -- check_commentary blocks the submission
-  * no leaked scaffolding    -- check_commentary also blocks VERIFY AGAINST
-                                AUDIO and CLEAN footers pasted whole into
-                                the document; a tasker flagged on
-                                2026-09-15 that every polish reply ends
-                                with a footer that reads as ordinary text,
-                                a real leak risk if the whole reply gets
-                                copied. Fixed on both sides: the prompt now
-                                wraps the document in START/END markers so
-                                there is something unambiguous to copy, and
-                                the gate catches it if the footer gets
-                                pasted anyway.
+  * no leaked scaffolding    -- a tasker flagged on 2026-09-15 that every
+                                polish reply ends with a footer that reads
+                                as ordinary text -- a real leak risk if the
+                                whole reply gets copied. First fix wrapped
+                                the document in START/END markers so there
+                                was something unambiguous to copy; that
+                                held only until a worker's own assistant
+                                UI (Gemini's canvas view) turned out to
+                                offer ONE copy button for its whole reply,
+                                markers included. The real fix is
+                                worker_prompts.strip_reply_scaffolding --
+                                the save path now accepts the whole reply
+                                and pulls the document out itself, so
+                                pasting everything is the expected path,
+                                not a mistake to avoid. check_commentary
+                                stays on as a backstop for whatever that
+                                function does not recognise.
   * nothing dropped or added -- check_length_anomaly
   * no source text left      -- check_source_leakage, and a HIGH finding
                                 seen on a live task
@@ -59,6 +65,7 @@ normal case on a translation task, so every instruction has to be one the
 assistant can carry out and the gate can then verify, rather than one the
 worker is expected to check by eye.
 """
+import re
 
 #: Language names, so no prompt ever says "translate into fr".
 _NAMES = {
@@ -264,12 +271,10 @@ no other commentary:
 === TRANSLATION END ===
 VERIFY AGAINST AUDIO: (the line described above, or NONE)
 
-ONLY the text between "=== TRANSLATION START ===" and
-"=== TRANSLATION END ===" is the document. Copy exactly that, and
-nothing outside those two lines, into the Polished {target} field. The
-VERIFY AGAINST AUDIO line is not part of the document -- it is for you
-to read and check against the audio, then discard. It must never be
-pasted into the submission.
+You do not need to select just part of this reply -- paste your whole
+answer, markers and all, into the Polished {target} field. The platform
+pulls the document out on its own and will show you the VERIFY AGAINST
+AUDIO line separately after you save, if there is one.
 
 --- SOURCE ({source}) ---
 {source_text}
@@ -368,10 +373,9 @@ CLEAN
 (the {target} translation exactly as given above, unchanged)
 === TRANSLATION END ===
 
-ONLY the text between the START and END markers is the document -- if
-you paste anything back, copy exactly that and nothing else. The word
-CLEAN above it is a verdict, not part of the document; it must never
-be pasted into the submission.
+You do not need to select just part of this reply -- if you paste
+something back, paste the whole answer, the word CLEAN and all. The
+platform pulls the document out on its own.
 
 --- SOURCE ({source}) ---
 {source_text}
@@ -424,6 +428,89 @@ def build(source_language: str, target_language: str, source_text: str = '') -> 
         'review': _REVIEW.format(
             source_text=cleaned_source_text, **parts, **sections),
     }
+
+
+# --------------------------------------------------------------------- #
+# Recovering the document from a worker's assistant's raw reply
+# --------------------------------------------------------------------- #
+#
+# WHY THIS EXISTS, HAVING JUST BUILT THE OPPOSITE ANSWER. _POLISH and
+# _REVIEW ask for the document wrapped in START/END markers specifically
+# so there is an unambiguous boundary for a worker to copy -- and that
+# held for about as long as it took a worker to actually use it. Gemini
+# (and assistants like it) render a long reply in their own "canvas" or
+# artifact view with ONE copy button for the whole block, because they
+# have no way to know two of the lines in it are instructions rather than
+# content. The natural action -- click the one copy icon on screen -- copies
+# the markers right along with the document, which is exactly the leak
+# this was supposed to prevent, just moved one step earlier.
+#
+# THE FIX IS TO STOP RELYING ON A WORKER SELECTING TEXT BY HAND AT ALL.
+# The save path now accepts the WHOLE reply, markers and all, and pulls
+# the document out of it the same way a person would read it -- so
+# pasting the entire clipboard is not just tolerated, it is the expected
+# path. check_commentary (deterministic.py) stays as a backstop for
+# whatever this does not recognise; this is the first line of defence,
+# not a replacement for it.
+_TRANSLATION_START_RE = re.compile(
+    r'^[ \t]*=+[ \t]*TRANSLATION[ \t]+START[ \t]*=+[ \t]*$',
+    re.IGNORECASE | re.MULTILINE)
+_TRANSLATION_END_RE = re.compile(
+    r'^[ \t]*=+[ \t]*TRANSLATION[ \t]+END[ \t]*=+[ \t]*$',
+    re.IGNORECASE | re.MULTILINE)
+#: A leading CLEAN verdict, from a _REVIEW reply -- only at the very
+#: start, so a document that happens to open with the word "Clean" is
+#: never touched.
+_CLEAN_LEADING_RE = re.compile(r'\A[ \t]*CLEAN[ \t]*\r?\n+')
+#: Everything from "VERIFY AGAINST AUDIO:" to the end of whatever text it
+#: is found in -- the footer is always last, never followed by more
+#: document, so there is nothing after it worth keeping.
+_VERIFY_AUDIO_RE = re.compile(
+    r'VERIFY AGAINST AUDIO:[ \t]*(.*)', re.IGNORECASE | re.DOTALL)
+
+
+def strip_reply_scaffolding(text: str) -> tuple:
+    """
+    Recover (document_text, verify_note) from a worker's assistant's raw
+    reply, tolerating the ENTIRE reply having been pasted -- markers,
+    CLEAN verdict, VERIFY AGAINST AUDIO footer and all -- rather than
+    requiring a worker to hand-select only the interior text first.
+
+    `verify_note` is '' when there is nothing to check: no VERIFY AGAINST
+    AUDIO line was found, or it explicitly said NONE. When it is not
+    empty, the caller must still surface it -- stripping it from the
+    saved document and then saying nothing about it would silently
+    discard the one signal this whole mechanism exists to preserve. See
+    _POLISH's own "RESEARCH EVERY PROPER NAME" section for what put it
+    there in the first place.
+    """
+    text = (text or '').strip()
+    text = _CLEAN_LEADING_RE.sub('', text, count=1).strip()
+
+    start_m = _TRANSLATION_START_RE.search(text)
+    end_m = _TRANSLATION_END_RE.search(text, start_m.end()) if start_m else None
+    if start_m and end_m:
+        document = text[start_m.end():end_m.start()]
+        tail = text[end_m.end():]
+    else:
+        document, tail = text, ''
+
+    verify_note = ''
+    verify_m = _VERIFY_AUDIO_RE.search(tail) or _VERIFY_AUDIO_RE.search(document)
+    if verify_m:
+        verify_note = verify_m.group(1).strip()
+        document = _VERIFY_AUDIO_RE.sub('', document).strip()
+    if verify_note.upper() == 'NONE':
+        verify_note = ''
+
+    # DEFENSIVE, NOT THE NORMAL PATH: a stray unmatched marker (only one
+    # of the pair present -- a truncated paste, or an assistant that
+    # dropped one) would otherwise survive into the saved document
+    # verbatim. Idempotent no-op when both were already consumed above.
+    document = _TRANSLATION_START_RE.sub('', document)
+    document = _TRANSLATION_END_RE.sub('', document)
+
+    return document.strip(), verify_note
 
 
 # --------------------------------------------------------------------- #

@@ -233,6 +233,26 @@ describe('the polish round trip', () => {
     expect(failure.className).toMatch(/status-rejected/);
   });
 
+  it('surfaces a VERIFY AGAINST AUDIO note visibly after saving, since the paste no longer carries it', async () => {
+    // The server now strips this out of the saved document itself (see
+    // worker_prompts.strip_reply_scaffolding) -- a worker pasting the
+    // whole reply never sees this line in their own textarea, so it has
+    // to appear here or the note is lost, not just relocated.
+    vi.spyOn(translation, 'save').mockResolvedValue({
+      saved: true, words: 6, blocking: false, findings: [],
+      verify_against_audio: 'the judge\'s exact title in paragraph 4.',
+    });
+    render(<TranslationWorkspace task={TASK} />);
+    await screen.findByText('Plusieurs fois par seconde');
+
+    await userEvent.type(screen.getByLabelText('Polished French'), 'Texte poli');
+    await userEvent.click(screen.getByRole('button', { name: 'Save polished version' }));
+
+    const note = await screen.findByText(/judge's exact title/);
+    expect(note).not.toHaveClass('sr-only');
+    expect(note.className).toMatch(/status-review/);
+  });
+
   it('copies the prompt together with the French, not the French alone', async () => {
     // THE WHOLE POINT OF THE FEATURE. The screen used to name a prompt it
     // did not supply, so each worker brought their own and applied their

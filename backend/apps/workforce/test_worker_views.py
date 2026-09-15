@@ -579,6 +579,80 @@ class TranslationDraftTestCase(WorkerEndpointBase):
 
         self.assertEqual(response.status_code, 400)
 
+    def test_an_empty_document_between_the_markers_is_still_refused(self):
+        """The emptiness check has to run AFTER stripping, not before --
+        otherwise a reply that is all scaffolding and no document would
+        sail past the length check and save nothing."""
+        task = self.translation_task(claimed_by=self.ana)
+        self.client.force_authenticate(self.ana_user)
+
+        response = self.client.post(
+            f'/api/v1/workforce/tasks/{task.id}/translation/',
+            {'text': '=== TRANSLATION START ===\n=== TRANSLATION END ===\n'
+                      'VERIFY AGAINST AUDIO: NONE'},
+            format='json')
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_the_whole_assistant_reply_can_be_pasted_markers_and_all(self):
+        """
+        THE REAL FIX FOR THE LEAKAGE RISK, NOT JUST THE PROMPT WORDING.
+        A worker's own assistant UI (seen live: Gemini's canvas view)
+        offers one copy button for its entire reply -- there is no
+        realistic way to ask a worker to hand-select around that. The
+        save path accepts the whole thing and pulls the document out
+        itself; this is the same shape worker_prompts._POLISH's own
+        reply instruction asks the assistant for.
+        """
+        task = self.translation_task(claimed_by=self.ana)
+        self.client.force_authenticate(self.ana_user)
+        raw_reply = (
+            '=== TRANSLATION START ===\n'
+            + ('Une phrase polie par le tasker. ' * 100)
+            + '\n=== TRANSLATION END ===\n'
+            + 'VERIFY AGAINST AUDIO: NONE'
+        )
+
+        response = self.client.post(
+            f'/api/v1/workforce/tasks/{task.id}/translation/',
+            {'text': raw_reply}, format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.data['verify_against_audio'])
+        task.refresh_from_db()
+        self.assertIn('polie par le tasker', task.polished_text)
+        self.assertNotIn('TRANSLATION START', task.polished_text)
+        self.assertNotIn('VERIFY AGAINST AUDIO', task.polished_text)
+
+    def test_a_real_verify_note_surfaces_instead_of_disappearing(self):
+        """
+        THE ONE THING THIS MUST NOT DO: stripping the footer out of the
+        saved document is only safe because it comes back in the
+        response instead. Losing it here would silently recreate the
+        exact problem VERIFY AGAINST AUDIO exists to prevent -- see
+        worker_prompts.py's own comment on strip_reply_scaffolding.
+        """
+        from .models import TaskEvent
+
+        task = self.translation_task(claimed_by=self.ana)
+        self.client.force_authenticate(self.ana_user)
+        raw_reply = (
+            '=== TRANSLATION START ===\n'
+            + ('Une phrase polie par le tasker. ' * 100)
+            + '\n=== TRANSLATION END ===\n'
+            + 'VERIFY AGAINST AUDIO: the judge\'s exact title in paragraph 4.'
+        )
+
+        response = self.client.post(
+            f'/api/v1/workforce/tasks/{task.id}/translation/',
+            {'text': raw_reply}, format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('judge', response.data['verify_against_audio'])
+        event = TaskEvent.objects.get(
+            task=task, event_type=TaskEvent.TRANSLATION_POLISHED)
+        self.assertIn('judge', event.metadata.get('verify_against_audio', ''))
+
     def test_the_polished_version_is_what_gets_submitted(self):
         """It is the later, human-approved version of the same document.
         Rendering the machine draft instead would submit work nobody read."""

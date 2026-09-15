@@ -202,17 +202,14 @@ const SECTIONS = [
         </li>
         <li>Paste it into your own assistant (Gemini or similar).</li>
         <li>
-          <strong className="text-ink">Copy only what is between the{' '}
-          <code>=== TRANSLATION START ===</code> and{' '}
-          <code>=== TRANSLATION END ===</code> markers in the reply.</strong>{' '}
-          Anything outside those markers — a{' '}
-          <code>VERIFY AGAINST AUDIO:</code> line especially — is not part
-          of the document; see <em>“VERIFY AGAINST AUDIO”</em> below for
-          what that line means and why it is there.
-        </li>
-        <li>
-          Paste that into the <em>Polished French</em> box and press{' '}
-          <Btn>Save polished version</Btn>.
+          <strong className="text-ink">Copy the whole reply and paste it
+          into the <em>Polished French</em> box, then press{' '}
+          <Btn>Save polished version</Btn>.</strong> Do not bother
+          selecting just part of it — the platform pulls the actual
+          translation out on its own, markers and all. If your assistant
+          named something to check against the audio, it will show up
+          right here after you save; see <em>“VERIFY AGAINST AUDIO”</em>{' '}
+          below for what that means.
         </li>
         <li>
           Read what gets flagged. Fix anything shown (see{' '}
@@ -271,19 +268,16 @@ const SECTIONS = [
         </P>
         <P>
           If it finds nothing, it replies with the word <Btn>CLEAN</Btn>,
-          then the French translation, unchanged, wrapped in{' '}
-          <code>=== TRANSLATION START ===</code> /{' '}
-          <code>=== TRANSLATION END ===</code> markers — so there is always
+          then the French translation, unchanged — so there is always
           something ready to paste back, whether or not anything needed
-          fixing. Copy only what is{' '}
-          <strong className="text-ink">between the markers</strong> into
-          Polished French — the word CLEAN above them is a verdict for you
-          to read, not French text to submit, and pasting it in as-is would
-          show up as a stray English word on the checks. If it finds real
-          problems instead, you have its list — either ask the same
-          assistant to now give you the corrected French incorporating
-          exactly those fixes, or switch to <Btn>Copy prompt + translation</Btn>{' '}
-          and let the polish prompt do that in one step.
+          fixing. Paste the whole reply into Polished French just like the
+          polish button's reply — the platform pulls the actual
+          translation out on its own and leaves the CLEAN verdict out of
+          what gets saved. If it finds real problems instead, you have its
+          list — either ask the same assistant to now give you the
+          corrected French incorporating exactly those fixes, or switch to{' '}
+          <Btn>Copy prompt + translation</Btn> and let the polish prompt
+          do that in one step.
         </P>
       </>
     ),
@@ -296,13 +290,14 @@ const SECTIONS = [
         <P>
           Sometimes a <Btn>Copy prompt + translation</Btn> reply ends with a
           line reading exactly <code>VERIFY AGAINST AUDIO:</code>, followed
-          by one or more specific spots.{' '}
-          <strong className="text-ink">This is not part of the
-          translation — never paste it into Polished French.</strong> It
-          means your assistant researched a name or detail to a plausible
-          match, not a certain one, and is handing you the one step
-          research can never do on its own: confirming what the recording
-          actually contains.
+          by one or more specific spots. You do not need to do anything
+          with that line yourself — paste the whole reply as usual, and
+          it will show up here, on screen, right after you press{' '}
+          <Btn>Save polished version</Btn>, separately from the document
+          that got saved. It means your assistant researched a name or
+          detail to a plausible match, not a certain one, and is handing
+          you the one step research can never do on its own: confirming
+          what the recording actually contains.
         </P>
         <P>
           This exists because of a real, live disagreement: a garbled
@@ -322,13 +317,13 @@ const SECTIONS = [
           the deadline over it.
         </P>
         <P>
-          If this line (or a <Btn>CLEAN</Btn> verdict) ever does end up
-          pasted into Polished French anyway — it happened once, from
-          copying a whole reply instead of just what was between the
-          markers — the platform’s own check catches it and blocks
-          submission before it reaches Eagle, rather than letting it
-          through silently. That is a backstop, not the plan: copy only
-          between the markers and it never comes up.
+          You cannot get this wrong by pasting too much. Whatever your
+          assistant's reply looks like — with or without the exact
+          markers, with or without a stray line before or after — the
+          platform pulls the real translation out of it on save. If
+          something in a very unusual reply still slips through anyway,
+          the platform's own check catches it and blocks submission
+          before it reaches Eagle rather than letting it through silently.
         </P>
       </>
     ),

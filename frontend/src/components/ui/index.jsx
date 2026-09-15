@@ -174,6 +174,15 @@ export function LiveRegion({ message }) {
  * LiveRegion did -- the fix is making it visible too, not choosing one
  * over the other.
  */
+const NOTICE_TONES = {
+  info: 'text-ink-dim',
+  error: 'font-medium text-status-rejected',
+  // A lead to go verify, not a failure -- the same amber used elsewhere
+  // for "needs a look" states (StatusBadge's review status), not the red
+  // reserved for something actually wrong.
+  warn: 'font-medium text-status-review',
+};
+
 export function Notice({ message, tone = 'info' }) {
   if (!message) return null;
   return (
@@ -181,7 +190,7 @@ export function Notice({ message, tone = 'info' }) {
       role="status"
       aria-live="polite"
       aria-atomic="true"
-      className={`text-xs ${tone === 'error' ? 'font-medium text-status-rejected' : 'text-ink-dim'}`}
+      className={`text-xs ${NOTICE_TONES[tone] || NOTICE_TONES.info}`}
     >
       {message}
     </p>

@@ -329,7 +329,21 @@ export default function TranslationWorkspace({ task, onTaskChange }) {
     try {
       const outcome = await translation.save(task.id, pasted);
       setResult(outcome);
-      notify(`Saved ${outcome.words} words. ${outcome.findings.length} findings.`);
+      // THE WHOLE REPLY IS NOW ACCEPTED, MARKERS AND ALL -- the server
+      // pulls the document out itself (see worker_prompts.
+      // strip_reply_scaffolding). That means a VERIFY AGAINST AUDIO line
+      // is no longer sitting in the pasted text where a worker would see
+      // it; it has to surface here instead, or the one signal this
+      // mechanism exists for goes missing silently.
+      if (outcome.verify_against_audio) {
+        notify(
+          `Saved ${outcome.words} words. ${outcome.findings.length} findings. `
+          + `VERIFY AGAINST AUDIO: ${outcome.verify_against_audio}`,
+          'warn',
+        );
+      } else {
+        notify(`Saved ${outcome.words} words. ${outcome.findings.length} findings.`);
+      }
       refresh({ silent: true });
     } catch (err) {
       // THE EXACT FAILURE THAT PROMPTED THIS FIX: this used to land only in

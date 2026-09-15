@@ -178,12 +178,10 @@ no other commentary:
 === TRANSLATION END ===
 VERIFY AGAINST AUDIO: (the line described above, or NONE)
 
-ONLY the text between "=== TRANSLATION START ===" and
-"=== TRANSLATION END ===" is the document. Copy exactly that, and
-nothing outside those two lines, into the Polished French field. The
-VERIFY AGAINST AUDIO line is not part of the document — it is for you
-to read and check against the audio, then discard. It must never be
-pasted into the submission.
+You do not need to select just part of this reply — paste your whole
+answer, markers and all, into the Polished French field. The platform
+pulls the document out on its own and will show you the VERIFY AGAINST
+AUDIO line separately after you save, if there is one.
 
 --- SOURCE (English) ---
 [the task's real English source goes here]
@@ -334,9 +332,11 @@ specific detail the source gives no trace of — gets the core correction
 made conservatively in the text, and the uncertain part named separately
 under a `VERIFY AGAINST AUDIO:` line, for a human who can actually
 listen to settle. See `worker_prompts.py`'s `_POLISH` for the exact
-wording, and `TASKER_GUIDE.md` for what to do with that line if you see
-one: it is not part of the translation — do not paste it into Polished
-French. Listen to the spots it names, then decide, then save.
+wording, and `TASKER_GUIDE.md` for what to do with that line: nothing,
+at paste time — paste the whole reply as usual and the line shows up
+separately on screen after saving (see the section below for why it is
+no longer the worker's job to keep it out of the paste). Listen to the
+spots it names, then decide.
 
 **One reconciliation this required, caught by a second assistant reading
 the finished prompt.** `_MUST_NOT`'s "your entire reply must be the
@@ -352,23 +352,36 @@ problem it exists to prevent — so both older rules now name their
 exception explicitly instead.
 
 **A second real risk, caught by a tasker reading their own results
-side by side.** Telling a worker not to paste the `VERIFY AGAINST
-AUDIO` line (or a `CLEAN` verdict) was, for a while, the whole
-safeguard — a sentence in this document and in the prompt itself, with
-nothing making the two parts of the reply visually different from each
-other. Select-all-and-copy, the natural instinct after reading a long
-reply, copies the footer right along with the document, and nothing on
-the platform's own gate was checking for it either — a leaked footer
-would have reached Eagle undetected. Fixed in two places, deliberately
-not just one: the reply itself now wraps ONLY the document in
-`=== TRANSLATION START ===` / `=== TRANSLATION END ===` markers with
-the footer explicitly outside them (see the reply-shape instruction
-above), and `check_commentary` on the server now also blocks a leaked
-`VERIFY AGAINST AUDIO:` line, a leaked `CLEAN`, or a leaked marker if
-the shape gets ignored anyway. The second layer is the one that
-actually matters — a worker forgetting or a wording tweak drifting
-should never be the only thing standing between a leaked footer and a
-real submission.
+side by side — and the fix that followed it took two tries.** Telling a
+worker not to paste the `VERIFY AGAINST AUDIO` line (or a `CLEAN`
+verdict) was, for a while, the whole safeguard — a sentence in this
+document and in the prompt itself, with nothing making the two parts of
+the reply visually different from each other. The first fix wrapped
+ONLY the document in `=== TRANSLATION START ===` / `=== TRANSLATION
+END ===` markers with the footer explicitly outside them, on the theory
+that a clear boundary is enough for a worker to copy the right part by
+hand.
+
+**That held for about as long as it took a worker to actually try it.**
+A worker's own assistant UI (seen live: Gemini's canvas view) renders a
+long reply in its own document card with ONE copy button for the whole
+thing — Gemini has no way to know two of the lines in it are
+instructions rather than content, so the obvious, natural action
+(click the copy icon) copies the markers right along with the document.
+Asking a worker to hand-select around a visual boundary instead of
+using the copy button sitting right there was never going to hold up.
+
+**The actual fix is `worker_prompts.strip_reply_scaffolding`: the save
+path now accepts the WHOLE reply and pulls the document out of it
+itself**, the same way a person reading it would — so pasting
+everything is the expected path, not a mistake to avoid. A real
+`VERIFY AGAINST AUDIO` note is never silently discarded in the
+process: it comes back in the save response and is shown to the worker
+separately, on screen, rather than depending on them having noticed it
+in the raw text before pasting. `check_commentary` on the server still
+blocks a leaked `VERIFY AGAINST AUDIO:` line, a leaked `CLEAN`, or a
+leaked marker as a backstop, for whatever shape the stripping function
+does not recognise — belt and suspenders, not either one alone.
 
 ## Long documents
 

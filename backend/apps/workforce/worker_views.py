@@ -388,6 +388,24 @@ class TranslationDraftView(views.APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # RECOVER THE DOCUMENT FROM THE WHOLE REPLY, MARKERS AND ALL.
+        #
+        # worker_prompts._POLISH/_REVIEW ask an assistant to wrap the
+        # document in START/END markers so there is an unambiguous
+        # boundary -- but a worker's own assistant UI (seen live: Gemini's
+        # canvas view) often offers one copy button for its entire reply,
+        # which copies the markers right along with it. Rather than rely
+        # on a worker hand-selecting the interior text, the whole paste is
+        # accepted and the document is pulled out of it here -- the same
+        # way a person reading it would. See worker_prompts.py's own
+        # comment above strip_reply_scaffolding for the fuller story.
+        text, verify_note = worker_prompts.strip_reply_scaffolding(text)
+        if not text:
+            return Response(
+                {'error': 'Paste the polished translation before saving.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         # STRIP MARKDOWN EMPHASIS.
         #
         # Assistants italicise book titles -- *The Mind of the South* --
@@ -421,6 +439,13 @@ class TranslationDraftView(views.APIView):
         event_metadata = {'characters': len(text), 'words': len(text.split())}
         if via_training:
             event_metadata['training_mode'] = True
+        if verify_note:
+            # NEVER SILENTLY DROPPED. strip_reply_scaffolding already took
+            # the footer out of the saved document -- if it named a real
+            # spot to check, that has to survive somewhere a worker (and
+            # a reviewer looking at the audit trail later) can still see
+            # it, not vanish along with the marker text around it.
+            event_metadata['verify_against_audio'] = verify_note
         record_event(
             task, TaskEvent.TRANSLATION_POLISHED, actor=request.user,
             message='Polished translation pasted back.',
@@ -433,6 +458,7 @@ class TranslationDraftView(views.APIView):
         return Response({
             'saved': True,
             'words': len(text.split()),
+            'verify_against_audio': verify_note or None,
             'findings': preview.findings,
             'blocking': preview.blocking,
         })

@@ -210,14 +210,14 @@ deliverable is prose. That is correct, not a bug.
    thing — the prompt, the English source and the French draft, all
    correctly ordered — nothing to open, find, or assemble by hand.
 4. **Paste it into your own assistant** (Gemini or similar).
-5. **Copy only what is between the `=== TRANSLATION START ===` and
-   `=== TRANSLATION END ===` markers in the reply.** Everything outside
-   those markers — a `VERIFY AGAINST AUDIO:` line, or a `CLEAN` verdict
-   — is not part of the document (see below); the markers are there so
-   there is never a guess about where one ends and the other begins.
-6. **Paste that into the Polished French box and save.**
-7. **Let the check run.** It will flag problems.
-8. **Fix what is flagged**, then preview and submit.
+5. **Copy the whole reply — do not bother selecting part of it — and
+   paste it into the Polished French box, then save.** The platform
+   pulls the actual translation out on its own, whether or not the reply
+   still has the markers, a `CLEAN` verdict, or a `VERIFY AGAINST AUDIO:`
+   line attached to it. If there was something to check against audio,
+   it shows up on screen right after you save (see below).
+6. **Let the check run.** It will flag problems.
+7. **Fix what is flagged**, then preview and submit.
 
 `Copy prompt + translation` rewrites the French, against Eagle's rules and
 against the actual English — it now sees both, so it can restore a
@@ -227,15 +227,17 @@ hands back the draft unchanged either way, ready to save). Use check when
 you already suspect the draft is fine and just want a second opinion; use
 polish when you know it needs real work.
 
-### `VERIFY AGAINST AUDIO:` — read this before you save
+### `VERIFY AGAINST AUDIO:` — read this after you save
 
 Sometimes your assistant's reply ends with a line reading exactly
-`VERIFY AGAINST AUDIO:`, followed by one or more specific spots. **This
-is not part of the translation — never paste it into Polished French.**
-It means your assistant found a name or detail it could only get to a
-plausible research match on, not a certain one, and is handing the last
-step back to you: the one thing research can never settle is what the
-recording actually contains, and you're the one who can listen.
+`VERIFY AGAINST AUDIO:`, followed by one or more specific spots. You do
+not need to do anything with that line yourself — paste the whole reply
+as usual in step 5 above, and it shows up on screen right after you
+save, separately from the document that got saved. It means your
+assistant found a name or detail it could only get to a plausible
+research match on, not a certain one, and is handing the last step back
+to you: the one thing research can never settle is what the recording
+actually contains, and you're the one who can listen.
 
 This exists because of a real, live disagreement: a garbled "Alino...
 JoJo Scanlon" got correctly researched to Samuel A. Alito Jr. and
@@ -245,13 +247,13 @@ translation or not — and neither had heard the audio, so neither could
 actually say. Listen to the specific spot named, use what you actually
 hear, and save that — not either assistant's guess.
 
-**If this line (or a `CLEAN` verdict) ever does end up pasted into
-Polished French** — it happened once, from copying a whole reply
-instead of just what was between the markers — the platform's own
-check will catch it and block submission before it reaches Eagle,
-rather than letting it through silently. That is a backstop, not the
-plan: copy only between the markers in step 5 above and it never comes
-up.
+**You cannot get the paste itself wrong by pasting too much.** A
+CLEAN verdict, the markers, the VERIFY AGAINST AUDIO footer — none of
+it needs removing by hand, and none of it ends up in what gets
+submitted; the platform pulls the real translation out of whatever you
+paste. If something in a very unusual reply still slips through anyway,
+the platform's own check catches it and blocks submission before it
+reaches Eagle rather than letting it through silently.
 
 ### When the ENGLISH is wrong
 
