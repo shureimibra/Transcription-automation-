@@ -125,9 +125,9 @@ describe('a task that has already been submitted', () => {
     const speaker = screen.getAllByRole('combobox')[0];
     expect(speaker).toBeDisabled();
 
-    // And the transcript text no longer offers itself for editing.
-    const line = screen.getByText('first turn');
-    expect(line.closest('[role="button"]')).toBeNull();
+    // And no Edit button offers itself on delivered work -- editing now
+    // goes through that button explicitly rather than the text itself.
+    expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
   });
 
   it('still shows the working surface for a REJECTED task, which comes back for rework', async () => {
@@ -185,6 +185,35 @@ describe('the verbatim standard', () => {
 });
 
 describe('the transcript', () => {
+  it('scrolls inside its own box, not the page, same as translation', async () => {
+    // Ported from TranslationWorkspace's own equivalent test. Before this,
+    // the highlight moved with the playhead but nothing scrolled to keep
+    // it in view -- a reader had to go hunting for wherever it had
+    // wandered off to on a long transcript.
+    render(<ReviewWorkspace task={TASK} />);
+    const line = await screen.findByText('first turn');
+
+    const box = line.closest('.overflow-y-auto');
+    expect(box).not.toBeNull();
+    expect(box.className).toMatch(/max-h-/);
+    expect(box.className).toMatch(/overscroll-contain/);
+  });
+
+  it('no longer opens the editor just from clicking the text', async () => {
+    // THE BUG THIS REPLACES: clicking a segment's words used to jump
+    // straight into edit mode, with no way to just listen to that segment
+    // without also opening its editor. Editing now goes through the
+    // explicit Edit button only.
+    render(<ReviewWorkspace task={TASK} />);
+    const line = await screen.findByText('first turn');
+
+    await userEvent.click(line);
+    expect(screen.queryByRole('textbox', { name: '' })).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getAllByRole('button', { name: 'Edit' })[0]);
+    expect(screen.getByRole('textbox', { name: '' })).toBeInTheDocument();
+  });
+
   it('lists every turn with its speaker and timing', async () => {
     render(<ReviewWorkspace task={TASK} />);
 
@@ -225,7 +254,11 @@ describe('the transcript', () => {
     });
     render(<ReviewWorkspace task={TASK} />);
 
-    await userEvent.click(await screen.findByText('first turn'));
+    await screen.findByText('first turn');
+    // Clicking the text itself now seeks the audio, matching
+    // TranslationWorkspace's rows -- editing goes through the explicit
+    // Edit button instead. s1 ("first turn") is the first row.
+    await userEvent.click(screen.getAllByRole('button', { name: 'Edit' })[0]);
     // Two textboxes are on screen once the Accuracy check card is showing
     // (its own paste-back box has an accessible name); the segment editor
     // has none, so that is what tells them apart.
@@ -249,7 +282,9 @@ describe('the transcript', () => {
     });
     render(<ReviewWorkspace task={TASK} />);
 
-    await userEvent.click(await screen.findByText('first turn'));
+    await screen.findByText('first turn');
+    // See the previous test for why this goes through the Edit button now.
+    await userEvent.click(screen.getAllByRole('button', { name: 'Edit' })[0]);
     // See the previous test for why this needs a name filter.
     const box = screen.getByRole('textbox', { name: '' });
     // "first turn" -- place the cursor right after "first" (index 5), not
@@ -661,12 +696,14 @@ describe('following the audio while it plays', () => {
     expect(await screen.findByText('first turn')).toBeInTheDocument();
   });
 
-  it('still opens for editing when clicked', async () => {
-    // The highlight wraps text in spans; the click target must survive it.
+  it('still opens for editing via the Edit button', async () => {
+    // The highlight wraps text in spans; the Edit button (rendered outside
+    // that wrapped text, in the row header) must still work regardless.
     vi.spyOn(transcript, 'get').mockResolvedValue(MULTI);
     render(<ReviewWorkspace task={TASK} />);
+    await screen.findByText(/First sentence here/);
 
-    await userEvent.click(await screen.findByText(/First sentence here/));
+    await userEvent.click(screen.getByRole('button', { name: 'Edit' }));
     // Unnamed, unlike the Accuracy check card's own paste-back textarea.
     expect(screen.getByRole('textbox', { name: '' })).toBeInTheDocument();
   });

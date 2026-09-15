@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AudioPlayer from './AudioPlayer.jsx';
 import DeadlineClock from './DeadlineClock.jsx';
 import { segments as segmentsApi, submission, taskMedia, transcript } from '../api/eagle.js';
@@ -112,6 +112,16 @@ function Step({ n }) {
 
 export default function ReviewWorkspace({ task, onTaskChange }) {
   const playerRef = useRef(null);
+  // FOLLOWING THE AUDIO WAS THE MISSING HALF, same as TranslationWorkspace's
+  // own screen had before this: the highlight moved with the playhead, but
+  // nothing scrolled to keep it in view -- on a long transcript the reader
+  // has to go hunting for wherever it wandered off to. Ported from that
+  // screen rather than reinvented, so both work the same way.
+  const activeRow = useRef(null);
+  const listBox = useRef(null);
+  //: Whether the transcript follows the audio. Off while the reader has
+  //: scrolled away, on again once the spoken line is back in view.
+  const [following, setFollowing] = useState(true);
   const [playhead, setPlayhead] = useState(0);
   const [editing, setEditing] = useState(null);
   const [draft, setDraft] = useState('');
@@ -141,6 +151,37 @@ export default function ReviewWorkspace({ task, onTaskChange }) {
     () => [...(job?.segments || [])].sort((a, b) => a.start_time - b.start_time),
     [job?.segments],
   );
+
+  // WHICH LINE THE AUDIO IS ON. Derived rather than stored, so it cannot
+  // drift out of step with the player -- same reasoning as
+  // TranslationWorkspace's identical activeKey.
+  const activeKey = useMemo(() => {
+    const row = rows.find((r) => playhead >= r.start_time && playhead < r.end_time);
+    return row ? row.id : null;
+  }, [rows, playhead]);
+
+  // KEEP IT IN VIEW, AND ONLY WHEN IT CHANGES. Scrolling on every playhead
+  // tick would fight the reader for control of the page; once per turn is
+  // following along, more than that is a wrestling match. Scrolling away
+  // turns following OFF, and it resumes on its own once the line being
+  // spoken is back on screen -- so reaching for Pause or reading back
+  // never gets undone by the next segment a second later.
+  useEffect(() => {
+    if (activeKey === null || !following) return;
+    activeRow.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [activeKey, following]);
+
+  const onListScroll = () => {
+    const box = listBox.current;
+    const row = activeRow.current;
+    if (!box || !row) return;
+    // Programmatic scrolls fire this too, so "did the user move away" is
+    // answered by geometry rather than by trying to tell the events apart.
+    const boxTop = box.getBoundingClientRect().top;
+    const rowTop = row.getBoundingClientRect().top;
+    const offset = rowTop - boxTop;
+    setFollowing(offset >= -8 && offset <= box.clientHeight);
+  };
 
   /**
    * A speaker's name as it will actually be submitted.
@@ -571,13 +612,27 @@ export default function ReviewWorkspace({ task, onTaskChange }) {
         }
         padded={false}
       >
+        {/* BOUNDED AND SELF-SCROLLING, matching TranslationWorkspace's own
+            panel -- see the following-the-audio note above. Without this
+            the highlight still moved with the playhead but the page around
+            it did not, so a reader had to go hunting for wherever a long
+            transcript's highlight had wandered off to. */}
+        <div ref={listBox} onScroll={onListScroll}
+             className="max-h-[60vh] overflow-y-auto overscroll-contain">
         <ol className="divide-y divide-edge/60">
           {rows.map((row) => {
             const active = playhead >= row.start_time && playhead < row.end_time;
             return (
               <li
                 key={row.id}
-                className={`px-4 py-3 transition-colors ${active ? 'bg-accent-soft' : ''}`}
+                ref={active ? activeRow : null}
+                // THE WHOLE ROW SEEKS, same as TranslationWorkspace's rows --
+                // clicking a segment to just listen used to be impossible
+                // without hitting the small timestamp link exactly; now the
+                // default action on this screen matches the other one.
+                onClick={() => playerRef.current?.seekTo(row.start_time)}
+                className={`cursor-pointer px-4 py-3 transition-colors ${
+                  active ? 'bg-accent-soft' : 'hover:bg-overlay/60'}`}
               >
                 <div className="flex flex-wrap items-center gap-2">
                   {labelsSpeakers && (
@@ -585,6 +640,7 @@ export default function ReviewWorkspace({ task, onTaskChange }) {
                       aria-label={`Speaker for the turn at ${timestamp(row.start_time)}`}
                       value={row.speaker_label || ''}
                       disabled={readOnly || saving === row.id}
+                      onClick={(e) => e.stopPropagation()}
                       onChange={(e) => patchSegment(row, { speaker_label: e.target.value })}
                       className="rounded border border-edge bg-canvas px-1.5 py-0.5 text-2xs text-ink"
                     >
@@ -597,17 +653,33 @@ export default function ReviewWorkspace({ task, onTaskChange }) {
                     </select>
                   )}
 
-                  <button
-                    onClick={() => playerRef.current?.seekTo(row.start_time)}
-                    className={`rounded font-mono text-2xs tabular-nums text-accent hover:text-accent-strong ${FOCUS}`}
-                    title="Jump to this moment"
-                  >
+                  <span className="rounded font-mono text-2xs tabular-nums text-accent">
                     {timestamp(row.start_time)} – {timestamp(row.end_time)}
-                  </button>
+                  </span>
+
+                  {/* EXPLICIT AND ALWAYS VISIBLE, not triggered by clicking
+                      the words themselves -- see TranslationWorkspace's own
+                      Edit button for the same reasoning, though this one is
+                      styled as the ordinary action it is here: fixing a
+                      mishearing is this screen's main job, not a rare,
+                      consequential exception the way editing the English
+                      source is on the translation side. */}
+                  {!readOnly && editing !== row.id && (
+                    <Button
+                      size="sm" variant="secondary"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEditing(row.id);
+                        setDraft(row.text || '');
+                      }}
+                    >
+                      Edit
+                    </Button>
+                  )}
                 </div>
 
                 {editing === row.id ? (
-                  <div className="mt-2 space-y-2">
+                  <div className="mt-2 space-y-2" onClick={(e) => e.stopPropagation()}>
                     <textarea
                       autoFocus
                       rows={3}
@@ -648,17 +720,12 @@ export default function ReviewWorkspace({ task, onTaskChange }) {
                     </div>
                   </div>
                 ) : (
-                  <p
-                    role={readOnly ? undefined : 'button'}
-                    tabIndex={readOnly ? undefined : 0}
-                    onClick={readOnly ? undefined
-                      : () => { setEditing(row.id); setDraft(row.text || ''); }}
-                    onKeyDown={readOnly ? undefined : (e) => {
-                      if (e.key === 'Enter') { setEditing(row.id); setDraft(row.text || ''); }
-                    }}
-                    className={`mt-1 rounded text-sm leading-relaxed text-ink
-                      ${readOnly ? '' : `cursor-text ${FOCUS}`}`}
-                  >
+                  <p className="mt-1 text-sm leading-relaxed text-ink">
+                    {/* No click-to-edit here any more -- the Edit button
+                        above is the one, explicit way in. This text is part
+                        of the row now, so clicking it seeks like the rest
+                        of the row instead of surprising a reader who just
+                        wanted to listen with an open textarea. */}
                     {/* Follow the audio sentence by sentence while it plays.
                         Only the segment being spoken is broken up -- doing it
                         to all 400 would cost a lot of DOM for nothing. */}
@@ -682,6 +749,7 @@ export default function ReviewWorkspace({ task, onTaskChange }) {
             );
           })}
         </ol>
+        </div>
       </Card>
 
       {showPreview && (
