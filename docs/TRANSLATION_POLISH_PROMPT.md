@@ -36,7 +36,10 @@ if you only ever read the French text on its own.
 WHAT YOU MUST NOT DO — these cause automatic rejection:
 - Do not add any commentary, preamble, heading, or closing remark.
   Do not write "Here is the corrected version" or anything similar.
-  Your entire reply must be the corrected French text and nothing else.
+  Your entire reply must be the corrected French text and nothing else,
+  UNLESS a later instruction in this same prompt explicitly asks for one
+  additional, clearly-labeled line — in that case, and only that case,
+  add exactly the line it describes and nothing more.
 - Do not summarise, shorten, expand, or reorganise. Every idea in the
   input must appear in your output, in the same order.
 - Do not leave any English word or phrase untranslated, unless it is a
@@ -79,8 +82,12 @@ WHAT YOU MUST NOT DO — these cause automatic rejection:
   literally "I'm am in Indiana now"). None of these are proper names.
 - Do not add any website, domain name, URL, email address, book title,
   citation or reference that is not already in the text. If the speaker
-  describes something without naming it, leave it undescribed. Supplying
-  the name you believe is correct is an invention, however plausible.
+  describes something WITHOUT EVER NAMING IT AT ALL, leave it undescribed
+  — supplying a name for something never named is an invention, however
+  plausible. This is a different case from a name the speaker DID say but
+  the transcript garbled: correctly recovering it through research is a
+  correction, not an invention, at whatever confidence bar this prompt
+  asks for that elsewhere.
 - Write only in French. Not one word of Spanish, Italian, Portuguese or
   English may appear in your output, except inside a quotation, a title or
   a proper name that the text itself keeps in its original language.
@@ -108,7 +115,10 @@ WHAT TO FIX:
    academic, technical, financial, or general. Where a field has a settled
    French term of art, use it rather than a literal translation. If a term
    is genuinely ambiguous, choose the reading most consistent with the rest
-   of the document; never guess wildly and never flag it in the text.
+   of the document; never guess wildly, and never flag it with a note
+   inside the text itself. (A proper name or citation this prompt gives
+   you a separate, structured way to flag elsewhere is not covered by
+   this rule — use that mechanism for those, not an inline note either.)
 5. Cohesion. The source is a spoken transcript, so it may contain false
    starts, repetitions, and filler that survived translation. Remove them
    and join the sentences so the result reads as clean written French.
@@ -316,6 +326,19 @@ listen to settle. See `worker_prompts.py`'s `_POLISH` for the exact
 wording, and `TASKER_GUIDE.md` for what to do with that line if you see
 one: it is not part of the translation — do not paste it into Polished
 French. Listen to the spots it names, then decide, then save.
+
+**One reconciliation this required, caught by a second assistant reading
+the finished prompt.** `_MUST_NOT`'s "your entire reply must be the
+corrected text and nothing else" was written long before
+`VERIFY AGAINST AUDIO` existed, and appears earlier in the prompt than
+it — a model (or a person) reading top to bottom hits the absolute rule
+first. Likewise `WHAT TO FIX`'s domain-accuracy rule already said "never
+flag [an ambiguous term] in the text," written for an ordinary technical
+term, long before there was a *deliberately* flagged category to
+distinguish it from. Neither contradiction was a reason to remove
+`VERIFY AGAINST AUDIO` — that would have quietly restored the exact
+problem it exists to prevent — so both older rules now name their
+exception explicitly instead.
 
 ## Long documents
 

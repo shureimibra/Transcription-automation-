@@ -62,7 +62,10 @@ _MUST_NOT = """\
 WHAT YOU MUST NOT DO — these cause automatic rejection:
 - Do not add any commentary, preamble, heading, or closing remark. Do not
   write "Here is the corrected version" or anything similar. Your entire
-  reply must be the corrected {target} text and nothing else.
+  reply must be the corrected {target} text and nothing else, UNLESS a
+  later instruction in this same prompt explicitly asks for one
+  additional, clearly-labeled line -- in that case, and only that case,
+  add exactly the line it describes and nothing more.
 - Do not summarise, shorten, expand, or reorganise. Every idea in the input
   must appear in your output, in the same order.
 - Do not leave any {source} word or phrase untranslated, unless it is a
@@ -85,8 +88,12 @@ WHAT YOU MUST NOT DO — these cause automatic rejection:
   Never invent one, and never delete one the source gave you.
 - Do not add any website, domain name, URL, email address, book title,
   citation or reference that is not already in the text. If the speaker
-  describes something without naming it, leave it undescribed. Supplying
-  the name you believe is correct is an invention, however plausible.
+  describes something WITHOUT EVER NAMING IT AT ALL, leave it
+  undescribed -- supplying a name for something never named is an
+  invention, however plausible. This is a different case from a name
+  the speaker DID say but the transcript garbled: correctly recovering
+  it through research is a correction, not an invention, at whatever
+  confidence bar this prompt asks for that elsewhere.
 - Write only in {target}. Not one word of any other language may appear in
   your output, except inside a quotation, a title or a proper name that the
   text itself keeps in its original language.
@@ -147,7 +154,10 @@ WHAT TO FIX:
    academic, technical, financial, or general. Where a field has a settled
    {target} term of art, use it rather than a literal translation. If a term
    is genuinely ambiguous, choose the reading most consistent with the rest
-   of the document; never guess wildly and never flag it in the text.
+   of the document; never guess wildly, and never flag it with a note
+   inside the text itself. (A proper name or citation this prompt gives
+   you a separate, structured way to flag elsewhere is not covered by
+   this rule — use that mechanism for those, not an inline note either.)
 5. Cohesion. The source is a spoken transcript, so it may contain false
    starts, repetitions, and filler that survived translation. Remove them
    and join the sentences so the result reads as clean written {target}.

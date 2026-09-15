@@ -247,6 +247,37 @@ class WorkerPromptTestCase(TestCase):
         self.assertIn('exactly one real, well-known match', polish)
         self.assertIn('use the correct form', polish)
 
+    def test_the_no_extra_content_rule_no_longer_contradicts_verify_against_audio(self):
+        """
+        A REAL, INDEPENDENTLY-CONFIRMED READING PROBLEM: a second assistant,
+        asked to evaluate this exact prompt, correctly noticed that
+        _MUST_NOT's "your entire reply must be the corrected text and
+        nothing else" appears BEFORE the VERIFY AGAINST AUDIO instruction,
+        and concluded the two contradict -- recommending VERIFY AGAINST
+        AUDIO be removed rather than the earlier rule be reconciled. The
+        fix is the reconciliation, not the removal: the "nothing else"
+        rule now names its own exception.
+        """
+        polish = self.prompts['polish']
+        # Split across the prompt's own line-wrap break, same as this
+        # file's other wrapped-text assertions.
+        self.assertIn('nothing else, UNLESS a', polish)
+        self.assertIn('later instruction in this same prompt', polish)
+        # The exception is still real, not a loophole: still no OTHER
+        # commentary is licensed anywhere in the prompt.
+        self.assertIn('Do not add explanatory notes', polish)
+
+    def test_ambiguous_domain_terms_still_get_no_inline_note_but_flagged_names_do(self):
+        """The other half of the same reconciliation: _WHAT_TO_FIX's
+        "never flag it in the text" (written for an ambiguous DOMAIN term,
+        long before VERIFY AGAINST AUDIO existed) must not also swallow
+        the new, deliberately separate flagging mechanism for a proper
+        name research could only partly settle."""
+        polish = self.prompts['polish']
+        self.assertIn('never flag it with a note\n   inside the text itself',
+                      polish)
+        self.assertIn('a separate, structured way to flag elsewhere', polish)
+
     def test_a_clean_check_hands_back_something_to_paste(self):
         """
         THE OTHER HALF OF THE PROBLEM THIS SESSION SURFACED: a worker
