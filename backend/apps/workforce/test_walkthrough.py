@@ -173,6 +173,14 @@ class WalkthroughTestCase(TestCase):
         say('   Ana corrected the speaker and the words. Her edit lives on')
         say('   the transcript itself, which is what the submitter renders.')
 
+        say("   She also runs the accuracy-check prompt through her own")
+        say("   assistant and pastes back what it found -- the Preview gate")
+        say("   refuses to let that step be skipped.")
+        from django.utils import timezone
+        task.accuracy_check_by = self.ana
+        task.accuracy_check_at = timezone.now()
+        task.save(update_fields=['accuracy_check_by', 'accuracy_check_at'])
+
         say('\n6. SHE PREVIEWS EXACTLY WHAT EAGLE WILL RECEIVE')
         from .eagle_submit import preview_submission
         services.start_task(task.id, actor=self.ana_user)
