@@ -193,6 +193,12 @@ const SECTIONS = [
           is actually said?
         </li>
         <li>
+          If a check or your own assistant names something to verify — a
+          name, a term — press <Btn>⌕ Search</Btn> above the source and
+          type it. Every line mentioning it is found at once, with a way
+          to step straight to each one instead of scrolling to find them.
+        </li>
+        <li>
           Press <Btn>Copy prompt + translation</Btn>. This copies the polish
           prompt together with the English source AND the French, ready to
           paste — you do not need a prompt of your own, and you should not

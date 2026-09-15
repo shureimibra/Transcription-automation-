@@ -120,6 +120,48 @@ describe('the two documents', () => {
   });
 });
 
+describe('searching the English', () => {
+  // Searches the English, not the French: that is the side a worker
+  // actually reads against the audio, and what a mishearing would turn
+  // up in. "LGM1" is unique to the second row; "second" only in the
+  // first.
+
+  it('is closed by default', async () => {
+    render(<TranslationWorkspace task={TASK} />);
+    await screen.findByText('Several times a second');
+
+    expect(screen.queryByPlaceholderText('Search the English…')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Search/ })).toBeInTheDocument();
+  });
+
+  it('narrows to the matching row and dims the other one', async () => {
+    const { container } = render(<TranslationWorkspace task={TASK} />);
+    await screen.findByText('Several times a second');
+
+    await userEvent.click(screen.getByRole('button', { name: /Search/ }));
+    await userEvent.type(
+      screen.getByPlaceholderText('Search the English…'), 'LGM1');
+
+    expect(await screen.findByText('1 of 1')).toBeInTheDocument();
+    const rows = [...container.querySelectorAll('li')];
+    const firstRow = rows.find((li) => li.textContent.includes('Several times a second'));
+    const secondRow = rows.find((li) => li.textContent.includes('nicknamed'));
+    expect(firstRow.className).toMatch(/opacity-40/);
+    expect(secondRow.className).not.toMatch(/opacity-40/);
+  });
+
+  it('reports no matches rather than an empty count', async () => {
+    render(<TranslationWorkspace task={TASK} />);
+    await screen.findByText('Several times a second');
+
+    await userEvent.click(screen.getByRole('button', { name: /Search/ }));
+    await userEvent.type(
+      screen.getByPlaceholderText('Search the English…'), 'nonexistent');
+
+    expect(await screen.findByText('No matches')).toBeInTheDocument();
+  });
+});
+
 describe('reverting an edited line', () => {
   const EDITED_DRAFT = {
     ...DRAFT,
@@ -189,7 +231,10 @@ describe('following the audio', () => {
     render(<TranslationWorkspace task={TASK} />);
     const heading = await screen.findByText('English (source)');
 
-    expect(heading.parentElement.className).toMatch(/sticky/);
+    // Sticky on the wrapper that also holds the search bar now, not the
+    // heading row's own immediate parent -- one sticky unit, not two
+    // competing for the same top edge.
+    expect(heading.closest('.sticky')).not.toBeNull();
   });
 });
 

@@ -197,6 +197,13 @@ const SECTIONS = [
           already reviewed every line.
         </li>
         <li>
+          If you already know a name or term the ASR likely misheard
+          somewhere, press <Btn>⌕ Search</Btn> above the transcript and
+          type it — every segment mentioning it is found at once, with a
+          way to step straight to each one instead of scrolling to find
+          them by eye.
+        </li>
+        <li>
           Click any line to edit its text. Fix what is actually wrong —
           names, technical terms, numbers — rather than rewording things
           that are already correct.

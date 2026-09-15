@@ -8,6 +8,8 @@ import Verdict from '../components/Verdict.jsx';
 import DeliveredBanner, { isDelivered } from '../components/DeliveredBanner.jsx';
 import SubmittedPanel from '../components/SubmittedPanel.jsx';
 import { useAsync } from '../hooks/useAsync.js';
+import { useSegmentSearch, splitOnMatch } from '../hooks/useSegmentSearch.js';
+import SegmentSearchBar from '../components/SegmentSearchBar.jsx';
 import {
   Button, Card, ErrorState, FOCUS, Notice, Skeleton, inputClass,
 } from '../components/ui/index.jsx';
@@ -182,6 +184,23 @@ export default function ReviewWorkspace({ task, onTaskChange }) {
     const offset = rowTop - boxTop;
     setFollowing(offset >= -8 && offset <= box.clientHeight);
   };
+
+  // FIND EVERY SEGMENT MENTIONING A WORD, AND STEP THROUGH JUST THOSE.
+  // See useSegmentSearch's own docstring for the scenario this exists
+  // for: a name spelled three different wrong ways across a long
+  // transcript, findable in seconds instead of by reading past every
+  // segment that was never the problem.
+  const search = useSegmentSearch(rows, (row) => row.text);
+  const matchingIds = useMemo(
+    () => new Set(search.matches.map((m) => m.row.id)),
+    [search.matches],
+  );
+  // A SEPARATE REF MAP FROM activeRow. That one tracks whichever segment
+  // the AUDIO is currently on, for the follow-while-playing behaviour
+  // above; a search jump moves to whatever segment MATCHED, which is
+  // usually a different one and must scroll on its own, not wait for the
+  // playhead to agree.
+  const searchRowRefs = useRef({});
 
   /**
    * A speaker's name as it will actually be submitted.
@@ -598,6 +617,12 @@ export default function ReviewWorkspace({ task, onTaskChange }) {
         subtitle={`${rows.length} turns · click any line to hear it`}
         actions={
           <div className="flex flex-wrap items-center gap-2">
+            {!search.open && (
+              <Button size="sm" variant="ghost" onClick={search.openSearch}
+                      title="Search this transcript">
+                ⌕ Search
+              </Button>
+            )}
             {labelsSpeakers && (
               <Button size="sm" variant="ghost" onClick={() => setShowGuide(true)}>
                 Full guide
@@ -619,20 +644,41 @@ export default function ReviewWorkspace({ task, onTaskChange }) {
             transcript's highlight had wandered off to. */}
         <div ref={listBox} onScroll={onListScroll}
              className="max-h-[60vh] overflow-y-auto overscroll-contain">
+        <SegmentSearchBar
+          search={search}
+          placeholder="Search the transcript…"
+          onJump={(row) => {
+            playerRef.current?.seekTo(row.start_time);
+            searchRowRefs.current[row.id]?.scrollIntoView?.({ block: 'center' });
+          }}
+        />
         <ol className="divide-y divide-edge/60">
           {rows.map((row) => {
             const active = playhead >= row.start_time && playhead < row.end_time;
+            // SEARCHING DIMS EVERYTHING ELSE. With a query typed, the
+            // segments that did not match recede instead of disappearing
+            // outright -- position in the transcript still matters (a
+            // worker reads a fix in context), but the eye should land on
+            // the handful that matched, not scan all 400 to find them.
+            const searching = search.query.trim() !== '';
+            const isMatch = matchingIds.has(row.id);
+            const isCurrent = search.current?.row.id === row.id;
             return (
               <li
                 key={row.id}
-                ref={active ? activeRow : null}
+                ref={(el) => {
+                  if (active) activeRow.current = el;
+                  searchRowRefs.current[row.id] = el;
+                }}
                 // THE WHOLE ROW SEEKS, same as TranslationWorkspace's rows --
                 // clicking a segment to just listen used to be impossible
                 // without hitting the small timestamp link exactly; now the
                 // default action on this screen matches the other one.
                 onClick={() => playerRef.current?.seekTo(row.start_time)}
                 className={`cursor-pointer px-4 py-3 transition-colors ${
-                  active ? 'bg-accent-soft' : 'hover:bg-overlay/60'}`}
+                  isCurrent ? 'bg-accent-soft ring-1 ring-inset ring-accent'
+                    : active ? 'bg-accent-soft' : 'hover:bg-overlay/60'
+                } ${searching && !isMatch ? 'opacity-40' : ''}`}
               >
                 <div className="flex flex-wrap items-center gap-2">
                   {labelsSpeakers && (
@@ -729,7 +775,23 @@ export default function ReviewWorkspace({ task, onTaskChange }) {
                     {/* Follow the audio sentence by sentence while it plays.
                         Only the segment being spoken is broken up -- doing it
                         to all 400 would cost a lot of DOM for nothing. */}
-                    {active
+                    {/* SEARCH HIGHLIGHTING TAKES OVER WHILE A QUERY IS
+                        TYPED, in place of the active-sentence split above --
+                        the two would otherwise fight over the same text, and
+                        a worker jumping between matches is not necessarily
+                        mid-playback on any of them. */}
+                    {searching
+                      ? splitOnMatch(row.text, search.query).map((part, i) => (
+                          <span
+                            key={i}
+                            className={part.hit
+                              ? 'rounded bg-status-review/30 box-decoration-clone px-0.5'
+                              : undefined}
+                          >
+                            {part.text}
+                          </span>
+                        ))
+                      : active
                       ? sentencesWithActive(
                           row.text, row.start_time, row.end_time, playhead,
                         ).map((part, i) => (

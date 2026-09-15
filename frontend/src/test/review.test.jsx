@@ -214,6 +214,84 @@ describe('the transcript', () => {
     expect(screen.getByRole('textbox', { name: '' })).toBeInTheDocument();
   });
 
+  describe('searching the transcript', () => {
+    // JOB's three segments are "first turn", "second turn", "third turn" --
+    // "turn" is in all three, "second" only in one. Real scenario this
+    // covers: finding the handful of segments a misheard name actually
+    // appears in, instead of reading past everything that never mentioned
+    // it.
+
+    it('is closed by default, costing nothing on a screen that is not searching', async () => {
+      render(<ReviewWorkspace task={TASK} />);
+      await screen.findByText('first turn');
+
+      expect(screen.queryByPlaceholderText('Search the transcript…')).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Search/ })).toBeInTheDocument();
+    });
+
+    it('narrows to the matching segments and reports how many', async () => {
+      const { container } = render(<ReviewWorkspace task={TASK} />);
+      await screen.findByText('first turn');
+
+      await userEvent.click(screen.getByRole('button', { name: /Search/ }));
+      await userEvent.type(
+        screen.getByPlaceholderText('Search the transcript…'), 'second');
+
+      expect(await screen.findByText('1 of 1')).toBeInTheDocument();
+      // The matched substring is highlighted, splitting "second turn"
+      // across sibling spans -- find rows by their full text content
+      // rather than an exact node, same as the sentence-splitting tests
+      // above handle the same shape of problem.
+      const rows = [...container.querySelectorAll('li')];
+      const firstRow = rows.find((li) => li.textContent.includes('first turn'));
+      const secondRow = rows.find((li) => li.textContent.includes('second turn'));
+      expect(firstRow.className).toMatch(/opacity-40/);
+      expect(secondRow.className).not.toMatch(/opacity-40/);
+    });
+
+    it('steps through multiple matches with Next/Previous', async () => {
+      render(<ReviewWorkspace task={TASK} />);
+      await screen.findByText('first turn');
+
+      await userEvent.click(screen.getByRole('button', { name: /Search/ }));
+      await userEvent.type(
+        screen.getByPlaceholderText('Search the transcript…'), 'turn');
+
+      expect(await screen.findByText('1 of 3')).toBeInTheDocument();
+      await userEvent.click(screen.getByRole('button', { name: 'Next match' }));
+      expect(await screen.findByText('2 of 3')).toBeInTheDocument();
+      await userEvent.click(screen.getByRole('button', { name: 'Previous match' }));
+      expect(await screen.findByText('1 of 3')).toBeInTheDocument();
+    });
+
+    it('reports no matches rather than an empty count', async () => {
+      render(<ReviewWorkspace task={TASK} />);
+      await screen.findByText('first turn');
+
+      await userEvent.click(screen.getByRole('button', { name: /Search/ }));
+      await userEvent.type(
+        screen.getByPlaceholderText('Search the transcript…'), 'nonexistent');
+
+      expect(await screen.findByText('No matches')).toBeInTheDocument();
+    });
+
+    it('closes and clears the query, un-dimming everything', async () => {
+      render(<ReviewWorkspace task={TASK} />);
+      await screen.findByText('first turn');
+
+      await userEvent.click(screen.getByRole('button', { name: /Search/ }));
+      const input = screen.getByPlaceholderText('Search the transcript…');
+      await userEvent.type(input, 'second');
+      await screen.findByText('1 of 1');
+
+      await userEvent.click(screen.getByRole('button', { name: 'Close search' }));
+
+      expect(screen.queryByPlaceholderText('Search the transcript…')).not.toBeInTheDocument();
+      expect(screen.getByText('first turn').closest('li').className)
+        .not.toMatch(/opacity-40/);
+    });
+  });
+
   it('lists every turn with its speaker and timing', async () => {
     render(<ReviewWorkspace task={TASK} />);
 

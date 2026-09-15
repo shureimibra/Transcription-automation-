@@ -3,6 +3,8 @@ import {
   aiRevisions, segments as segmentsApi, submission, taskMedia, translation,
 } from '../api/eagle.js';
 import { useAsync } from '../hooks/useAsync.js';
+import { useSegmentSearch, splitOnMatch } from '../hooks/useSegmentSearch.js';
+import SegmentSearchBar from '../components/SegmentSearchBar.jsx';
 import AudioPlayer from './AudioPlayer.jsx';
 import Verdict from '../components/Verdict.jsx';
 import DeliveredBanner, { isDelivered } from '../components/DeliveredBanner.jsx';
@@ -129,6 +131,22 @@ export default function TranslationWorkspace({ task, onTaskChange }) {
     const offset = rowTop - boxTop;
     setFollowing(offset >= -8 && offset <= box.clientHeight);
   };
+
+  // FIND EVERY LINE MENTIONING A WORD, AND STEP THROUGH JUST THOSE.
+  // Searches the ENGLISH -- that is the side a worker actually reads
+  // against the audio; the French is what gets corrected as a result, not
+  // what a mishearing would be found in. See useSegmentSearch's own
+  // docstring for the scenario (a name the ASR spelled three different
+  // wrong ways across a long lecture) this exists for.
+  const search = useSegmentSearch(rows, (row) => row.english);
+  const matchingKeys = useMemo(
+    () => new Set(search.matches.map((m) => m.row.key)),
+    [search.matches],
+  );
+  // Separate from `activeRow`, same reasoning as ReviewWorkspace's own:
+  // that one follows the PLAYHEAD, this one follows wherever a search
+  // jump lands, which is usually a different row entirely.
+  const searchRowRefs = useRef({});
 
   const body = data?.polished_text || data?.draft_text || '';
 
@@ -515,28 +533,36 @@ export default function TranslationWorkspace({ task, onTaskChange }) {
             : `${rows.length} segments · English is read-only`
         }
         actions={
-          <Button
-            size="sm"
-            onClick={() => setShowPreview(true)}
-            // THE SELF-CHECK IS REQUIRED, NOT ADVISORY -- see
-            // run_quality_gate's 'self-check-not-completed' finding.
-            // `polished_at` is what proves the copy/paste-through-the-
-            // worker's-own-assistant loop actually ran at least once.
-            // Skipped once delivered: that work already passed the gate,
-            // and the button now only offers to VIEW it.
-            disabled={!isDelivered(task) && (
-              (notTranslatedYet && !data?.polished_text) || !data?.polished_at
+          <div className="flex flex-wrap items-center gap-2">
+            {!search.open && (
+              <Button size="sm" variant="ghost" onClick={search.openSearch}
+                      title="Search the English">
+                ⌕ Search
+              </Button>
             )}
-            title={isDelivered(task) ? undefined
-              : notTranslatedYet && !data?.polished_text
-                ? 'Save a translation first'
-                : !data?.polished_at
-                  ? 'Copy the prompt, run it through your own assistant, '
-                    + 'and save the result first'
-                  : undefined}
-          >
-            {isDelivered(task) ? 'View what was submitted' : 'Preview submission'}
-          </Button>
+            <Button
+              size="sm"
+              onClick={() => setShowPreview(true)}
+              // THE SELF-CHECK IS REQUIRED, NOT ADVISORY -- see
+              // run_quality_gate's 'self-check-not-completed' finding.
+              // `polished_at` is what proves the copy/paste-through-the-
+              // worker's-own-assistant loop actually ran at least once.
+              // Skipped once delivered: that work already passed the gate,
+              // and the button now only offers to VIEW it.
+              disabled={!isDelivered(task) && (
+                (notTranslatedYet && !data?.polished_text) || !data?.polished_at
+              )}
+              title={isDelivered(task) ? undefined
+                : notTranslatedYet && !data?.polished_text
+                  ? 'Save a translation first'
+                  : !data?.polished_at
+                    ? 'Copy the prompt, run it through your own assistant, '
+                      + 'and save the result first'
+                    : undefined}
+            >
+              {isDelivered(task) ? 'View what was submitted' : 'Preview submission'}
+            </Button>
+          </div>
         }
         padded={false}
       >
@@ -549,28 +575,50 @@ export default function TranslationWorkspace({ task, onTaskChange }) {
           movement inside this panel and the controls where they were put. */}
       <div ref={listBox} onScroll={onListScroll}
            className="max-h-[60vh] overflow-y-auto overscroll-contain">
-        <div className="sticky top-0 z-10 grid grid-cols-2 gap-px bg-edge/60 text-2xs font-medium text-ink-mute">
-          <div className="bg-surface px-4 py-2">English (source)</div>
-          <div className="bg-surface px-4 py-2">
-            {notTranslatedYet
-              ? 'French — not produced yet'
-              : data?.polished_at ? 'French (machine draft)' : 'French'}
+        {/* ONE STICKY UNIT, NOT TWO COMPETING FOR THE SAME TOP EDGE. The
+            search bar and the column headings both need to stay visible
+            while the list scrolls; stacking them inside one sticky
+            wrapper does that without either fighting the other for
+            `top: 0`. */}
+        <div className="sticky top-0 z-10 bg-surface">
+          <SegmentSearchBar
+            search={search}
+            placeholder="Search the English…"
+            onJump={(row) => {
+              playerRef.current?.seekTo(row.start);
+              searchRowRefs.current[row.key]?.scrollIntoView?.({ block: 'center' });
+            }}
+          />
+          <div className="grid grid-cols-2 gap-px bg-edge/60 text-2xs font-medium text-ink-mute">
+            <div className="bg-surface px-4 py-2">English (source)</div>
+            <div className="bg-surface px-4 py-2">
+              {notTranslatedYet
+                ? 'French — not produced yet'
+                : data?.polished_at ? 'French (machine draft)' : 'French'}
+            </div>
           </div>
         </div>
         <ol className="divide-y divide-edge/60">
           {rows.map((row) => {
             const active = playhead >= row.start && playhead < (row.end ?? row.start);
+            const searching = search.query.trim() !== '';
+            const isMatch = matchingKeys.has(row.key);
+            const isCurrent = search.current?.row.key === row.key;
             return (
               <li
                 key={row.key}
-                ref={active ? activeRow : null}
+                ref={(el) => {
+                  if (active) activeRow.current = el;
+                  searchRowRefs.current[row.key] = el;
+                }}
                 // THE WHOLE ROW SEEKS. Both halves say the same thing, so
                 // either is a fair handle for "play this bit" -- and the
                 // pair is what a reviewer is actually comparing.
                 onClick={() => playerRef.current?.seekTo(row.start)}
                 className={`grid cursor-pointer grid-cols-2 gap-4 px-4 py-2.5 transition-colors ${
-                  active ? 'bg-accent-soft' : 'hover:bg-overlay/60'
-                }`}
+                  isCurrent ? 'bg-accent-soft ring-1 ring-inset ring-accent'
+                    : active ? 'bg-accent-soft' : 'hover:bg-overlay/60'
+                } ${searching && !isMatch ? 'opacity-40' : ''}`}
               >
                 {editing === row.id ? (
                   <div onClick={(e) => e.stopPropagation()}>
@@ -603,7 +651,18 @@ export default function TranslationWorkspace({ task, onTaskChange }) {
                 ) : (
                   <div className={`flex items-start justify-between gap-2 text-xs ${active ? 'text-accent-ink' : 'text-ink-dim'}`}>
                     <p className="flex-1">
-                      {row.english}
+                      {searching
+                        ? splitOnMatch(row.english, search.query).map((part, i) => (
+                            <span
+                              key={i}
+                              className={part.hit
+                                ? 'rounded bg-status-review/30 box-decoration-clone px-0.5'
+                                : undefined}
+                            >
+                              {part.text}
+                            </span>
+                          ))
+                        : row.english}
                       {row.isEdited && (
                         <span
                           title="This line has been edited from what the machine originally heard"
