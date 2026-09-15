@@ -10804,6 +10804,40 @@ class QualityDeterministicCheckTestCase(TestCase):
         )
         self.assertEqual(check_address_consistency(text, 'fr'), [])
 
+    def test_quoted_dialogue_does_not_count_against_the_documents_own_address_form(self):
+        """
+        A REAL FALSE POSITIVE, CONFIRMED ON A REAL PASSED TASK ("A 12.mp3",
+        a lecture on the American South): two guillemet-quoted lines --
+        Toni Morrison's Beloved ("Toi et moi, Sethe...") and Noah Webster's
+        own 18th-century apostrophe to New England ("...combien tes
+        habitudes...") -- were the only two "familiar" matches behind a
+        "2 familiar, 15 polite" finding on a document a human reviewer
+        actually passed unchanged. Quoted speech carries the quoted
+        person's own register, not the transcript's.
+        """
+        from core.services.ai_assist.quality import check_address_consistency
+        text = (
+            'Vous pouvez choisir ce que vous voulez. Votre commande arrive. '
+            '« Toi et moi, Sethe, on a trop d’hier. » '
+            '« Ô Nouvelle-Angleterre, combien tes habitudes sont '
+            'supérieures. » Nous vous remercions de votre présence.'
+        )
+        self.assertEqual(check_address_consistency(text, 'fr'), [])
+
+    def test_a_genuine_slip_just_outside_a_quote_is_still_caught(self):
+        """The exclusion must not blind the check to a real slip sitting
+        right next to a quote -- only text ACTUALLY inside the guillemets
+        is exempt."""
+        from core.services.ai_assist.quality import check_address_consistency
+        text = (
+            'Vous pouvez choisir ce que vous voulez. Votre commande arrive. '
+            '« Toi et moi, Sethe, on a trop d’hier. » '
+            'Tu peux le croire, et ton ticket est prêt.'
+        )
+        issues = check_address_consistency(text, 'fr')
+        self.assertTrue(issues)
+        self.assertEqual(issues[0].rule, 'language.mixed-address')
+
     def test_a_repeated_paragraph_is_flagged(self):
         from core.services.ai_assist.quality import check_duplication
         block = 'A' * 100

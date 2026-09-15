@@ -1362,6 +1362,30 @@ _ADDRESS_FORMS = {
 }
 
 
+#: Text inside a guillemet-quoted span belongs to whoever is being quoted --
+#: a novelist's dialogue, a historical figure's own words -- not to the
+#: document's own address to its audience. CONFIRMED on a real, PASSED
+#: task ("A 12.mp3", a lecture on the American South): Toni Morrison's
+#: Beloved quoted in tu ("« Toi et moi, Sethe, on a trop d'hier. »") and
+#: Noah Webster's own 18th-century apostrophe to New England, also in tu
+#: ("« ... combien tes habitudes... »"), both counted against the
+#: lecturer's own consistently-vous address to the audience -- a false
+#: "2 familiar, 15 polite" finding on a document a human reviewer actually
+#: passed with both lines in it unchanged.
+#:
+#: Excluded structurally, the same way the 'ton' noun/possessive fix
+#: closed a whole class rather than one sentence: ANY quoted dialogue with
+#: its own tu/vous choice is covered, not just these two quotes. The one
+#: honest limit is that it only recognises a quote actually delimited with
+#: guillemets in the translated text -- unmatched or straight-quoted
+#: dialogue still counts, which is no worse than before this fix existed.
+_GUILLEMET_QUOTE_RE = re.compile(r'«[^»]*»')
+
+
+def _outside_quotes(text: str) -> str:
+    return _GUILLEMET_QUOTE_RE.sub(' ', text)
+
+
 def check_address_consistency(text: str, target_language: str,
                               segment_index: Optional[int] = None) -> List[QualityIssue]:
     """
@@ -1389,8 +1413,10 @@ def check_address_consistency(text: str, target_language: str,
         return []
 
     familiar_re, polite_re, familiar_name, polite_name = forms
-    familiar = familiar_re.findall(text)
-    polite = polite_re.findall(text)
+    # QUOTED SPEECH IS EXCLUDED BEFORE COUNTING -- see _outside_quotes.
+    unquoted = _outside_quotes(text)
+    familiar = familiar_re.findall(unquoted)
+    polite = polite_re.findall(unquoted)
     if not familiar or not polite:
         return []
 
