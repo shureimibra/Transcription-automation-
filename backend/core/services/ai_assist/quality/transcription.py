@@ -207,8 +207,8 @@ PROJECT_STANDARDS: Dict[str, str] = {
     'legal proceedings': STRICT_VERBATIM,
     'law':               STRICT_VERBATIM,
     'law class':         STRICT_VERBATIM,
-    'all':               STRICT_VERBATIM,
 
+    'all':               EDITED_VERBATIM,
     'speech':            EDITED_VERBATIM,
     'lecture':           EDITED_VERBATIM,
     'lectures':          EDITED_VERBATIM,
@@ -217,9 +217,28 @@ PROJECT_STANDARDS: Dict[str, str] = {
     'news reports':      EDITED_VERBATIM,
 }
 
-# "All" is a project NAME, and it is three letters long. Matched loosely it
-# would claim "small group discussion" and "Hall lecture" for strict
-# verbatim, which is the expensive direction to be wrong in. Exact only.
+# CHANGED 2026-09-15, FROM STRICT TO EDITED -- 'all' was originally sent to
+# strict on the strength of ONE observed example, a legal-dictation task
+# that happened to carry this label. Real production data now contradicts
+# that generalization: 'all' is the single LARGEST project on the whole
+# platform (155 of the 200 most recently created transcription tasks --
+# nearly 78%, well ahead of the next-largest, "Lectures" at 45), and four
+# real tasks checked directly under it during a live audit -- a quantum
+# mechanics lecture, two civil rights history talks, a welfare-rights
+# history lecture -- carried zero legal content between them. A label this
+# large reads as Eagle's generic, uncategorized bucket, not a legal one;
+# the one legal example the strict mapping was built on was most likely a
+# coincidence, not representative. The real cost of being wrong here was
+# not "slightly messier transcripts" -- every one of those four tasks had
+# a successful, gate-validated standard pass that correctly did nothing to
+# clean them up, because that is strict verbatim's whole job. Matches
+# EDITED_VERBATIM's own default for a task with no project label at all,
+# which was reasoned from the same evidence ("most transcription work on
+# the platform is lectures").
+#
+# "All" is also a project NAME, and it is three letters long. Matched
+# loosely it would claim "small group discussion" and "Hall lecture" too,
+# which is the expensive direction to be wrong in. Exact only.
 _EXACT_ONLY_PROJECTS = frozenset({'all'})
 
 _PROJECT_NORMALISE_RE = re.compile(r'[^a-z ]+')
