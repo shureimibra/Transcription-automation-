@@ -1306,6 +1306,24 @@ def check_autocorrect(text: str, target_language: str,
     return issues
 
 
+#: "ton" IS ALSO AN ORDINARY NOUN ("tone"), and French can never stack two
+#: determiners before one noun -- "le ton juste" (the right tone) cannot
+#: also mean "your right ...", so a determiner immediately before "ton"
+#: proves it is the noun, not the familiar possessive. CONFIRMED LIVE: a
+#: real accepted-pending task was flagged for "1 familiar, 10 polite" on
+#: the strength of exactly one match, "trouver le ton juste" (to find the
+#: right tone) -- zero genuine tu/vous mixing anywhere in the document,
+#: independently confirmed by re-reading the whole thing for every second-
+#: person form by hand. The list is deliberately generous rather than
+#: narrowly tuned to that one sentence, for the same reason the 'cause
+#: exclusions are: closing the whole class of false positive rather than
+#: the one instance that happened to be seen first.
+_TON_NOUN_PRECEDERS = (
+    'le ', 'un ', 'ce ', 'cet ', 'du ', 'au ', 'quel ', 'quelle ',
+    'mon ', 'son ', 'notre ', 'votre ', 'leur ', 'aucun ', 'chaque ',
+    'tout ', 'même ', 'bon ', 'mauvais ', 'autre ', 'certain ',
+)
+
 #: Second-person address, split by register. Only languages with a real
 #: T-V distinction appear here; English has none, so there is nothing to be
 #: inconsistent about.
@@ -1315,9 +1333,19 @@ _ADDRESS_FORMS = {
     # character, so the patterns compiled, ran, and matched NOTHING --
     # reporting every document clean. A check that cannot fail is worse
     # than no check, because it is indistinguishable from a passing one.
+    #
+    # "tiens" IS DELIBERATELY LEFT OUT, not merely unrecognised. It is the
+    # first-person present of "tenir" ("je tiens à vous remercier" --
+    # "I would like to thank you" -- is ordinary formal French with no
+    # second person in it at all) far more often than it is the rare
+    # familiar possessive pronoun ("les tiens"). Keeping it would trade an
+    # occasional real catch for a near-certain false one in exactly the
+    # register -- formal, prepared remarks -- this check runs on most.
     'fr': (
-        re.compile(r"\b(?:tu|t['’]as|t['’]es|toi|ton|ta|tes|tiens)\b",
-                   re.IGNORECASE),
+        re.compile(
+            r"\b(?:tu|t['’]as|t['’]es|toi|ta|tes)\b"
+            r'|' + ''.join(f'(?<!{w})' for w in _TON_NOUN_PRECEDERS) + r'\bton\b',
+            re.IGNORECASE),
         re.compile(r'\b(?:vous|votre|vos|vôtre)\b', re.IGNORECASE),
         'tu', 'vous',
     ),

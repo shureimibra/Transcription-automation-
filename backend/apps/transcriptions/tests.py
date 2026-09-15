@@ -10757,6 +10757,53 @@ class QualityDeterministicCheckTestCase(TestCase):
                 self.assertNotIn(chr(8), familiar_re.pattern)
                 self.assertNotIn(chr(8), polite_re.pattern)
 
+    def test_le_ton_juste_is_a_noun_not_a_slip_into_tutoiement(self):
+        """
+        A REAL FALSE POSITIVE, CONFIRMED ON A REAL PENDING TASK: "trouver
+        le ton juste" ("to find the right tone") was the ONLY match behind
+        a "1 familiar, 10 polite" mixed-address finding on a document with
+        zero genuine tu/vous mixing anywhere in it -- independently
+        confirmed by reading the whole thing by hand for every second-
+        person form. "ton" is an ordinary noun here, not the familiar
+        possessive, and French cannot stack a determiner ("le") in front
+        of a possessive determiner before the same noun.
+        """
+        from core.services.ai_assist.quality import check_address_consistency
+        text = (
+            'Nous voulions vous présenter la conférence. '
+            "J'espère que ce que je vais partager pourra vous être utile. "
+            'Je vais vous ramener loin en arrière, afin de trouver le ton '
+            'juste pour cette histoire, et vous montrer ce que vous '
+            'connaissez déjà.'
+        )
+        self.assertEqual(check_address_consistency(text, 'fr'), [])
+
+    def test_a_genuine_ton_possessive_is_still_caught(self):
+        """The fix above must not blind the check to a real slip: "ton"
+        immediately after a verb, with no article in front of it, is
+        still the familiar possessive, not the noun."""
+        from core.services.ai_assist.quality import check_address_consistency
+        issues = check_address_consistency(
+            'Vous pouvez apporter votre livre. As-tu vu ton ami hier ? '
+            'Votre commande arrive.', 'fr')
+        self.assertTrue(issues)
+        self.assertEqual(issues[0].rule, 'language.mixed-address')
+
+    def test_je_tiens_a_is_not_mistaken_for_familiar_address(self):
+        """
+        "tiens" is far more often the first-person verb ("je tiens à vous
+        remercier" -- ordinary formal French, no second person in it at
+        all) than the rare familiar possessive pronoun ("les tiens").
+        Keeping it in the pattern would flag exactly the register --
+        formal, prepared remarks -- this check runs on most.
+        """
+        from core.services.ai_assist.quality import check_address_consistency
+        text = (
+            'Je tiens à vous remercier pour votre présence. '
+            'Votre soutien compte beaucoup pour nous.'
+        )
+        self.assertEqual(check_address_consistency(text, 'fr'), [])
+
     def test_a_repeated_paragraph_is_flagged(self):
         from core.services.ai_assist.quality import check_duplication
         block = 'A' * 100
