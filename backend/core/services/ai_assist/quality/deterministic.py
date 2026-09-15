@@ -768,6 +768,15 @@ _COMMENTARY_PATTERNS = (
                re.IGNORECASE | re.MULTILINE),
     re.compile(r'[✅❌⚠]'),  # check mark, cross mark, warning sign
     re.compile(r'^\s*```', re.MULTILINE),
+    # worker_prompts._POLISH's own footer, in case it gets pasted along
+    # with the document instead of being read and discarded -- see the
+    # "no leaked scaffolding" entry in that module's header comment.
+    re.compile(r'^\s*verify against audio\s*:', re.IGNORECASE | re.MULTILINE),
+    re.compile(r'^\s*=+\s*translation\s+(?:start|end)\s*=+', re.IGNORECASE | re.MULTILINE),
+    # worker_prompts._REVIEW's CLEAN verdict, only when it is the very
+    # first thing in the document -- exactly the shape a leaked verdict
+    # takes, and not a pattern a real transcript would open with.
+    re.compile(r'\A\s*CLEAN\s*(?:\r?\n|$)'),
 )
 
 # A paragraph repeated verbatim -- the classic symptom of a model looping.

@@ -210,10 +210,12 @@ deliverable is prose. That is correct, not a bug.
    thing — the prompt, the English source and the French draft, all
    correctly ordered — nothing to open, find, or assemble by hand.
 4. **Paste it into your own assistant** (Gemini or similar).
-5. **Check for a `VERIFY AGAINST AUDIO:` line at the end of the reply**
-   (see below) before doing anything else with it.
-6. **Paste the translation** — not that line — into the Polished French
-   box and save.
+5. **Copy only what is between the `=== TRANSLATION START ===` and
+   `=== TRANSLATION END ===` markers in the reply.** Everything outside
+   those markers — a `VERIFY AGAINST AUDIO:` line, or a `CLEAN` verdict
+   — is not part of the document (see below); the markers are there so
+   there is never a guess about where one ends and the other begins.
+6. **Paste that into the Polished French box and save.**
 7. **Let the check run.** It will flag problems.
 8. **Fix what is flagged**, then preview and submit.
 
@@ -242,6 +244,14 @@ whether the "Jr." and the exact circuit number belonged in the
 translation or not — and neither had heard the audio, so neither could
 actually say. Listen to the specific spot named, use what you actually
 hear, and save that — not either assistant's guess.
+
+**If this line (or a `CLEAN` verdict) ever does end up pasted into
+Polished French** — it happened once, from copying a whole reply
+instead of just what was between the markers — the platform's own
+check will catch it and block submission before it reaches Eagle,
+rather than letting it through silently. That is a backstop, not the
+plan: copy only between the markers in step 5 above and it never comes
+up.
 
 ### When the ENGLISH is wrong
 

@@ -37,9 +37,9 @@ WHAT YOU MUST NOT DO — these cause automatic rejection:
 - Do not add any commentary, preamble, heading, or closing remark.
   Do not write "Here is the corrected version" or anything similar.
   Your entire reply must be the corrected French text and nothing else,
-  UNLESS a later instruction in this same prompt explicitly asks for one
-  additional, clearly-labeled line — in that case, and only that case,
-  add exactly the line it describes and nothing more.
+  UNLESS a later instruction in this same prompt explicitly describes a
+  different reply shape — in that case, and only that case, follow
+  exactly the shape it describes and nothing more.
 - Do not summarise, shorten, expand, or reorganise. Every idea in the
   input must appear in your output, in the same order.
 - Do not leave any English word or phrase untranslated, unless it is a
@@ -170,9 +170,20 @@ STRUCTURE:
   paragraphs. Do not merge everything into one block and do not add
   headings that are not in the input.
 
-Reply with the corrected French text, then the VERIFY AGAINST AUDIO line
-described above, and nothing else — no source text, no other commentary,
-no note about what you changed beyond that one line.
+Reply in exactly this shape and nothing else — no source text repeated,
+no other commentary:
+
+=== TRANSLATION START ===
+(the corrected French text goes here — nothing else on these lines)
+=== TRANSLATION END ===
+VERIFY AGAINST AUDIO: (the line described above, or NONE)
+
+ONLY the text between "=== TRANSLATION START ===" and
+"=== TRANSLATION END ===" is the document. Copy exactly that, and
+nothing outside those two lines, into the Polished French field. The
+VERIFY AGAINST AUDIO line is not part of the document — it is for you
+to read and check against the audio, then discard. It must never be
+pasted into the submission.
 
 --- SOURCE (English) ---
 [the task's real English source goes here]
@@ -339,6 +350,25 @@ distinguish it from. Neither contradiction was a reason to remove
 `VERIFY AGAINST AUDIO` — that would have quietly restored the exact
 problem it exists to prevent — so both older rules now name their
 exception explicitly instead.
+
+**A second real risk, caught by a tasker reading their own results
+side by side.** Telling a worker not to paste the `VERIFY AGAINST
+AUDIO` line (or a `CLEAN` verdict) was, for a while, the whole
+safeguard — a sentence in this document and in the prompt itself, with
+nothing making the two parts of the reply visually different from each
+other. Select-all-and-copy, the natural instinct after reading a long
+reply, copies the footer right along with the document, and nothing on
+the platform's own gate was checking for it either — a leaked footer
+would have reached Eagle undetected. Fixed in two places, deliberately
+not just one: the reply itself now wraps ONLY the document in
+`=== TRANSLATION START ===` / `=== TRANSLATION END ===` markers with
+the footer explicitly outside them (see the reply-shape instruction
+above), and `check_commentary` on the server now also blocks a leaked
+`VERIFY AGAINST AUDIO:` line, a leaked `CLEAN`, or a leaked marker if
+the shape gets ignored anyway. The second layer is the one that
+actually matters — a worker forgetting or a wording tweak drifting
+should never be the only thing standing between a leaked footer and a
+real submission.
 
 ## Long documents
 

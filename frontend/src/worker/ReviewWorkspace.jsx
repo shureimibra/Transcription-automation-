@@ -9,7 +9,7 @@ import DeliveredBanner, { isDelivered } from '../components/DeliveredBanner.jsx'
 import SubmittedPanel from '../components/SubmittedPanel.jsx';
 import { useAsync } from '../hooks/useAsync.js';
 import {
-  Button, Card, ErrorState, FOCUS, LiveRegion, Skeleton, inputClass,
+  Button, Card, ErrorState, FOCUS, Notice, Skeleton, inputClass,
 } from '../components/ui/index.jsx';
 
 /**
@@ -416,7 +416,12 @@ export default function ReviewWorkspace({ task, onTaskChange }) {
       />
 
       {error && <ErrorState message={error} onRetry={() => setError('')} compact />}
-      <LiveRegion message={notice} />
+      {/* Every FAILURE on this screen already routes to `error` above, which
+          is visible -- `notice` here is only ever a confirmation ("Saved.",
+          a rename, a copy). Still worth a visible line, not just an
+          aria-live announcement a sighted worker would never see, for the
+          same reason TranslationWorkspace's Notice exists. */}
+      <Notice message={notice} tone="info" />
 
       <DeliveredBanner task={task} />
       <StandardBanner task={task} />

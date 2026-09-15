@@ -10,7 +10,7 @@ import SubmittedPanel from '../components/SubmittedPanel.jsx';
 import DeadlineClock from './DeadlineClock.jsx';
 import TranslationGuideModal from './TranslationGuideModal.jsx';
 import {
-  Button, Card, ErrorState, FOCUS, LiveRegion, Skeleton,
+  Button, Card, ErrorState, FOCUS, Notice, Skeleton,
 } from '../components/ui/index.jsx';
 
 /**
@@ -40,6 +40,17 @@ export default function TranslationWorkspace({ task, onTaskChange }) {
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState(null);
   const [notice, setNotice] = useState('');
+  // THE BUG THIS PAIR EXISTS FOR: a failed save read identically to a
+  // successful one on screen, because the only place either landed was a
+  // screen-reader-only live region. `notify` tags every message with
+  // whether it is a problem, so a real failure -- a save that 404'd
+  // because the task was reclaimed mid-edit, a revert that failed -- reads
+  // visibly differently from "Saved 42 words."
+  const [noticeTone, setNoticeTone] = useState('info');
+  const notify = (message, tone = 'info') => {
+    setNotice(message);
+    setNoticeTone(tone);
+  };
   const [copied, setCopied] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
@@ -151,13 +162,13 @@ export default function TranslationWorkspace({ task, onTaskChange }) {
     // step that goes wrong.
     const payload = prompt ? `${prompt}${text}` : text;
     if (!payload.trim()) {
-      setNotice('There is nothing to copy yet.');
+      notify('There is nothing to copy yet.', 'error');
       return;
     }
     try {
       await navigator.clipboard.writeText(payload);
       setCopied(kind);
-      setNotice(
+      notify(
         kind === 'review'
           ? 'Prompt, English and French copied. Your assistant will reply '
             + 'CLEAN plus the draft ready to paste back if it finds '
@@ -171,7 +182,7 @@ export default function TranslationWorkspace({ task, onTaskChange }) {
     } catch {
       // Clipboard can be refused. The text is on screen and selectable, so
       // there is nothing to apologise for -- just do not claim success.
-      setNotice('Could not copy automatically — select the text and copy it.');
+      notify('Could not copy automatically — select the text and copy it.', 'error');
     }
   };
 
@@ -196,12 +207,12 @@ export default function TranslationWorkspace({ task, onTaskChange }) {
     try {
       await segmentsApi.update(task.job, row.id, { text });
       await refresh({ silent: true });
-      setNotice(
+      notify(
         'English updated. The French has NOT changed — translate the corrected '
         + 'English again in your assistant and paste it below.'
       );
     } catch (err) {
-      setNotice(`Could not save that line: ${err.message}`);
+      notify(`Could not save that line: ${err.message}`, 'error');
     } finally {
       setEditing(null);
     }
@@ -220,12 +231,12 @@ export default function TranslationWorkspace({ task, onTaskChange }) {
     try {
       await segmentsApi.revert(task.job, row.id);
       await refresh({ silent: true });
-      setNotice(
+      notify(
         'Reverted to the original English. If the French was already '
         + 'retranslated from the edit, retranslate this line again.'
       );
     } catch (err) {
-      setNotice(`Could not revert that line: ${err.message}`);
+      notify(`Could not revert that line: ${err.message}`, 'error');
     } finally {
       setReverting(null);
     }
@@ -306,22 +317,26 @@ export default function TranslationWorkspace({ task, onTaskChange }) {
   const copyRetranslated = async (row) => {
     try {
       await navigator.clipboard.writeText(retranslated[row.key] || '');
-      setNotice('Copied. Paste it into the polished French below where it belongs.');
+      notify('Copied. Paste it into the polished French below where it belongs.');
     } catch {
-      setNotice('Could not copy automatically — select the text and copy it.');
+      notify('Could not copy automatically — select the text and copy it.', 'error');
     }
   };
 
   const save = async () => {
     setSaving(true);
-    setNotice('');
+    notify('');
     try {
       const outcome = await translation.save(task.id, pasted);
       setResult(outcome);
-      setNotice(`Saved ${outcome.words} words. ${outcome.findings.length} findings.`);
+      notify(`Saved ${outcome.words} words. ${outcome.findings.length} findings.`);
       refresh({ silent: true });
     } catch (err) {
-      setNotice(err.message);
+      // THE EXACT FAILURE THAT PROMPTED THIS FIX: this used to land only in
+      // a screen-reader-only live region. A worker whose task was reclaimed
+      // mid-edit clicked Save repeatedly and saw nothing change -- no error,
+      // just a Preview button that stayed disabled with no visible reason.
+      notify(err.message, 'error');
     } finally {
       setSaving(false);
     }
@@ -341,7 +356,7 @@ export default function TranslationWorkspace({ task, onTaskChange }) {
         onTimeUpdate={setPlayhead}
       />
       <DeliveredBanner task={task} />
-      <LiveRegion message={notice} />
+      <Notice message={notice} tone={noticeTone} />
       {error && <ErrorState message={error.message} onRetry={() => refresh()} />}
 
       {/* THE BOX IS ALWAYS HERE.

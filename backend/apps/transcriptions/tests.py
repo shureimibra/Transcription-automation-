@@ -10796,6 +10796,30 @@ class QualityDeterministicCheckTestCase(TestCase):
             self.assertTrue(check_commentary(text), f'missed: {text!r}')
         self.assertEqual(check_commentary('Le mandataire agit pour le mandant.'), [])
 
+    def test_leaked_polish_footer_is_caught_as_commentary(self):
+        """
+        A REAL LEAKAGE RISK a tasker flagged directly: worker_prompts._POLISH
+        ends every reply with a VERIFY AGAINST AUDIO footer, and _REVIEW's
+        CLEAN verdict sits right above the draft -- both read as ordinary
+        text, so copying the whole assistant reply pastes them into the
+        submission along with the real document. The prompt now marks the
+        document off with START/END markers (see worker_prompts.py's "no
+        leaked scaffolding" note); this is the gate-side backstop for when
+        the marker boundary gets ignored anyway.
+        """
+        from core.services.ai_assist.quality import check_commentary
+        real_document = 'Le mandataire agit pour le mandant.'
+        for leaked in (
+            real_document + '\nVERIFY AGAINST AUDIO: NONE',
+            real_document + "\nVerify against audio: the judge's name.",
+            '=== TRANSLATION START ===\n' + real_document + '\n=== TRANSLATION END ===',
+            'CLEAN\n' + real_document,
+        ):
+            self.assertTrue(check_commentary(leaked), f'missed: {leaked!r}')
+        # A genuinely clean document, with no leaked verdict in front of it,
+        # must not be caught by the new CLEAN pattern.
+        self.assertEqual(check_commentary(real_document), [])
+
     def test_an_empty_output_is_critical_and_suppresses_noise(self):
         from core.services.ai_assist.quality import run_deterministic_checks
         issues = run_deterministic_checks('take 10 mg twice daily', '')

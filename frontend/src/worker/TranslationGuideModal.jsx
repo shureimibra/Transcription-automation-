@@ -202,18 +202,17 @@ const SECTIONS = [
         </li>
         <li>Paste it into your own assistant (Gemini or similar).</li>
         <li>
-          <strong className="text-ink">Look for a line reading exactly{' '}
-          <code>VERIFY AGAINST AUDIO:</code> at the end of the reply</strong>,
-          before you do anything else with it — see{' '}
-          <em>“VERIFY AGAINST AUDIO”</em> below for what it means and why it
-          is there.
+          <strong className="text-ink">Copy only what is between the{' '}
+          <code>=== TRANSLATION START ===</code> and{' '}
+          <code>=== TRANSLATION END ===</code> markers in the reply.</strong>{' '}
+          Anything outside those markers — a{' '}
+          <code>VERIFY AGAINST AUDIO:</code> line especially — is not part
+          of the document; see <em>“VERIFY AGAINST AUDIO”</em> below for
+          what that line means and why it is there.
         </li>
         <li>
-          Paste what comes back — not that line — into the{' '}
-          <em>Polished French</em> box and press{' '}
-          <Btn>Save polished version</Btn>. If your assistant added a line
-          like “Here is the corrected version”, leave that out too. That
-          exact sentence is what the commentary check looks for.
+          Paste that into the <em>Polished French</em> box and press{' '}
+          <Btn>Save polished version</Btn>.
         </li>
         <li>
           Read what gets flagged. Fix anything shown (see{' '}
@@ -271,14 +270,16 @@ const SECTIONS = [
           can weigh against what the platform’s own gate found.
         </P>
         <P>
-          If it finds nothing, it replies with the word <Btn>CLEAN</Btn> on
-          its own first line, then the French translation, unchanged, right
-          below it — so there is always something ready to paste back,
-          whether or not anything needed fixing. Paste only the part{' '}
-          <strong className="text-ink">below</strong> the CLEAN line into
-          Polished French — the word CLEAN itself is a verdict for you to
-          read, not French text to submit, and pasting it in as-is would show
-          up as a stray English word on the checks. If it finds real
+          If it finds nothing, it replies with the word <Btn>CLEAN</Btn>,
+          then the French translation, unchanged, wrapped in{' '}
+          <code>=== TRANSLATION START ===</code> /{' '}
+          <code>=== TRANSLATION END ===</code> markers — so there is always
+          something ready to paste back, whether or not anything needed
+          fixing. Copy only what is{' '}
+          <strong className="text-ink">between the markers</strong> into
+          Polished French — the word CLEAN above them is a verdict for you
+          to read, not French text to submit, and pasting it in as-is would
+          show up as a stray English word on the checks. If it finds real
           problems instead, you have its list — either ask the same
           assistant to now give you the corrected French incorporating
           exactly those fixes, or switch to <Btn>Copy prompt + translation</Btn>{' '}
@@ -319,6 +320,15 @@ const SECTIONS = [
           listen, submit the translation as given (the uncertain detail was
           already left out of it, not guessed into it) rather than stall
           the deadline over it.
+        </P>
+        <P>
+          If this line (or a <Btn>CLEAN</Btn> verdict) ever does end up
+          pasted into Polished French anyway — it happened once, from
+          copying a whole reply instead of just what was between the
+          markers — the platform’s own check catches it and blocks
+          submission before it reaches Eagle, rather than letting it
+          through silently. That is a backstop, not the plan: copy only
+          between the markers and it never comes up.
         </P>
       </>
     ),

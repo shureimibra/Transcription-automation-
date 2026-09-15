@@ -17,6 +17,17 @@ EVERY RULE HERE CORRESPONDS TO A REAL DEFECT OR A REAL CHECK. None of it is
 stylistic preference:
 
   * no commentary            -- check_commentary blocks the submission
+  * no leaked scaffolding    -- check_commentary also blocks VERIFY AGAINST
+                                AUDIO and CLEAN footers pasted whole into
+                                the document; a tasker flagged on
+                                2026-09-15 that every polish reply ends
+                                with a footer that reads as ordinary text,
+                                a real leak risk if the whole reply gets
+                                copied. Fixed on both sides: the prompt now
+                                wraps the document in START/END markers so
+                                there is something unambiguous to copy, and
+                                the gate catches it if the footer gets
+                                pasted anyway.
   * nothing dropped or added -- check_length_anomaly
   * no source text left      -- check_source_leakage, and a HIGH finding
                                 seen on a live task
@@ -63,9 +74,9 @@ WHAT YOU MUST NOT DO — these cause automatic rejection:
 - Do not add any commentary, preamble, heading, or closing remark. Do not
   write "Here is the corrected version" or anything similar. Your entire
   reply must be the corrected {target} text and nothing else, UNLESS a
-  later instruction in this same prompt explicitly asks for one
-  additional, clearly-labeled line -- in that case, and only that case,
-  add exactly the line it describes and nothing more.
+  later instruction in this same prompt explicitly describes a
+  different reply shape -- in that case, and only that case, follow
+  exactly the shape it describes and nothing more.
 - Do not summarise, shorten, expand, or reorganise. Every idea in the input
   must appear in your output, in the same order.
 - Do not leave any {source} word or phrase untranslated, unless it is a
@@ -245,9 +256,20 @@ can actually listen closes that gap.
 
 {structure}
 
-Reply with the corrected {target} text, then the VERIFY AGAINST AUDIO
-line described above, and nothing else -- no source text, no other
-commentary, no note about what you changed beyond that one line.
+Reply in exactly this shape and nothing else -- no source text repeated,
+no other commentary:
+
+=== TRANSLATION START ===
+(the corrected {target} text goes here -- nothing else on these lines)
+=== TRANSLATION END ===
+VERIFY AGAINST AUDIO: (the line described above, or NONE)
+
+ONLY the text between "=== TRANSLATION START ===" and
+"=== TRANSLATION END ===" is the document. Copy exactly that, and
+nothing outside those two lines, into the Polished {target} field. The
+VERIFY AGAINST AUDIO line is not part of the document -- it is for you
+to read and check against the audio, then discard. It must never be
+pasted into the submission.
 
 --- SOURCE ({source}) ---
 {source_text}
@@ -338,11 +360,18 @@ that cost a submission:
   7. Anything that reads as translated rather than written. Literal
      renderings of idioms, and phrases a native speaker would not say.
 
-If you find nothing at all, reply with exactly two things and nothing
-else: the word CLEAN alone on the first line, then the {target}
-translation exactly as given above, unchanged, starting on the next
-line -- so there is something ready to paste back either way, not just
-a verdict.
+If you find nothing at all, reply with exactly this and nothing else:
+
+CLEAN
+
+=== TRANSLATION START ===
+(the {target} translation exactly as given above, unchanged)
+=== TRANSLATION END ===
+
+ONLY the text between the START and END markers is the document -- if
+you paste anything back, copy exactly that and nothing else. The word
+CLEAN above it is a verdict, not part of the document; it must never
+be pasted into the submission.
 
 --- SOURCE ({source}) ---
 {source_text}

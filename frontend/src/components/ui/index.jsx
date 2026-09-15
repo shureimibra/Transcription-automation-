@@ -161,6 +161,33 @@ export function LiveRegion({ message }) {
   return <div aria-live="polite" aria-atomic="true" className="sr-only">{message}</div>;
 }
 
+/**
+ * A status line a SIGHTED worker can actually see.
+ *
+ * THE BUG THIS EXISTS FOR: a failed save was reaching `LiveRegion`, which
+ * is `sr-only` -- present in the DOM (so a test asserting on the text still
+ * passed) but invisible on screen. A worker whose save silently 404'd (the
+ * task reclaimed out from under them) saw no error at all: no red text, no
+ * banner, just a Save button that appeared to do nothing and a Preview
+ * button that stayed disabled with no visible reason why. `aria-live` and
+ * `role="status"` still make this announce to a screen reader, same as
+ * LiveRegion did -- the fix is making it visible too, not choosing one
+ * over the other.
+ */
+export function Notice({ message, tone = 'info' }) {
+  if (!message) return null;
+  return (
+    <p
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+      className={`text-xs ${tone === 'error' ? 'font-medium text-status-rejected' : 'text-ink-dim'}`}
+    >
+      {message}
+    </p>
+  );
+}
+
 export function Field({ label, error, hint, children, htmlFor }) {
   return (
     <div className="space-y-1.5">

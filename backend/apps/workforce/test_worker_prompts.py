@@ -289,7 +289,28 @@ class WorkerPromptTestCase(TestCase):
         review = self.prompts['review']
         self.assertIn('CLEAN', review)
         self.assertIn('unchanged', review)
-        self.assertIn('ready to paste back either way', review)
+        self.assertIn('=== TRANSLATION START ===', review)
+        self.assertIn('=== TRANSLATION END ===', review)
+
+    def test_the_reply_shape_marks_off_what_is_and_is_not_the_document(self):
+        """
+        A REAL LEAKAGE RISK, FLAGGED DIRECTLY BY A TASKER: every polish
+        reply ends with a VERIFY AGAINST AUDIO footer, and every CLEAN
+        check reply starts with a verdict word -- both read as ordinary
+        text, so copying the whole assistant reply (the natural instinct)
+        pastes them straight into the submission along with the real
+        document. Both prompts now wrap ONLY the document in unambiguous
+        markers and say explicitly what must never be pasted.
+        """
+        polish = self.prompts['polish']
+        self.assertIn('=== TRANSLATION START ===', polish)
+        self.assertIn('=== TRANSLATION END ===', polish)
+        self.assertIn('ONLY the text between', polish)
+        self.assertIn('must never be\npasted into the submission', polish)
+
+        review = self.prompts['review']
+        self.assertIn('is a verdict, not part of the document', review)
+        self.assertIn('must never\nbe pasted into the submission', review)
 
     def test_nothing_may_be_reordered_however_much_is_rewritten(self):
         """

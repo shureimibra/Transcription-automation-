@@ -214,6 +214,25 @@ describe('the polish round trip', () => {
     expect(await screen.findByText(/planethunters\.org/)).toBeInTheDocument();
   });
 
+  it('shows a failed save visibly, not only to a screen reader', async () => {
+    // THE EXACT BUG THIS PROVES FIXED, from a real live incident: a failed
+    // save used to land only in an sr-only live region -- present in the
+    // DOM, so a query for the text would already have passed, but never
+    // seen by a sighted worker. A worker whose task was reclaimed mid-edit
+    // clicked Save repeatedly and saw no error at all, only a Preview
+    // button that stayed disabled with no visible reason why.
+    vi.spyOn(translation, 'save').mockRejectedValue(new Error('Not found.'));
+    render(<TranslationWorkspace task={TASK} />);
+    await screen.findByText('Plusieurs fois par seconde');
+
+    await userEvent.type(screen.getByLabelText('Polished French'), 'Texte poli');
+    await userEvent.click(screen.getByRole('button', { name: 'Save polished version' }));
+
+    const failure = await screen.findByText('Not found.');
+    expect(failure).not.toHaveClass('sr-only');
+    expect(failure.className).toMatch(/status-rejected/);
+  });
+
   it('copies the prompt together with the French, not the French alone', async () => {
     // THE WHOLE POINT OF THE FEATURE. The screen used to name a prompt it
     // did not supply, so each worker brought their own and applied their
