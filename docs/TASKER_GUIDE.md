@@ -177,6 +177,17 @@ check**, between the speaker list and the transcript.
 3. Paste what it found into the box under **What your assistant found**,
    and press **Save accuracy check**.
 
+**As soon as you paste it, a checklist appears below the box** — one card
+per correction, parsed straight out of the same text you just pasted,
+nothing extra to copy anywhere. Each card gets two buttons: **Find it**
+jumps the transcript straight to that phrase (same as searching for it
+by hand), and **Apply** — once you've listened and agree — corrects the
+segment in one click instead of retyping it. A card marked **✓ Applied**
+was already handled, even if a later check re-flags the same thing; one
+that says **Not found in the transcript** most likely means the wording
+already changed since that report was written — nothing broken, just
+nothing left to do there.
+
 > **This is required, not optional.** Submit stays blocked — a critical
 > finding reading *"Copy the accuracy-check prompt, run it through your own
 > assistant, and paste back what it found before submitting"* — until this

@@ -311,6 +311,20 @@ const SECTIONS = [
           <Btn>Save</Btn>, the check will review the OLD text — save first,
           then check, if you want it looking at your latest edit.
         </P>
+        <P>
+          <strong className="text-ink">As soon as you paste the reply into
+          the box below, a checklist appears under it</strong> — one card per
+          correction, parsed straight out of that same pasted text. Each
+          card has <Btn>Find it</Btn> (jumps the transcript to that phrase,
+          same as searching for it) and, once you have listened and agree,{' '}
+          <Btn>Apply</Btn> (corrects the segment in one click instead of
+          retyping it by hand). A card already marked{' '}
+          <strong className="text-ink">✓ Applied</strong> stays that way
+          permanently, even after a later check re-flags the same phrase —
+          <strong className="text-ink"> Not found in the transcript</strong>{' '}
+          usually just means the wording already changed since that report
+          was written.
+        </P>
       </>
     ),
   },

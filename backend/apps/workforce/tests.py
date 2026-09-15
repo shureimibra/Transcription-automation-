@@ -897,6 +897,56 @@ class TaskWorkflowAPITestCase(APITestCase):
         self.assertIn(TaskEvent.TASK_CLAIMED,
                       {row['event_type'] for row in response.data})
 
+    def test_the_holder_can_record_an_applied_finding(self):
+        """
+        See ACCURACY_CHECK_FINDING_APPLIED's own docstring on the model:
+        permanent and additive, unlike accuracy_check_notes, which only
+        ever holds the latest pasted report.
+        """
+        task = services.create_task(actor=self.admin_user)
+        services.claim_task(task.id, self.alice, self.alice_user)
+        self.client.force_authenticate(user=self.alice_user)
+
+        response = self.client.post(
+            f'/api/v1/workforce/tasks/{task.id}/apply-finding/',
+            {'phrase': 'Meridale', 'suggestion': 'Mayor Daley'}, format='json')
+
+        self.assertEqual(response.status_code, 200)
+        event = task.events.get(event_type=TaskEvent.ACCURACY_CHECK_FINDING_APPLIED)
+        self.assertEqual(event.metadata, {'phrase': 'Meridale', 'suggestion': 'Mayor Daley'})
+        self.assertEqual(event.actor_id, self.alice_user.id)
+
+    def test_a_worker_who_does_not_hold_the_task_cannot_record_one(self):
+        """
+        404, not 403 -- TaskAccessPermission already hides a task Bob has
+        no claim on before this view's own holder check ever runs, the
+        same posture used everywhere else in this app (never confirm to
+        an outsider that a task they cannot see exists at all).
+        """
+        task = services.create_task(actor=self.admin_user)
+        services.claim_task(task.id, self.alice, self.alice_user)
+        bob_user, _bob = make_worker('bob', 'W002')
+        self.client.force_authenticate(user=bob_user)
+
+        response = self.client.post(
+            f'/api/v1/workforce/tasks/{task.id}/apply-finding/',
+            {'phrase': 'Meridale', 'suggestion': 'Mayor Daley'}, format='json')
+
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(
+            task.events.filter(event_type=TaskEvent.ACCURACY_CHECK_FINDING_APPLIED).exists())
+
+    def test_applying_a_finding_requires_both_fields(self):
+        task = services.create_task(actor=self.admin_user)
+        services.claim_task(task.id, self.alice, self.alice_user)
+        self.client.force_authenticate(user=self.alice_user)
+
+        response = self.client.post(
+            f'/api/v1/workforce/tasks/{task.id}/apply-finding/',
+            {'phrase': 'Meridale'}, format='json')
+
+        self.assertEqual(response.status_code, 400)
+
     def test_deactivating_a_worker_releases_their_held_tasks(self):
         """Otherwise a suspended worker's queue becomes unreachable work."""
         task = services.create_task(actor=self.admin_user)

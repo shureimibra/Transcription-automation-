@@ -487,6 +487,41 @@ class TaskViewSet(viewsets.ModelViewSet):
         task = self.get_object()
         return Response(TaskEventSerializer(task.events.all()[:200], many=True).data)
 
+    @action(detail=True, methods=['post'], url_path='apply-finding')
+    def apply_finding(self, request, pk=None):
+        """
+        Record that a worker applied ONE specific correction from an
+        accuracy-check report -- see ACCURACY_CHECK_FINDING_APPLIED's own
+        docstring on the model for why this is a separate, permanent event
+        rather than folded into accuracy_check_notes.
+
+        RECORDS ONLY -- DOES NOT TOUCH THE TRANSCRIPT. The actual text
+        change goes through the ordinary segment-edit endpoint, exactly
+        like any other correction a worker makes by hand; this is the
+        audit trail alongside it, not a replacement for it.
+        """
+        task = self.get_object()
+        phrase = str(request.data.get('phrase') or '').strip()[:500]
+        suggestion = str(request.data.get('suggestion') or '').strip()[:500]
+        if not phrase or not suggestion:
+            return Response(
+                {'error': 'Provide both phrase and suggestion.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        profile = worker_profile(request.user)
+        is_holder = profile is not None and task.claimed_by_id == profile.id
+        if not is_admin(request.user) and not is_holder:
+            return Response(
+                {'error': 'Only the worker holding this task can do that.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        services.record_event(
+            task, TaskEvent.ACCURACY_CHECK_FINDING_APPLIED, actor=request.user,
+            message=f'Applied: "{phrase}" -> "{suggestion}"',
+            metadata={'phrase': phrase, 'suggestion': suggestion},
+        )
+        return Response({'recorded': True})
+
 
 class WorkerViewSet(viewsets.ModelViewSet):
     """Admin worker management. Workers use `/me/` instead."""

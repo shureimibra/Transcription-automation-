@@ -482,11 +482,21 @@ class TaskEvent(models.Model):
     # check a transcript against the accuracy-check prompt. The transcript
     # itself is unaffected by this event -- see Task.accuracy_check_notes.
     ACCURACY_CHECK_COMPLETED = 'ACCURACY_CHECK_COMPLETED'
+    # A worker applied ONE specific correction from an accuracy-check
+    # report to the transcript. Deliberately its own permanent, additive
+    # event rather than folded into accuracy_check_notes -- that field
+    # holds only the LATEST pasted report (a second check overwrites the
+    # first), so without this there would be no way to tell, once a
+    # second report replaces the first, which of the first report's
+    # findings were already acted on. `metadata` carries `phrase` and
+    # `suggestion`, so a later check re-flagging the same phrase can be
+    # told apart from a genuinely new one.
+    ACCURACY_CHECK_FINDING_APPLIED = 'ACCURACY_CHECK_FINDING_APPLIED'
 
     EVENT_CHOICES = [(name, name) for name in (
         TASK_CREATED, TASK_ASSIGNED, TASK_UNASSIGNED, TASK_CLAIMED,
         TASK_RELEASED, TASK_STARTED, TRANSLATION_POLISHED,
-        ACCURACY_CHECK_COMPLETED,
+        ACCURACY_CHECK_COMPLETED, ACCURACY_CHECK_FINDING_APPLIED,
         TRANSCRIPTION_STARTED,
         TRANSCRIPTION_COMPLETED, AI_PROCESSING_STARTED,
         AI_PROCESSING_COMPLETED, REVIEW_STARTED, READY_FOR_SUBMISSION,

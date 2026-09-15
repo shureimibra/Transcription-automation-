@@ -27,6 +27,11 @@ export const tasks = {
   get:    (id) => api.get(`/workforce/tasks/${id}/`),
   events: (id) => api.get(`/workforce/tasks/${id}/events/`),
   create: (data) => api.post('/workforce/tasks/', data),
+  // Records that one accuracy-check finding was applied -- permanent and
+  // additive, so a later check re-flagging the same phrase can be told
+  // apart from a new one. Does not touch the transcript itself.
+  applyFinding: (id, phrase, suggestion) =>
+    api.post(`/workforce/tasks/${id}/apply-finding/`, { phrase, suggestion }),
 
   // Worker actions.
   claim:       (id) => api.post(`/workforce/tasks/${id}/claim/`),

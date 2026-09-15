@@ -2,11 +2,14 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import AudioPlayer from './AudioPlayer.jsx';
 import DeadlineClock from './DeadlineClock.jsx';
 import { segments as segmentsApi, submission, taskMedia, transcript } from '../api/eagle.js';
+import { tasks as tasksApi } from '../api/workforce.js';
 import { ANNOTATION_TAGS, insertTagAtPosition } from '../lib/annotations.js';
+import { parseFindings, replaceFirst } from '../lib/accuracyFindings.js';
 import TranscriptionGuideModal from './TranscriptionGuideModal.jsx';
 import Verdict from '../components/Verdict.jsx';
 import DeliveredBanner, { isDelivered } from '../components/DeliveredBanner.jsx';
 import SubmittedPanel from '../components/SubmittedPanel.jsx';
+import AccuracyChecklist from '../components/AccuracyChecklist.jsx';
 import { useAsync } from '../hooks/useAsync.js';
 import { useSegmentSearch, splitOnMatch } from '../hooks/useSegmentSearch.js';
 import SegmentSearchBar from '../components/SegmentSearchBar.jsx';
@@ -314,6 +317,78 @@ export default function ReviewWorkspace({ task, onTaskChange }) {
     }
   };
 
+  // TURNING THE PASTED REPORT INTO A CHECKLIST, NOT JUST A RECORD.
+  //
+  // See AccuracyChecklist's own docstring for why "Apply" writes straight
+  // to the segment rather than opening a second editable draft, and why
+  // there is deliberately no "apply everything" shortcut.
+  //
+  // `appliedPhrases` comes from real, permanent history
+  // (ACCURACY_CHECK_FINDING_APPLIED events), NOT from accuracy_check_notes
+  // -- that field holds only the latest pasted report, so it alone could
+  // never tell a re-flagged phrase from a first-flagged one once a second
+  // check overwrites the first. See the event's own docstring on the
+  // model for the full reasoning.
+  const { data: taskEvents, refresh: refreshEvents } = useAsync(
+    () => tasksApi.events(task.id), [task.id],
+  );
+  const appliedAt = useMemo(() => {
+    const map = new Map();
+    for (const event of taskEvents || []) {
+      if (event.event_type !== 'ACCURACY_CHECK_FINDING_APPLIED') continue;
+      const phrase = (event.metadata?.phrase || '').toLowerCase();
+      // Events come back newest-first; the first one seen per phrase is
+      // therefore the most recent application of it.
+      if (phrase && !map.has(phrase)) map.set(phrase, event.occurred_at);
+    }
+    return map;
+  }, [taskEvents]);
+
+  const findings = useMemo(() => parseFindings(checkNotesInput), [checkNotesInput]);
+  const enrichedFindings = useMemo(() => findings.map((finding) => {
+    const key = finding.phrase.toLowerCase();
+    const when = appliedAt.get(key);
+    return {
+      ...finding,
+      applied: Boolean(when),
+      appliedAt: when ? new Date(when).toLocaleDateString() : null,
+      found: rows.some((r) => (r.text || '').toLowerCase().includes(key)),
+    };
+  }), [findings, appliedAt, rows]);
+
+  const [applyingPhrase, setApplyingPhrase] = useState(null);
+
+  const findFinding = (finding) => {
+    search.setQuery(finding.phrase);
+    if (!search.open) search.openSearch();
+  };
+
+  const applyFinding = async (finding) => {
+    const key = finding.phrase.toLowerCase();
+    const row = rows.find((r) => (r.text || '').toLowerCase().includes(key));
+    if (!row) return;
+    setApplyingPhrase(finding.phrase);
+    setError('');
+    try {
+      const newText = replaceFirst(row.text, finding.phrase, finding.suggestion);
+      const updated = await segmentsApi.update(jobId, row.id, { text: newText });
+      setData((current) => (current ? {
+        ...current,
+        segments: current.segments.map((s) => (s.id === row.id ? { ...s, ...updated } : s)),
+      } : current));
+      // Recorded only once the segment write actually succeeded -- the
+      // audit trail must never claim a correction was applied when it
+      // was not.
+      await tasksApi.applyFinding(task.id, finding.phrase, finding.suggestion);
+      await refreshEvents({ silent: true });
+      setNotice(`Applied: "${finding.phrase}" → "${finding.suggestion}"`);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setApplyingPhrase(null);
+    }
+  };
+
   /**
    * Same tag vocabulary and the same fixed insertion behaviour as the
    * studio (views/Dashboard.jsx / lib/annotations.js): lands at the last
@@ -608,6 +683,14 @@ export default function ReviewWorkspace({ task, onTaskChange }) {
                   : 'Not completed yet'}
               </span>
             </div>
+            {/* Same box, same paste, no second place to put the same text --
+                the checklist is just what its own contents parse into. */}
+            <AccuracyChecklist
+              findings={enrichedFindings}
+              onFind={findFinding}
+              onApply={applyFinding}
+              applying={applyingPhrase}
+            />
           </div>
         </Card>
       )}

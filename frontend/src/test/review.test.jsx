@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event';
 import ReviewWorkspace from '../worker/ReviewWorkspace.jsx';
 import DeadlineClock from '../worker/DeadlineClock.jsx';
 import { segments as segmentsApi, submission, taskMedia, transcript } from '../api/eagle.js';
+import { tasks as tasksApi } from '../api/workforce.js';
 
 /**
  * The review surface.
@@ -645,6 +646,114 @@ describe('the accuracy check paste-back', () => {
     await screen.findByText('first turn');
 
     expect(screen.queryByText('Accuracy check')).not.toBeInTheDocument();
+  });
+});
+
+describe('the accuracy-check checklist', () => {
+  // Turns the SAME pasted report into one-click actions -- see
+  // AccuracyChecklist's own docstring for why "Apply" writes straight to
+  // the segment instead of opening a second editable draft.
+
+  const REPORT = (
+    '* the phrase as transcribed: first turn\n'
+    + '* what you think it should probably be: First Turn\n'
+    + '* why: Should be capitalized as a proper title.'
+  );
+
+  it('parses the pasted report into a checklist as you type', async () => {
+    vi.spyOn(tasksApi, 'events').mockResolvedValue([]);
+    render(<ReviewWorkspace task={TASK} />);
+    await screen.findByText('first turn');
+
+    await userEvent.type(screen.getByLabelText('What your assistant found'), REPORT);
+
+    expect(await screen.findByText('First Turn')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Find it' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Apply' })).toBeInTheDocument();
+  });
+
+  it('"Find it" opens the search box already searching for the phrase', async () => {
+    vi.spyOn(tasksApi, 'events').mockResolvedValue([]);
+    render(<ReviewWorkspace task={TASK} />);
+    await screen.findByText('first turn');
+    await userEvent.type(screen.getByLabelText('What your assistant found'), REPORT);
+    await screen.findByText('First Turn');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Find it' }));
+
+    expect(await screen.findByPlaceholderText('Search the transcript…'))
+      .toHaveValue('first turn');
+  });
+
+  it('"Apply" corrects the segment and records a permanent, dateable event', async () => {
+    vi.spyOn(tasksApi, 'events').mockResolvedValue([]);
+    const update = vi.spyOn(segmentsApi, 'update').mockResolvedValue({
+      ...JOB.segments[0], text: 'First Turn',
+    });
+    const apply = vi.spyOn(tasksApi, 'applyFinding').mockResolvedValue({ recorded: true });
+    render(<ReviewWorkspace task={TASK} />);
+    await screen.findByText('first turn');
+    await userEvent.type(screen.getByLabelText('What your assistant found'), REPORT);
+    await screen.findByText('First Turn');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
+    await waitFor(() => expect(update).toHaveBeenCalledWith(
+      'job-1', 's1', { text: 'First Turn' },
+    ));
+    await waitFor(() => expect(apply).toHaveBeenCalledWith(
+      'task-1', 'first turn', 'First Turn',
+    ));
+  });
+
+  it('shows an already-applied finding as done, from real history, not the notes text', async () => {
+    // The whole point: accuracy_check_notes only ever holds the LATEST
+    // pasted report, so this has to come from a permanent event, not from
+    // anything re-derived out of the box's current contents.
+    vi.spyOn(tasksApi, 'events').mockResolvedValue([
+      {
+        id: 1, event_type: 'ACCURACY_CHECK_FINDING_APPLIED',
+        occurred_at: '2026-09-10T12:00:00Z',
+        metadata: { phrase: 'first turn', suggestion: 'First Turn' },
+      },
+    ]);
+    render(<ReviewWorkspace task={TASK} />);
+    await screen.findByText('first turn');
+    await userEvent.type(screen.getByLabelText('What your assistant found'), REPORT);
+
+    expect(await screen.findByText(/Applied/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument();
+  });
+
+  it('tells a worker a phrase is likely already fixed instead of a dead button', async () => {
+    vi.spyOn(tasksApi, 'events').mockResolvedValue([]);
+    const report = (
+      '* the phrase as transcribed: something nobody said\n'
+      + '* what you think it should probably be: a correction\n'
+      + '* why: example'
+    );
+    render(<ReviewWorkspace task={TASK} />);
+    await screen.findByText('first turn');
+
+    await userEvent.type(screen.getByLabelText('What your assistant found'), report);
+
+    expect(await screen.findByText(/Not found in the transcript/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument();
+  });
+
+  it('drops a "not sure" answer -- nothing to search for or apply', async () => {
+    vi.spyOn(tasksApi, 'events').mockResolvedValue([]);
+    const report = (
+      '* the phrase as transcribed: first turn\n'
+      + '* what you think it should probably be: not sure\n'
+      + '* why: unclear'
+    );
+    render(<ReviewWorkspace task={TASK} />);
+    await screen.findByText('first turn');
+
+    await userEvent.type(screen.getByLabelText('What your assistant found'), report);
+
+    expect(screen.queryByRole('button', { name: 'Find it' })).not.toBeInTheDocument();
   });
 });
 

@@ -36,6 +36,8 @@ const EVENT_LABELS = {
   REJECTED: 'Rejected',
   FAILED: 'Failed',
   CANCELLED: 'Cancelled',
+  ACCURACY_CHECK_COMPLETED: 'Accuracy check pasted back',
+  ACCURACY_CHECK_FINDING_APPLIED: 'Correction applied',
 };
 
 function label(event) {
