@@ -651,6 +651,7 @@ export default function ReviewWorkspace({ task, onTaskChange }) {
             playerRef.current?.seekTo(row.start_time);
             searchRowRefs.current[row.id]?.scrollIntoView?.({ block: 'center' });
           }}
+          onTogglePlay={() => playerRef.current?.togglePlay()}
         />
         <ol className="divide-y divide-edge/60">
           {rows.map((row) => {

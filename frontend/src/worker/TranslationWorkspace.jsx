@@ -588,6 +588,7 @@ export default function TranslationWorkspace({ task, onTaskChange }) {
               playerRef.current?.seekTo(row.start);
               searchRowRefs.current[row.key]?.scrollIntoView?.({ block: 'center' });
             }}
+            onTogglePlay={() => playerRef.current?.togglePlay()}
           />
           <div className="grid grid-cols-2 gap-px bg-edge/60 text-2xs font-medium text-ink-mute">
             <div className="bg-surface px-4 py-2">English (source)</div>

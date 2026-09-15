@@ -16,8 +16,18 @@ import { Button } from './ui/index.jsx';
  * new first hit, Enter/Next, Shift+Enter/Previous. This component owns
  * only the query and the match list; the caller decides what "jump"
  * means for its own screen (seek the audio, scroll the row into view).
+ *
+ * `onTogglePlay` fixes a real, reported bug: the player's own Space
+ * shortcut is deliberately disabled while ANY text input has focus (so
+ * Space does not hijack play/pause while someone is mid-sentence in the
+ * segment editor) -- but that left a worker who had just searched with no
+ * way to pause at all, since focus sits right here until they remember to
+ * click away. Space is not prevented here, so it still types a literal
+ * space for a multi-word search ("h power") exactly as before; it ALSO
+ * now toggles playback in the same keystroke, so a worker never has to
+ * choose between the two or go hunting for something to click.
  */
-export default function SegmentSearchBar({ search, onJump, placeholder = 'Search…' }) {
+export default function SegmentSearchBar({ search, onJump, onTogglePlay, placeholder = 'Search…' }) {
   const inputRef = useRef(null);
   const {
     open, query, setQuery, matches, index, current, next, prev, closeSearch,
@@ -51,6 +61,8 @@ export default function SegmentSearchBar({ search, onJump, placeholder = 'Search
         onKeyDown={(e) => {
           if (e.key === 'Escape') closeSearch();
           if (e.key === 'Enter') { e.preventDefault(); e.shiftKey ? prev() : next(); }
+          // NOT prevented -- the space still has to land in the query too.
+          if (e.code === 'Space') onTogglePlay?.();
         }}
         placeholder={placeholder}
         aria-label={placeholder}

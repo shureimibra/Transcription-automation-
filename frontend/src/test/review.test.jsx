@@ -264,6 +264,28 @@ describe('the transcript', () => {
       expect(await screen.findByText('1 of 3')).toBeInTheDocument();
     });
 
+    it('space still pauses even while the search box has focus', async () => {
+      // A REAL, REPORTED BUG: the player's own Space shortcut is disabled
+      // while any text input has focus (correct, so it does not hijack
+      // Space while someone is mid-sentence in the segment editor) -- but
+      // that left a worker who had just searched with no way to pause at
+      // all, typing silently into the query box instead, with no obvious
+      // way back short of remembering to click elsewhere.
+      render(<ReviewWorkspace task={TASK} />);
+      await screen.findByText('first turn');
+
+      await userEvent.click(screen.getByRole('button', { name: /Search/ }));
+      const input = screen.getByPlaceholderText('Search the transcript…');
+      await userEvent.type(input, 'turn');
+      await screen.findByText('1 of 3');
+
+      await userEvent.type(input, ' ');
+      // The space still landed in the query -- multi-word search ("h
+      // power") must keep working, not be traded away for this fix.
+      expect(input).toHaveValue('turn ');
+      expect(window.HTMLMediaElement.prototype.play).toHaveBeenCalled();
+    });
+
     it('reports no matches rather than an empty count', async () => {
       render(<ReviewWorkspace task={TASK} />);
       await screen.findByText('first turn');
