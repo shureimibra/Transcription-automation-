@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { tasks as tasksApi } from '../api/workforce.js';
 import { useAsync, usePolling } from '../hooks/useAsync.js';
@@ -6,8 +6,9 @@ import { useTaskStream } from '../hooks/useTaskStream.js';
 import { useAuth } from '../auth/AuthContext.jsx';
 import TaskCard from '../components/TaskCard.jsx';
 import ReviewOutcomes from './ReviewOutcomes.jsx';
+import { taskLabel } from '../lib/format.js';
 import {
-  Card, EmptyState, ErrorState, FOCUS, PageHero, Skeleton, Stat,
+  Card, EmptyState, ErrorState, FOCUS, Notice, PageHero, Skeleton, Stat,
 } from '../components/ui/index.jsx';
 import { HomeIcon } from '../components/icons.jsx';
 
@@ -41,7 +42,31 @@ export default function WorkerDashboard() {
   // correct when the socket is not there.
   useTaskStream(useCallback(() => refresh({ silent: true }), [refresh]));
 
+  // A CLAIMED CARD DISAPPEARS FROM "UP NEXT" AS SOON AS THE REFETCH LANDS --
+  // that is correct (it now belongs under "Current work"), but it is also
+  // exactly what a mis-fired click looks like. A worker claimed two tasks
+  // in one motion this way: clicked Claim, the grid silently reshuffled
+  // (the card gone, the next four sliding up to fill its spot), read that
+  // as "nothing happened", and clicked what was now a DIFFERENT task's
+  // Claim button sitting in the same screen position. The button itself
+  // was never unresponsive -- see TaskActions' `loading` state -- the
+  // reshuffle just outran the worker's eye. A confirmation anchored to the
+  // page, not to a card the list is about to remove, survives the reshuffle.
+  const [claimedNotice, setClaimedNotice] = useState('');
+  const clearNoticeTimer = useRef(null);
+
+  useEffect(() => () => clearTimeout(clearNoticeTimer.current), []);
+
   const replaceTask = useCallback((updated) => {
+    // Only the claim transition ever lands a task ON `claimed` -- every
+    // other action in TaskActions' ACTIONS map targets a different status,
+    // so this is a reliable "a claim just succeeded" signal without
+    // threading a second callback through TaskCard/TaskActions for it.
+    if (updated?.status === 'claimed') {
+      setClaimedNotice(`Claimed ${taskLabel(updated)} — it moved to "Current work" below.`);
+      clearTimeout(clearNoticeTimer.current);
+      clearNoticeTimer.current = setTimeout(() => setClaimedNotice(''), 8000);
+    }
     // A task that changed state may belong in a different list now, so the
     // authoritative move is a refetch -- but do it silently, without
     // blanking the screen the worker is looking at.
@@ -118,6 +143,18 @@ export default function WorkerDashboard() {
           message={error.message}
           onRetry={() => refresh()}
         />
+      )}
+
+      {/* Anchored above the grid it is confirming, on purpose -- this is the
+          one thing on the page that does NOT move when "Up next" reshuffles
+          after a claim, which is the whole point of it. */}
+      {claimedNotice && (
+        <div
+          className="flex items-center gap-2 rounded-xl2 border border-status-ready/30
+                     bg-status-ready/10 px-4 py-2.5"
+        >
+          <Notice message={claimedNotice} />
+        </div>
       )}
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
