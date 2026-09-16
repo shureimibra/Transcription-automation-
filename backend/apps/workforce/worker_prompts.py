@@ -157,7 +157,21 @@ _WHAT_TO_FIX = """\
 WHAT TO FIX:
 1. Fluency. Rewrite anything that reads as machine-translated so that it
    reads as though written by a native {target} professional. Fix word
-   order, agreement, tense, register, and awkward literal renderings.
+   order, agreement, tense, register, and awkward literal renderings. You
+   may split one long {source} sentence into two {target} ones, or merge
+   two into one, when that is what natural {target} rhythm calls for --
+   {target} does not have to inherit the transcript's sentence boundaries,
+   only its content and order. Vary your connectors, too: a translation
+   that reaches for the same one every time it needs to connect an idea
+   reads as translated even when every word in it is correct.
+1b. FALSE COGNATES ARE STILL A TRANSLATION MISTAKE, EVEN THOUGH THE WORD
+   EXISTS IN {target}. A word that looks like its {source} cousin is not
+   always its translation. In French, for example: "opportunité" for a
+   plain "opportunity" reads as an anglicism where "occasion" or
+   "possibilité" is the ordinary word; "impacter" is common in speech but
+   "toucher" or "avoir une incidence sur" is more standard in writing.
+   These are correct {target} words used in the wrong sense -- nothing a
+   spellchecker or a dictionary lookup on the word alone would catch.
 2. Terminology consistency. Once you choose a {target} term for a recurring
    concept, use that same term everywhere. Never render one source term
    three different ways.
@@ -214,7 +228,10 @@ FRENCH TYPOGRAPHY — apply all of these:
   $1,000. A real submission got this right in one paragraph and then left
   eight figures in a row in the English format later in the same document.
 - Apostrophes as ’ (typographic), not '
-- Capitalise only the first word of a title, plus proper nouns""",
+- Capitalise only the first word of a title, plus proper nouns
+- Centuries: a Roman numeral with a superscript ordinal -- XIXᵉ siècle,
+  XXᵉ siècle -- never a plain digit ("19e siècle") and never spelled
+  out ("dix-neuvième siècle")""",
 }
 
 _TYPOGRAPHY_DEFAULT = """\
@@ -283,6 +300,16 @@ construct, the same way you would resolve any other genuine ambiguity --
 but do not let a confident-sounding {target} sentence hide that the
 underlying {source} was broken. Name the spot on the VERIFY AGAINST AUDIO
 line the same way, with a short note on what made it unclear.
+
+THIS IS ABOUT TRANSCRIPTION NOISE, NOT ABOUT WHAT THE SPEAKER ACTUALLY
+MEANT. A clause that does not parse is a different problem from a clause
+that parses fine but sounds inconsistent, uncomfortable, or self-
+contradictory -- a speaker genuinely saying two things that sit in
+tension is real content, not an artifact, and smoothing it into
+something that reads more logically is an invention the audio can't
+excuse. Translate what the source actually says, contradiction and all;
+only route a spot to VERIFY AGAINST AUDIO when the WORDS THEMSELVES do
+not parse, never merely because the MEANING is surprising.
 
 {typography}
 

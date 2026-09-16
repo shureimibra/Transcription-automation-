@@ -61,6 +61,36 @@ class WorkerPromptTestCase(TestCase):
                 self.assertIn('ONE QUANTITY PRECEDES SEVERAL CATEGORIES', text)
                 self.assertIn('shared total', text)
 
+    def test_every_prompt_allows_redrawing_sentence_boundaries(self):
+        """FROM A COMPARISON AGAINST A COACH'S OWN AUDIT PROMPT: this prompt
+        used to say "fix word order", which licenses reordering words
+        inside a sentence but never says a long English sentence may become
+        two French ones, or the reverse -- exactly what natural French
+        rhythm often calls for on a spoken transcript."""
+        for name, text in self.prompts.items():
+            with self.subTest(prompt=name):
+                self.assertIn('split one long', text)
+                self.assertIn('Vary your connectors', text)
+
+    def test_every_prompt_names_false_cognates_as_their_own_category(self):
+        """opportunite/impacter are grammatically correct French words used
+        in the wrong sense -- invisible to a spellchecker and to "translate
+        every term" alike, since the word IS translated, just wrongly."""
+        for name, text in self.prompts.items():
+            with self.subTest(prompt=name):
+                self.assertIn('FALSE COGNATES', text)
+                self.assertIn('opportunité', text)
+                self.assertIn('impacter', text)
+
+    def test_french_typography_requires_the_superscript_century_ordinal(self):
+        """XIXe siecle, not 19e siecle or spelled out -- a real French
+        convention this prompt never stated until compared against a
+        coach's own audit prompt that does."""
+        for name, text in self.prompts.items():
+            with self.subTest(prompt=name):
+                self.assertIn('XIXᵉ siècle', text)
+                self.assertIn('never spelled\n  out', text)
+
     def test_every_prompt_forbids_leaving_source_text_untranslated(self):
         # A HIGH finding seen on a real task: a run of English carried
         # straight into the French. It does not block submission, so the
@@ -282,6 +312,19 @@ class WorkerPromptTestCase(TestCase):
         polish = self.prompts['polish']
         self.assertIn('THE SAME LIMIT APPLIES TO WHAT A QUANTITY COVERS', polish)
         self.assertIn('name the spot on the VERIFY AGAINST AUDIO line', polish)
+
+    def test_the_polish_prompt_does_not_smooth_over_a_genuine_contradiction(self):
+        """
+        FROM A COMPARISON AGAINST A COACH'S OWN AUDIT PROMPT: its rule --
+        "do not fix logical conflicts in the original text unless it is an
+        explicit typo" -- is the missing other half of the garbled-clause
+        addition. Without it, "translate the most plausible reading" risks
+        treating a speaker's real, uncomfortable point as transcription
+        noise and quietly smoothing it into something tidier.
+        """
+        polish = self.prompts['polish']
+        self.assertIn('NOT ABOUT WHAT THE SPEAKER ACTUALLY\nMEANT', polish)
+        self.assertIn('contradiction and all', polish)
 
     def test_the_polish_prompt_extends_audio_verification_to_garbled_source_prose(self):
         """

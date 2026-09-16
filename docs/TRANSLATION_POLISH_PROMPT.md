@@ -111,7 +111,21 @@ WHAT YOU MUST NOT DO — these cause automatic rejection:
 WHAT TO FIX:
 1. Fluency. Rewrite anything that reads as machine-translated so that it
    reads as though written by a native French professional. Fix word order,
-   agreement, tense, register, and awkward literal renderings.
+   agreement, tense, register, and awkward literal renderings. You may
+   split one long English sentence into two French ones, or merge two into
+   one, when that is what natural French rhythm calls for - French does
+   not have to inherit the transcript's sentence boundaries, only its
+   content and order. Vary your connectors, too: a translation that
+   reaches for the same one every time it needs to connect an idea reads
+   as translated even when every word in it is correct.
+1b. FALSE COGNATES ARE STILL A TRANSLATION MISTAKE, EVEN THOUGH THE WORD
+   EXISTS IN FRENCH. A word that looks like its English cousin is not
+   always its translation. "Opportunité" for a plain "opportunity" reads
+   as an anglicism where "occasion" or "possibilité" is the ordinary
+   word; "impacter" is common in speech but "toucher" or "avoir une
+   incidence sur" is more standard in writing. These are correct French
+   words used in the wrong sense - nothing a spellchecker or a dictionary
+   lookup on the word alone would catch.
 2. Terminology consistency. Once you choose a French term for a recurring
    concept, use that same term everywhere. Never render one source term
    three different ways.
@@ -177,6 +191,16 @@ but do not let a confident-sounding French sentence hide that the
 underlying English was broken. Name the spot on the VERIFY AGAINST AUDIO
 line the same way, with a short note on what made it unclear.
 
+THIS IS ABOUT TRANSCRIPTION NOISE, NOT ABOUT WHAT THE SPEAKER ACTUALLY
+MEANT. A clause that does not parse is a different problem from a clause
+that parses fine but sounds inconsistent, uncomfortable, or self-
+contradictory — a speaker genuinely saying two things that sit in
+tension is real content, not an artifact, and smoothing it into
+something that reads more logically is an invention the audio can't
+excuse. Translate what the source actually says, contradiction and all;
+only route a spot to VERIFY AGAINST AUDIO when the WORDS THEMSELVES do
+not parse, never merely because the MEANING is surprising.
+
 FRENCH TYPOGRAPHY — apply all of these:
 - Narrow non-breaking space before ; : ! and ?
 - Guillemets with inner spacing for quotations: « comme ceci »
@@ -189,6 +213,9 @@ FRENCH TYPOGRAPHY — apply all of these:
   eight figures in a row in the English format later in the same document.
 - Apostrophes as ’ (typographic), not '
 - Capitalise only the first word of a title, plus proper nouns
+- Centuries: a Roman numeral with a superscript ordinal - XIXᵉ siècle,
+  XXᵉ siècle - never a plain digit ("19e siècle") and never spelled out
+  ("dix-neuvième siècle")
 
 STRUCTURE:
 - Keep the paragraph breaks of the input. One blank line between
@@ -237,6 +264,11 @@ None of it is stylistic preference.
 | Numbers unchanged | `check_numbers` — **CRITICAL**, blocks submission outright |
 | Quantity's scope across categories preserved | Not automatically checkable — see below |
 | A garbled source clause flagged, not silently resolved | Not automatically checkable — see below |
+| Sentence boundaries allowed to move for French rhythm | Not automatically checkable — a judgment call, not a defect class |
+| Connector variety | Not automatically checkable — see below |
+| False cognates (*opportunité*, *impacter*, …) | Not automatically checkable — see below |
+| Centuries as `XIXᵉ siècle`, not `19e siècle` | Not automatically checkable — see below |
+| A genuine source contradiction left alone, not smoothed over | Not automatically checkable — see below |
 | No repeated paragraph | `check_duplication` — the signature of a model looping |
 | No invented references | `entity.invented-reference` — **HIGH**. Added after a real run supplied `planethunters.org`, a site the speaker never named |
 | French only | `language.foreign-word` — **MEDIUM**. Added after a real run wrote Spanish `decir` where French needs `dire`. Quoted titles are exempt |
@@ -577,6 +609,50 @@ those words. That one did **not** get a prompt change — restating an
 existing instruction more loudly does not fix an assistant not following
 it once, and the fix for that class of thing is catching it on the
 before-submit read, not more prompt text.
+
+## What a coach's own audit prompt taught us, and what it didn't
+
+A separate two-stage audit prompt, written independently for the same
+platform, was compared line by line against this one — not to replace it,
+but to check for real gaps on either side. Five things from it earned a
+place here:
+
+- **Sentence-boundary license.** It explicitly authorises splitting or
+  merging a sentence for native rhythm; this prompt previously said
+  nothing beyond "fix word order", which reads as license to reorder
+  words, not to redraw where one sentence ends and the next begins.
+- **Connector variety.** It calls out repetitive `aussi`/`de plus`/`en
+  outre` as a translationese tell in favour of `or`, `en effet`, `par
+  ailleurs`, `en l'occurrence` — a real, well-known pattern this prompt
+  had no equivalent for.
+- **False cognates, named as their own category.** `opportunité`,
+  `impacter` and the like are grammatically correct French words used in
+  the wrong sense — invisible to a spellchecker and to the "translate
+  every term" rule alike, since the word IS translated, just wrongly.
+- **Centuries with a superscript ordinal.** `XIXᵉ siècle`, not `19e
+  siècle` or spelled out — a real French convention this prompt simply
+  never stated.
+- **Preserve a genuine contradiction, don't resolve it.** Its own rule —
+  "do not fix logical conflicts in the original text unless it is an
+  explicit typo" — is the missing other half of the garbled-clause
+  addition above. Without it, "translate the most plausible reading" risks
+  reading a speaker's real, uncomfortable point as transcription noise and
+  smoothing it into something tidier, which is not this prompt's call to
+  make.
+
+What did NOT get adopted, and why: its domain-specific terminology
+sections (`le droit du mandat`, `dry dock` → `cale sèche`, `Tarsus` →
+`Tarse`, and dozens more) read as an accumulating answer key from whichever
+legal and historical documents its author has personally handled, not a
+generalizable rule — irrelevant noise on most documents, and actively
+risky on ones where a flagged word is the *correct* word in context, since
+the rule names no condition for when the anglicism reading actually
+applies. That is precisely why this prompt stays domain-*discovering*
+(rule 4) rather than domain-*listing*. Its output format also has no
+equivalent of `strip_reply_scaffolding` — no described mechanism for
+pulling the actual translation out of a reply that also contains an
+adjustments table and headings — which would reintroduce the exact leak
+risk `VERIFY AGAINST AUDIO`'s marker-and-strip design already fixed here.
 
 ## What three accepted documents taught us
 
