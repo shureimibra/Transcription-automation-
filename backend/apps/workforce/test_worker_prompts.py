@@ -283,6 +283,27 @@ class WorkerPromptTestCase(TestCase):
         self.assertIn('THE SAME LIMIT APPLIES TO WHAT A QUANTITY COVERS', polish)
         self.assertIn('name the spot on the VERIFY AGAINST AUDIO line', polish)
 
+    def test_the_polish_prompt_extends_audio_verification_to_garbled_source_prose(self):
+        """
+        FROM A REAL CONTROLLED COMPARISON: the same task, same prompt, run
+        through two assistants. One flagged four spots on VERIFY AGAINST
+        AUDIO, all four places the ASR source itself did not parse
+        ("our tankers' fades", "it's easier, more so pity"). The other
+        flagged zero and silently resolved every one itself -- in one case
+        by quietly inverting a clause's polarity. Neither was wrong by the
+        OLD prompt's letter: the mechanism was scoped to a garbled name or
+        a quantity's scope, and plain garbled prose was neither. This
+        widens it to the general case so both assistants land on the safer
+        behaviour instead of one of them guessing silently.
+        """
+        polish = self.prompts['polish']
+        self.assertIn(
+            'ANY SPOT WHERE THE SOURCE ITSELF IS GARBLED OR\nINCOMPLETE',
+            polish)
+        self.assertIn("our tankers' fades", polish)
+        # It must still say translate a reading, not refuse to translate.
+        self.assertIn('Translate the most plausible reading', polish)
+
     def test_the_no_extra_content_rule_no_longer_contradicts_verify_against_audio(self):
         """
         A REAL, INDEPENDENTLY-CONFIRMED READING PROBLEM: a second assistant,
@@ -312,7 +333,7 @@ class WorkerPromptTestCase(TestCase):
         polish = self.prompts['polish']
         self.assertIn('never flag it with a note\n   inside the text itself',
                       polish)
-        self.assertIn('a separate, structured way to flag elsewhere', polish)
+        self.assertIn('a separate,\n   structured way to flag each of those elsewhere', polish)
 
     def test_a_clean_check_hands_back_something_to_paste(self):
         """

@@ -180,9 +180,10 @@ WHAT TO FIX:
    {target} term of art, use it rather than a literal translation. If a term
    is genuinely ambiguous, choose the reading most consistent with the rest
    of the document; never guess wildly, and never flag it with a note
-   inside the text itself. (A proper name or citation this prompt gives
-   you a separate, structured way to flag elsewhere is not covered by
-   this rule — use that mechanism for those, not an inline note either.)
+   inside the text itself. (A proper name, a citation, a quantity's scope,
+   or a garbled source clause -- this prompt gives you a separate,
+   structured way to flag each of those elsewhere -- is not covered by
+   this rule; use that mechanism for those, not an inline note either.)
 5. Cohesion. The source is a spoken transcript, so it may contain false
    starts, repetitions, and filler that survived translation. Remove them
    and join the sentences so the result reads as clean written {target}.
@@ -272,6 +273,16 @@ whether it is one amount split across them or that amount applying to
 each one separately, that is also a question only the audio can answer.
 Translate the number and the categories without resolving the split, and
 name the spot on the VERIFY AGAINST AUDIO line the same way.
+
+THE SAME LIMIT APPLIES TO ANY SPOT WHERE THE SOURCE ITSELF IS GARBLED OR
+INCOMPLETE, NOT ONLY A NAME OR A QUANTITY. A speech-recognition transcript
+sometimes hands you a clause that does not parse, or parses two different
+ways, through no fault of the translation -- "our tankers' fades", "it's
+easier, more so pity". Translate the most plausible reading you can
+construct, the same way you would resolve any other genuine ambiguity --
+but do not let a confident-sounding {target} sentence hide that the
+underlying {source} was broken. Name the spot on the VERIFY AGAINST AUDIO
+line the same way, with a short note on what made it unclear.
 
 {typography}
 

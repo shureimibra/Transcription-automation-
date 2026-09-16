@@ -123,9 +123,10 @@ WHAT TO FIX:
    French term of art, use it rather than a literal translation. If a term
    is genuinely ambiguous, choose the reading most consistent with the rest
    of the document; never guess wildly, and never flag it with a note
-   inside the text itself. (A proper name or citation this prompt gives
-   you a separate, structured way to flag elsewhere is not covered by
-   this rule — use that mechanism for those, not an inline note either.)
+   inside the text itself. (A proper name, a citation, a quantity's scope,
+   or a garbled source clause - this prompt gives you a separate,
+   structured way to flag each of those elsewhere - is not covered by
+   this rule; use that mechanism for those, not an inline note either.)
 5. Cohesion. The source is a spoken transcript, so it may contain false
    starts, repetitions, and filler that survived translation. Remove them
    and join the sentences so the result reads as clean written French.
@@ -165,6 +166,16 @@ whether it is one amount split across them or that amount applying to
 each one separately, that is also a question only the audio can answer.
 Translate the number and the categories without resolving the split, and
 name the spot on the VERIFY AGAINST AUDIO line the same way.
+
+THE SAME LIMIT APPLIES TO ANY SPOT WHERE THE SOURCE ITSELF IS GARBLED OR
+INCOMPLETE, NOT ONLY A NAME OR A QUANTITY. A speech-recognition transcript
+sometimes hands you a clause that does not parse, or parses two different
+ways, through no fault of the translation — "our tankers' fades", "it's
+easier, more so pity". Translate the most plausible reading you can
+construct, the same way you would resolve any other genuine ambiguity —
+but do not let a confident-sounding French sentence hide that the
+underlying English was broken. Name the spot on the VERIFY AGAINST AUDIO
+line the same way, with a short note on what made it unclear.
 
 FRENCH TYPOGRAPHY — apply all of these:
 - Narrow non-breaking space before ; : ! and ?
@@ -225,6 +236,7 @@ None of it is stylistic preference.
 | No English left behind | `check_source_leakage` — flags surviving source text |
 | Numbers unchanged | `check_numbers` — **CRITICAL**, blocks submission outright |
 | Quantity's scope across categories preserved | Not automatically checkable — see below |
+| A garbled source clause flagged, not silently resolved | Not automatically checkable — see below |
 | No repeated paragraph | `check_duplication` — the signature of a model looping |
 | No invented references | `entity.invented-reference` — **HIGH**. Added after a real run supplied `planethunters.org`, a site the speaker never named |
 | French only | `language.foreign-word` — **MEDIUM**. Added after a real run wrote Spanish `decir` where French needs `dire`. Quoted titles are exempt |
@@ -529,6 +541,42 @@ sits right there in the same prompt. If the source itself does not settle
 it, that is a question only the audio can answer, same as an unconfirmable
 name, so it goes on the same line rather than getting silently resolved
 one way or the other.
+
+## What a controlled comparison taught us: two assistants, same prompt, same document
+
+The same real task (a foreign-policy lecture, ASR source and all) was run
+through two different assistants under the prompt as it stood before this
+addition. The deterministic side came back identical — clean, same
+numbers, same tolerated NBSP finding. The judgment calls diverged sharply:
+
+One assistant flagged four spots on `VERIFY AGAINST AUDIO` — all four were
+places the English source itself did not parse ("our tankers' fades",
+"it's easier, more so pity", "All signed familiar echoes from the past").
+The other flagged **zero**, and silently resolved every one of them
+itself — in one case by translating literally, in another by quietly
+inverting a clause's polarity to make it read sensibly ("is that we want
+to achieve this" became "is that we fail to achieve this").
+
+Neither assistant was actually wrong by the letter of the prompt as it
+stood: `VERIFY AGAINST AUDIO` was scoped to two named categories, a
+garbled name and a quantity's scope, and plain garbled prose was neither.
+One assistant extended the mechanism's underlying principle anyway; the
+other read the categories narrowly and fell back to rule 4's ordinary
+"choose the best reading, never flag inline" default — which is exactly
+what let a clause's meaning get silently inverted with nothing to show
+for it afterward. That is a prompt gap, not a compliance failure on
+either side, and it is the reason this addition names the general case
+explicitly rather than trusting every assistant to generalize the
+narrower one the same way.
+
+**Worth separating from this**: the same comparison also caught a real
+terminology-consistency miss — one assistant rendered a single recurring
+metaphor ("tanker") three different ways across one document, the other
+held it consistent throughout. Rule 2 already says not to do this, in
+those words. That one did **not** get a prompt change — restating an
+existing instruction more loudly does not fix an assistant not following
+it once, and the fix for that class of thing is catching it on the
+before-submit read, not more prompt text.
 
 ## What three accepted documents taught us
 
