@@ -755,6 +755,32 @@ describe('the accuracy-check checklist', () => {
 
     expect(screen.queryByRole('button', { name: 'Find it' })).not.toBeInTheDocument();
   });
+
+  it('says so when a pasted reply parses into nothing, instead of silently showing nothing at all', async () => {
+    // CONFIRMED LIVE: a worker's assistant replied in a real shape the
+    // parser did not yet handle, the checklist rendered nothing, and the
+    // reasonable conclusion from the outside was "this was never built."
+    // Once the reply itself no longer parses (garbage, or any future
+    // format drift), this message is what stands between that and silence.
+    vi.spyOn(tasksApi, 'events').mockResolvedValue([]);
+    render(<ReviewWorkspace task={TASK} />);
+    await screen.findByText('first turn');
+
+    await userEvent.type(
+      screen.getByLabelText('What your assistant found'),
+      'Everything looked fine, nothing to flag here.',
+    );
+
+    expect(await screen.findByText(/Nothing in that reply matched/)).toBeInTheDocument();
+  });
+
+  it('stays silent when the box is simply empty, not "nothing matched"', async () => {
+    vi.spyOn(tasksApi, 'events').mockResolvedValue([]);
+    render(<ReviewWorkspace task={TASK} />);
+    await screen.findByText('first turn');
+
+    expect(screen.queryByText(/Nothing in that reply matched/)).not.toBeInTheDocument();
+  });
 });
 
 describe('the full guide', () => {

@@ -57,6 +57,53 @@ The organization discussed is the Southern Christian Leadership Conference (SCLC
     expect(findings[1].suggestion).toBe('the SCLC');
   });
 
+  it('parses the bulleted-bold shape (a real report, confirmed live -- the one that made a worker conclude the checklist was never built)', () => {
+    const report = `
+* **Moett's**
+* Mowat's
+* Farley Mowat was introduced just previously; this is a misspelling of his surname.
+* **Eskimo's**
+* Eskimos
+* Plural form misheard/mistranscribed with an erroneous possessive apostrophe (occurs multiple times: "Eskimo's probably figured", "handled by Eskimo's", "worry about Eskimo's").
+* **a miner's fame**
+* a miner's pay
+* "Fame" does not parse in context with doing a miner's work; "pay" is the standard idiomatic and phonetic fit.
+* **Couserck**
+* not sure
+* Garbled Inuit personal name from the 1960 NFB film documentary narration.
+`;
+    const findings = parseFindings(report);
+    // "Couserck" is dropped -- "not sure" is a real, correct answer, not a
+    // usable correction, same as every other shape.
+    expect(findings).toHaveLength(3);
+    expect(findings[0]).toEqual({
+      phrase: "Moett's",
+      suggestion: "Mowat's",
+      reason: 'Farley Mowat was introduced just previously; this is a misspelling of his surname.',
+    });
+    expect(findings[1].phrase).toBe("Eskimo's");
+    expect(findings[1].suggestion).toBe('Eskimos');
+    expect(findings[2].phrase).toBe("a miner's fame");
+    expect(findings[2].suggestion).toBe('a miner\'s pay');
+  });
+
+  it('does not let the bulleted-bold shape swallow the next finding when a reason line is missing', () => {
+    // Two consecutive findings with no gap -- the second's bold phrase line
+    // must not be consumed as the first's reason.
+    const report = `
+* **first**
+* fixed
+* **second**
+* also fixed
+* because
+`;
+    const findings = parseFindings(report);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].phrase).toBe('second');
+    expect(findings[0].suggestion).toBe('also fixed');
+    expect(findings[0].reason).toBe('because');
+  });
+
   it('drops a "not sure" answer -- a real, correct reply with nothing to apply', () => {
     const report = `
 * the phrase as transcribed: cannabis

@@ -22,9 +22,30 @@ import { Button } from './ui/index.jsx';
  * neither found nor already applied most likely means the wording moved
  * since this report was generated -- shown as a plain note, not a dead
  * button pretending it still works.
+ *
+ * WHY `hasText` EXISTS, SEPARATELY FROM `findings`. Rendering nothing
+ * when there are no findings is right when the box is simply empty -- but
+ * it is indistinguishable from the feature never having been built when
+ * the box has real text in it that just did not match a shape
+ * parseFindings recognises. CONFIRMED LIVE: a worker's assistant replied
+ * in a real third shape (bare bulleted triples, no quotes, no labels)
+ * that the parser did not yet handle, the checklist rendered nothing at
+ * all, and the reasonable conclusion from the outside was "this was
+ * never implemented." `hasText` lets this component say what actually
+ * happened instead of staying silent.
  */
-export default function AccuracyChecklist({ findings, onFind, onApply, applying }) {
-  if (!findings.length) return null;
+export default function AccuracyChecklist({ findings, hasText = false, onFind, onApply, applying }) {
+  if (!findings.length) {
+    if (!hasText) return null;
+    return (
+      <p className="mt-4 text-2xs text-ink-mute" role="status">
+        Nothing in that reply matched a shape this can turn into a checklist
+        automatically — the text is still saved above, just not clickable.
+        Work through it by hand, or ask your assistant to list each finding
+        as: the phrase, then what it should probably be, then why.
+      </p>
+    );
+  }
 
   return (
     <div className="mt-4 space-y-2">

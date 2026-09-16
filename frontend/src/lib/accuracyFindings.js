@@ -2,17 +2,26 @@
 // act on one click at a time, instead of reading a list and doing the
 // find-and-retype work by hand for every single item.
 //
-// WHY THIS HAS TO TOLERATE TWO SHAPES. The check prompt (worker_prompts.py's
+// WHY THIS HAS TO TOLERATE THREE SHAPES. The check prompt (worker_prompts.py's
 // _TRANSCRIPT_CHECK) asks for an exact structure -- "the phrase as
 // transcribed / what you think it should probably be / why, in one line" --
 // and most compliant replies give it verbatim, with or without a leading
 // "*". But a worker's own assistant does not always obey that structure to
-// the letter: a real report seen in practice gave three bare lines per
-// finding instead -- a quoted phrase, a line starting "probably", then a
-// reasoning paragraph, no labels at all. Both shapes are parsed; anything
-// that matches neither is simply left out of the checklist rather than
-// guessed at -- the raw pasted text is still right there either way, so
-// nothing is lost, only not made clickable.
+// the letter, and it does not obey it the SAME WRONG WAY twice:
+//   - one real report gave three bare lines per finding instead -- a quoted
+//     phrase, a line starting "probably", then a reasoning paragraph, no
+//     labels at all.
+//   - another real report (same prompt, same task family, a different
+//     session) gave three bulleted lines per finding with no quotes and no
+//     "probably" either -- "* **phrase**" (bold marking where a finding
+//     starts), "* suggestion", "* reason" -- confirmed live: this is what
+//     made a worker conclude the checklist feature "wasn't there", because
+//     AccuracyChecklist renders nothing at all when it parses zero findings
+//     (see its own render guard), which looks identical to a missing
+//     feature from the outside.
+// All three shapes are parsed; anything that matches none of them is simply
+// left out of the checklist rather than guessed at -- the raw pasted text is
+// still right there either way, so nothing is lost, only not made clickable.
 
 const LABELLED_PHRASE_RE = /^\*?\s*(?:the\s+)?phrase as transcribed:?\s*(.+)$/i;
 const LABELLED_SUGGESTION_RE =
@@ -24,6 +33,12 @@ const LABELLED_REASON_RE = /^\*?\s*why(?:, in one line)?:?\s*(.+)$/i;
 // opens each finding with.
 const BARE_QUOTED_LINE_RE = /^["“](.+?)["”](?:\s*\/\s*["“].+?["”])*\s*$/;
 const BARE_PROBABLY_RE = /^probably\s+(.+)$/i;
+
+// The third real shape: "* **phrase**" / "* suggestion" / "* reason" --
+// three consecutive bullets, the first (and only the first) bold-marked as
+// where a finding begins. No quotes, no "probably", no label anywhere.
+const BULLETED_BOLD_PHRASE_RE = /^\*\s+\*\*(.+?)\*\*\s*$/;
+const BULLETED_PLAIN_RE = /^\*\s+(.+)$/;
 
 function stripQuotes(text) {
   return (text || '').trim().replace(/^["“]|["”]$/g, '').trim();
@@ -77,6 +92,29 @@ export function parseFindings(text) {
     if (pending && (m = line.match(LABELLED_REASON_RE))) {
       pending.reason = m[1].trim();
       continue;
+    }
+
+    // The bulleted-bold shape: "* **phrase**" then exactly two more plain
+    // bullets, suggestion then reason. Both follow-on lines must themselves
+    // be plain bullets, not the bold start of the NEXT finding -- a
+    // finding whose reason line was skipped must not silently swallow the
+    // next finding's phrase as its own reason.
+    if ((m = line.match(BULLETED_BOLD_PHRASE_RE))) {
+      const suggestionLine = lines[i + 1] || '';
+      const reasonLine = lines[i + 2] || '';
+      const sm = suggestionLine.match(BULLETED_PLAIN_RE);
+      const rm = reasonLine.match(BULLETED_PLAIN_RE);
+      if (sm && !BULLETED_BOLD_PHRASE_RE.test(suggestionLine)
+          && rm && !BULLETED_BOLD_PHRASE_RE.test(reasonLine)) {
+        flush();
+        findings.push({
+          phrase: stripQuotes(m[1]),
+          suggestion: firstAlternative(sm[1]),
+          reason: rm[1].trim(),
+        });
+        i += 2;
+        continue;
+      }
     }
 
     // The bare, unlabelled shape: a quoted phrase line, then a very next

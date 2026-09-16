@@ -687,6 +687,7 @@ export default function ReviewWorkspace({ task, onTaskChange }) {
                 the checklist is just what its own contents parse into. */}
             <AccuracyChecklist
               findings={enrichedFindings}
+              hasText={Boolean(checkNotesInput.trim())}
               onFind={findFinding}
               onApply={applyFinding}
               applying={applyingPhrase}
