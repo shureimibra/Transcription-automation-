@@ -10038,6 +10038,28 @@ class QualityDeterministicCheckTestCase(TestCase):
         self.assertTrue(any(i.rule == 'numeric.missing-from-target' for i in issues))
         self.assertTrue(any(i.rule == 'numeric.absent-from-source' for i in issues))
 
+    def test_the_hour_conversion_still_works_when_the_document_says_deux_elsewhere(self):
+        """
+        A REAL BLOCKED SUBMISSION, a 4,475-word lecture: "on Friday at
+        2 p.m." was correctly translated "vendredi a 14 h" -- but the same
+        long document also used the ordinary word "deux" twice, elsewhere,
+        meaning "two" in a sense with nothing to do with the time ("deux
+        realites etanches", "une conjonction des deux"). spelled_number_
+        values is value-only and document-wide by design, so it saw "deux"
+        = 2 spelled out SOMEWHERE and forgave the source's bare 2 as
+        already accounted for, stranding "14" with no partner left to pair
+        against -- CRITICAL, blocked, on an otherwise perfect translation.
+        Running the hour-pairing before the spelled-word filter fixes this:
+        it claims 2 and 14 before either can be consumed by something else.
+        """
+        from core.services.ai_assist.quality import check_numbers
+        self.assertEqual(check_numbers(
+            'We tended to see war and society as very different things. '
+            'And on Friday at 2 p.m. there will be a symposium.',
+            'Nous avons eu tendance a les considerer comme deux realites '
+            'etanches. Et vendredi a 14 h se tiendra un colloque.',
+        ), [])
+
     def test_two_and_a_half_million_is_not_an_invented_figure(self):
         """
         A REAL SUBMISSION HAD THIS BLOCKED, TWICE, on two separate ASR

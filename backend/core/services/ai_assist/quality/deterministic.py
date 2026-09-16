@@ -528,6 +528,21 @@ def check_numbers(
     target_values = _multiset(extract_numbers(target))
     missing, added = _multiset_diff(source_values, target_values)
 
+    # HOUR CONVERSIONS ARE FORGIVEN FIRST, before spelled_number_values gets
+    # a chance to consume either half of the pairing for an unrelated reason.
+    # CONFIRMED ON A REAL BLOCKED SUBMISSION: a lecture translated "2 p.m."
+    # as "14 h" (correct) and, completely separately, elsewhere in the same
+    # long document, used the ordinary French word "deux" twice -- "deux
+    # réalités étanches", "une conjonction des deux" -- meaning "two" in a
+    # sense that has nothing to do with the time. spelled_number_values is
+    # value-only and document-wide by design (see its own docstring), so it
+    # saw "deux" = 2 spelled somewhere and forgave the source's bare "2" as
+    # already accounted for -- stranding "14" with no partner left to pair
+    # against, reported as an invented number on an otherwise perfect
+    # translation. Running the pairing first means it claims "2" and "14"
+    # before either can be independently consumed by something else.
+    missing, added = _forgive_hour_conversions(missing, added)
+
     # A figure the source spelled out is not an invented figure. See
     # spelled_number_values: this forgives, it never accuses.
     # A figure the source spelled out is not an invented figure, and a figure
@@ -550,8 +565,6 @@ def check_numbers(
     target_set = set(extract_numbers(target))
     missing = [v for v in dict.fromkeys(missing) if v not in target_set]
     added = [v for v in dict.fromkeys(added) if v not in source_set]
-
-    missing, added = _forgive_hour_conversions(missing, added)
     # "$360 million" -> the source's bare 360 is not a dropped quantity
     # once the target legitimately writes it out in full as 360 000 000.
     # See _forgive_digit_scale_expansions.
