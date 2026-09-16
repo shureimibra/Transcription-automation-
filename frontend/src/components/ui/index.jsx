@@ -197,6 +197,21 @@ export function Notice({ message, tone = 'info' }) {
   );
 }
 
+/**
+ * The page-anchored banner half of useClaimNotice -- see that hook's own
+ * docstring for why this exists as shared code rather than markup copied
+ * into every screen that renders claimable task cards.
+ */
+export function ClaimNotice({ message }) {
+  if (!message) return null;
+  return (
+    <div className="flex items-center gap-2 rounded-xl2 border border-status-ready/30
+                     bg-status-ready/10 px-4 py-2.5">
+      <Notice message={message} />
+    </div>
+  );
+}
+
 export function Field({ label, error, hint, children, htmlFor }) {
   return (
     <div className="space-y-1.5">

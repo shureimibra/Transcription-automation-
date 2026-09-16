@@ -2,10 +2,11 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { tasks as tasksApi } from '../api/workforce.js';
 import { useAsync, usePolling } from '../hooks/useAsync.js';
 import { useTaskStream } from '../hooks/useTaskStream.js';
+import { useClaimNotice } from '../hooks/useClaimNotice.js';
 import TaskCard from '../components/TaskCard.jsx';
 import { STATUS_ORDER, statusMeta } from '../components/StatusBadge.jsx';
 import {
-  Button, EmptyState, ErrorState, FOCUS, Kbd, LiveRegion, PageHero, Pagination, Skeleton,
+  Button, ClaimNotice, EmptyState, ErrorState, FOCUS, Kbd, LiveRegion, PageHero, Pagination, Skeleton,
 } from '../components/ui/index.jsx';
 import { BoltIcon, LanguagesIcon, ListIcon, MicIcon, SearchIcon } from '../components/icons.jsx';
 import { taskLabel } from '../lib/format.js';
@@ -95,7 +96,17 @@ export default function TaskQueue({ kind = null }) {
   usePolling(refresh, 20000);
   useTaskStream(useCallback(() => refresh({ silent: true }), [refresh]));
 
-  const onChange = useCallback(() => refresh({ silent: true }), [refresh]);
+  // See useClaimNotice's own docstring -- this list is the SECOND screen
+  // that turned out to need it: same TaskCard/TaskActions, same silent
+  // refetch-then-reshuffle shape as WorkerDashboard's "Up next", confirmed
+  // live on this exact page.
+  const { claimedNotice, noteChange } = useClaimNotice(
+    'check the "Mine" tab above to open it.'
+  );
+  const onChange = useCallback((updated) => {
+    noteChange(updated);
+    refresh({ silent: true });
+  }, [refresh, noteChange]);
 
   // A PAGE THAT NO LONGER EXISTS IS NOT AN ERROR TO SHOW SOMEONE.
   //
@@ -274,6 +285,11 @@ export default function TaskQueue({ kind = null }) {
       </div>
 
       {error && <ErrorState message={error.message} onRetry={() => refresh()} />}
+
+      {/* Anchored above the grid it is confirming -- the one thing on this
+          page that does not move when a claim removes a card and the rest
+          of the page (and pagination) reshuffles underneath it. */}
+      <ClaimNotice message={claimedNotice} />
 
       <LiveRegion message={loading ? '' : `${list.length} tasks shown, ${readyCount} ready to start`} />
 

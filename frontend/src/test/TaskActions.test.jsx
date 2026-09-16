@@ -65,6 +65,29 @@ describe('TaskActions', () => {
     expect(claim).toHaveBeenCalledWith('task-1');
   });
 
+  it('reports busy while an action is in flight, and clear once it settles', async () => {
+    // CONFIRMED LIVE: a worker clicked Claim, then immediately clicked the
+    // same card's title before this request had resolved -- landing on the
+    // task's own page while it was still genuinely unclaimed on the
+    // server. `onBusyChange` is what lets a parent hold off on navigation
+    // until the action here has actually finished, not just been clicked.
+    let resolveClaim;
+    vi.spyOn(tasksApi, 'claim').mockReturnValue(
+      new Promise((resolve) => { resolveClaim = resolve; })
+    );
+    const onBusyChange = vi.fn();
+
+    wrap(<TaskActions task={makeTask()} onBusyChange={onBusyChange} />);
+    expect(onBusyChange).toHaveBeenCalledWith(false);
+    onBusyChange.mockClear();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Claim' }));
+    expect(onBusyChange).toHaveBeenCalledWith(true);
+
+    resolveClaim(makeTask({ status: 'claimed', available_transitions: ['in_progress'] }));
+    await waitFor(() => expect(onBusyChange).toHaveBeenLastCalledWith(false));
+  });
+
   it('shows the server message and refetches when someone else claimed first', async () => {
     const conflict = Object.assign(new Error('Someone else is already working on this task.'), {
       isConflict: true,

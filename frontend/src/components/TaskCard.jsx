@@ -39,6 +39,17 @@ export default function TaskCard({ task, onChange, showWorker = false, actions =
   const kind = KIND[task.kind] || { label: task.kind || 'Task', icon: <MicIcon className="h-4 w-4" /> };
   const owned = Boolean(task.claimed_by_code);
 
+  // CONFIRMED LIVE: clicking Claim, then immediately clicking this same
+  // card's title before the claim request had actually resolved, opened
+  // the task's own page while it was still genuinely unclaimed on the
+  // server -- the two links knew nothing about each other, so the title
+  // navigated straight through a claim in flight. The task page then
+  // showed a live Claim button of its own, invited a second click, and
+  // looked exactly like a bug in the claim itself rather than a race
+  // between two links on one card. See TaskActions' `onBusyChange` for
+  // the other half of this.
+  const [busy, setBusy] = useState(false);
+
   return (
     <article
       className="flex flex-col overflow-hidden rounded-xl2 border border-edge bg-surface
@@ -58,7 +69,14 @@ export default function TaskCard({ task, onChange, showWorker = false, actions =
         <div className="min-w-0">
           <Link
             to={`/tasks/${task.id}`}
-            className={`block truncate text-base font-semibold text-ink hover:text-accent ${FOCUS} rounded`}
+            aria-disabled={busy || undefined}
+            title={busy ? 'Working on it — the button below will confirm in a moment' : undefined}
+            onClick={(e) => { if (busy) e.preventDefault(); }}
+            className={`block truncate text-base font-semibold rounded ${FOCUS} ${
+              busy
+                ? 'cursor-wait text-ink-mute'
+                : 'text-ink hover:text-accent'
+            }`}
           >
             {taskLabel(task)}
           </Link>
@@ -118,7 +136,9 @@ export default function TaskCard({ task, onChange, showWorker = false, actions =
             {showWorker && task.claimed_by_code ? `${task.claimed_by_code} · ` : ''}
             Updated {relative(task.updated_at)}
           </p>
-          {actions && <TaskActions task={task} onChange={onChange} size="sm" />}
+          {actions && (
+            <TaskActions task={task} onChange={onChange} onBusyChange={setBusy} size="sm" />
+          )}
         </div>
       </div>
     </article>

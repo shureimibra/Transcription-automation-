@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { tasks as tasksApi } from '../api/workforce.js';
 import { Button, ErrorState } from './ui/index.jsx';
 import PromptDialog from './PromptDialog.jsx';
@@ -148,13 +148,29 @@ function useIsAdmin() {
 }
 
 
-export default function TaskActions({ task, onChange, size = 'md', only = null, className = '' }) {
+export default function TaskActions({
+  task, onChange, onBusyChange, size = 'md', only = null, className = '',
+}) {
   const isAdmin = useIsAdmin();
   const [pending, setPending] = useState(null);
   const [error, setError] = useState('');
   // A conflict is kept apart from an error on purpose -- see below.
   const [taken, setTaken] = useState('');
   const [dialog, setDialog] = useState(null);
+
+  // CONFIRMED LIVE: a worker clicked Claim on a card, then immediately
+  // clicked that same card's title to open the task -- before the claim
+  // request had actually resolved. TaskCard's title link is not disabled
+  // by TaskActions' own `pending` state (they did not know about each
+  // other), so the navigation went through mid-flight, landed on the
+  // task's own page while it was still, genuinely, unclaimed on the
+  // server, and showed a live Claim button there too. A second click
+  // followed. `onBusyChange` is how a parent that renders something else
+  // clickable on the same card -- the title, here -- learns to hold off
+  // until this component's own action has actually finished.
+  useEffect(() => {
+    onBusyChange?.(Boolean(pending));
+  }, [pending, onBusyChange]);
 
   if (!task) return null;
 
