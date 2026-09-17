@@ -18,7 +18,7 @@ what a worker can see, so no view has to re-derive it.
 """
 from rest_framework.permissions import BasePermission, SAFE_METHODS
 
-from . import roles
+from . import roles, states
 from .models import Account, Task, WorkerProfile
 
 
@@ -200,6 +200,27 @@ class TaskAccessPermission(BasePermission):
         # moment earlier, which is how they came to click claim.
         if getattr(view, 'action', None) == 'claim':
             return obj.assigned_to_id in (None, profile.id)
+
+        # UNLESS TRAINING MODE IS ON, and only for this one action.
+        #
+        # CONFIRMED LIVE: apply_finding tried to grow its own training-mode
+        # exception entirely inside the view -- and it was dead code,
+        # because this permission class runs first, inside get_object(),
+        # and already refused any non-holder before the view's own body
+        # ever saw the request. The exception has to live here, or nowhere.
+        #
+        # Scoped exactly like TranscriptCheckPromptView's and
+        # TranslationDraftView's own training-mode allowance: an unclaimed
+        # task still in the open, claimable pool, nothing reserved for
+        # someone else. Recording an applied finding is the same rehearsal
+        # workflow those two views already open to the pool; refusing only
+        # this one step of it was the gap, not a deliberate stricter rule --
+        # EditSegmentView (the endpoint that actually rewrites the segment)
+        # never required holding the task in the first place.
+        if (getattr(view, 'action', None) == 'apply_finding' and training_mode_active()
+                and obj.claimed_by_id is None and obj.assigned_to_id is None
+                and obj.status in states.CLAIMABLE_STATES):
+            return True
         return obj.claimed_by_id == profile.id
 
 

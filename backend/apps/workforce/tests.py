@@ -17,7 +17,7 @@ from django.contrib.auth.models import User
 from django.db import connection, connections, transaction
 from unittest import mock
 
-from django.test import TestCase, TransactionTestCase
+from django.test import TestCase, TransactionTestCase, override_settings
 from rest_framework.test import APIClient, APITestCase
 
 from . import services, states
@@ -946,6 +946,44 @@ class TaskWorkflowAPITestCase(APITestCase):
             {'phrase': 'Meridale'}, format='json')
 
         self.assertEqual(response.status_code, 400)
+
+    @override_settings(WORKFORCE_TRAINING_MODE=True)
+    def test_training_mode_lets_the_open_pool_record_an_applied_finding(self):
+        """
+        CONFIRMED LIVE: EditSegmentView's own permission check never
+        required holding the task at all -- it only checks whether the
+        caller may access the job -- so a worker testing the accuracy-check
+        checklist on an unclaimed task could already edit the segment
+        text successfully, while this endpoint refused to record that it
+        happened. The checklist card never flipped to "Applied" even
+        though the correction had genuinely gone through. Recording an
+        applied finding is the same workflow TranscriptCheckPromptView
+        already opens to the pool under training mode; this closes the
+        one step of it that had been left out.
+        """
+        task = services.create_task(actor=self.admin_user)
+        self.client.force_authenticate(user=self.alice_user)
+
+        response = self.client.post(
+            f'/api/v1/workforce/tasks/{task.id}/apply-finding/',
+            {'phrase': 'Meridale', 'suggestion': 'Mayor Daley'}, format='json')
+
+        self.assertEqual(response.status_code, 200)
+        event = task.events.get(event_type=TaskEvent.ACCURACY_CHECK_FINDING_APPLIED)
+        self.assertEqual(event.actor_id, self.alice_user.id)
+
+    @override_settings(WORKFORCE_TRAINING_MODE=True)
+    def test_training_mode_still_refuses_a_task_someone_else_holds(self):
+        task = services.create_task(actor=self.admin_user)
+        services.claim_task(task.id, self.alice, self.alice_user)
+        bob_user, _bob = make_worker('bob', 'W003')
+        self.client.force_authenticate(user=bob_user)
+
+        response = self.client.post(
+            f'/api/v1/workforce/tasks/{task.id}/apply-finding/',
+            {'phrase': 'Meridale', 'suggestion': 'Mayor Daley'}, format='json')
+
+        self.assertEqual(response.status_code, 404)
 
     def test_deactivating_a_worker_releases_their_held_tasks(self):
         """Otherwise a suspended worker's queue becomes unreachable work."""

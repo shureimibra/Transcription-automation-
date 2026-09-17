@@ -499,6 +499,15 @@ class TaskViewSet(viewsets.ModelViewSet):
         change goes through the ordinary segment-edit endpoint, exactly
         like any other correction a worker makes by hand; this is the
         audit trail alongside it, not a replacement for it.
+
+        WHO MAY DO THIS lives entirely in TaskAccessPermission, not here.
+        `self.get_object()` below already raises 403 (a non-holder, not in
+        training mode) or 404 (a task not even visible to this caller)
+        before this line runs -- a holder-or-training-mode check used to
+        be duplicated in this method too, and it was dead code: DRF checks
+        object permissions inside get_object() itself, so the view's own
+        copy of that check never had a chance to run before this one
+        already had the final say.
         """
         task = self.get_object()
         phrase = str(request.data.get('phrase') or '').strip()[:500]
@@ -507,13 +516,6 @@ class TaskViewSet(viewsets.ModelViewSet):
             return Response(
                 {'error': 'Provide both phrase and suggestion.'},
                 status=status.HTTP_400_BAD_REQUEST,
-            )
-        profile = worker_profile(request.user)
-        is_holder = profile is not None and task.claimed_by_id == profile.id
-        if not is_admin(request.user) and not is_holder:
-            return Response(
-                {'error': 'Only the worker holding this task can do that.'},
-                status=status.HTTP_403_FORBIDDEN,
             )
         services.record_event(
             task, TaskEvent.ACCURACY_CHECK_FINDING_APPLIED, actor=request.user,
