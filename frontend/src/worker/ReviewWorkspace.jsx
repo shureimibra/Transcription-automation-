@@ -397,7 +397,20 @@ export default function ReviewWorkspace({ task, onTaskChange }) {
   const applyFinding = async (finding) => {
     const key = primaryPhrase(finding.phrase);
     const row = rows.find((r) => containsPhrase(r.text, key));
-    if (!row) return;
+    if (!row) {
+      // CONFIRMED LIVE: this returned silently, with no error and no
+      // notice, so clicking Apply on a finding whose phrase the checklist
+      // itself had just said WAS found (the button only renders when
+      // `finding.found` is true) looked like the click did nothing at
+      // all. It can still legitimately happen -- a segment edited or
+      // reverted between the checklist rendering and the click -- but a
+      // worker needs to be told that, not left to guess.
+      setError(
+        `Could not find "${finding.phrase}" in the transcript anymore -- `
+        + 'it may have already been edited. Refresh the checklist and try again.'
+      );
+      return;
+    }
     setApplyingPhrase(finding.phrase);
     setError('');
     try {
