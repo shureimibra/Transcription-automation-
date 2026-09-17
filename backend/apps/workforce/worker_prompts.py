@@ -638,7 +638,24 @@ WHAT TO LOOK FOR, IN ORDER OF VALUE:
    part of an identifier or notation rather than a spoken count -- a
    variable like "K1", a musical note like "E4", a dimension like "3D",
    an exponent read aloud like "ten to the minus six" -- none of those
-   are numbers being spoken, so this rule does not apply to them.
+   are numbers being spoken, so this rule does not apply to them. A
+   PLAIN COUNT stays spelled out even when it is ordered or grouped --
+   "the first three" pictures is still "three" as a word, because
+   nothing there is naming or labelling a specific numbered thing. But a
+   LABEL WORD immediately followed by its number is always a figure,
+   whatever the number is: "step 1", "line 3", "page 23", "paragraph
+   14", "size 36", "verse 2", "Chapter 4", "Quiz 2", "number 1" naming
+   which face came up on a die -- these identify one specific numbered
+   item by that number, the same as "Rule 8" or "Section 4" does, so
+   "step one" and "number six" are defects here, not correct spelled-out
+   counts.
+4b. Special characters Eagle's house style never uses, regardless of how
+   the source name is normally spelled: an accent or diacritic ("fiance"
+   never "fiance" with an acute accent, "El Nino" never with a tilde),
+   an ellipsis, or an exclamation mark (except as part of a brand name
+   that genuinely has one, like "Yahoo!"). None of these is a
+   mishearing to flag when the transcript already omits them -- that is
+   the correct spelling under this house style, not a defect.
 5. Informal words ("gonna", "kinda", "gotta") that should be replaced
    with their formal equivalent for a professional transcript --
    {standard_note} Do NOT flag "yeah" -- Eagle's own Writing Rules table
@@ -675,6 +692,11 @@ For each thing you flag, give me exactly this and nothing else:
   * what you think it should probably be, if you have a real guess --
     say "not sure" rather than inventing one you are not confident in
   * why, in one line
+
+Only list something here if you are proposing an actual change. If a
+number, a word or a phrase is already correct, do not include it just to
+show your work -- that pads the list without giving the worker anything
+to act on.
 
 Order them worst first: the ones you are most confident about first.
 

@@ -561,6 +561,53 @@ class TranscriptCheckPromptTestCase(TestCase):
         prompt = worker_prompts.build_transcript_check('')
         self.assertIn('unless you are told', prompt)
 
+    def test_it_treats_a_label_word_plus_number_as_always_a_figure(self):
+        """
+        CORRECTED, not merely added -- see the docstring on this change in
+        worker_prompts.py itself. Eagle's own General Guidelines name this
+        exactly: the Capitalization table's "Item in sequence" row lists
+        "line 3, page 23, paragraph 14, size 36, step 1, verse 2" as
+        exceptions that are ALWAYS figures, and the Numbers table's "Number
+        of item" row lists "size 6 | Quiz 2 | Chapter 7" the same way --
+        independent of the plain 0-9-spelled-out rule.
+
+        An earlier version of this prompt got this backwards: it told a
+        worker's assistant to leave "step one, step two" and "number
+        one"/"number six" spelled out, reasoning from a narrower "citation"
+        exception rather than Eagle's actual, broader rule. That directly
+        caused two correct findings in a real report to be rejected as
+        wrong during an audit BEFORE this prompt text was checked against
+        the actual General Guidelines. "The first three" pictures is kept
+        as the contrasting case: a plain count, naming nothing, correctly
+        still a word.
+        """
+        prompt = worker_prompts.build_transcript_check('edited_verbatim')
+        self.assertIn('LABEL WORD immediately followed by its number', prompt)
+        self.assertIn('"step 1"', prompt)
+        self.assertIn('"number 1"', prompt)
+        self.assertIn('the first three', prompt)
+        self.assertIn('PLAIN COUNT stays spelled out', prompt)
+
+    def test_it_does_not_flag_a_missing_accent_mark_or_banned_punctuation(self):
+        """Eagle's Punctuation rules ban accents/diacritics, ellipses, and
+        exclamation marks outright (fiance not fiance-with-an-accent, El
+        Nino not El Nino-with-a-tilde) -- none of this was in the check
+        prompt at all, so an assistant unaware of it could flag a
+        correctly de-accented name as if it were a mishearing."""
+        prompt = worker_prompts.build_transcript_check('edited_verbatim')
+        self.assertIn('accent or diacritic', prompt)
+        self.assertIn('El Nino', prompt)
+        self.assertIn('ellipsis', prompt)
+        self.assertIn('Yahoo!', prompt)
+
+    def test_it_asks_for_actual_changes_only_not_a_confirmation_list(self):
+        """FROM A REAL AUDIT: a report padded its count with entries like
+        "two dice -> two dice" that proposed no change at all -- noise
+        that makes the report look more thorough than it is without
+        giving the worker anything to act on."""
+        prompt = worker_prompts.build_transcript_check('edited_verbatim')
+        self.assertIn('Only list something here if you are proposing an actual change', prompt)
+
 
 class ReplyScaffoldingTestCase(TestCase):
     """
