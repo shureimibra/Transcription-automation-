@@ -89,6 +89,31 @@ The organization discussed is the Southern Christian Leadership Conference (SCLC
     expect(findings[2].suggestion).toBe('a miner\'s pay');
   });
 
+  it('parses the fourth real shape: plain bulleted triples with no marker at all', () => {
+    // CONFIRMED LIVE the same day notation findings shipped: a real report
+    // delivering exactly two notation findings, no bold, no quotes, no
+    // labels -- just three plain "* " bullets per finding -- parsed into
+    // nothing, and the badge never got a chance to render.
+    const report = `
+* mv squared over r is equal to qvvb
+* m * v^2 / r = q * v * B
+* Notation: Dictated centripetal force equation rendered in written mathematical symbols.
+* v over r is equal to qb of m
+* v / r = q * B / m
+* Notation: Dictated equation rendered in written mathematical symbols.
+`;
+    const findings = parseFindings(report);
+    expect(findings).toHaveLength(2);
+    expect(findings[0].phrase).toBe('mv squared over r is equal to qvvb');
+    expect(findings[0].suggestion).toBe('m * v^2 / r = q * v * B');
+    expect(findings[0].notation).toBe(true);
+    expect(findings[0].reason).toBe(
+      'Dictated centripetal force equation rendered in written mathematical symbols.');
+    expect(findings[1].phrase).toBe('v over r is equal to qb of m');
+    expect(findings[1].suggestion).toBe('v / r = q * B / m');
+    expect(findings[1].notation).toBe(true);
+  });
+
   it('does not let the bulleted-bold shape swallow the next finding when a reason line is missing', () => {
     // Two consecutive findings with no gap -- the second's bold phrase line
     // must not be consumed as the first's reason.

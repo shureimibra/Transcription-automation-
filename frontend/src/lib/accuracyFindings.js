@@ -2,7 +2,7 @@
 // act on one click at a time, instead of reading a list and doing the
 // find-and-retype work by hand for every single item.
 //
-// WHY THIS HAS TO TOLERATE THREE SHAPES. The check prompt (worker_prompts.py's
+// WHY THIS HAS TO TOLERATE FOUR SHAPES. The check prompt (worker_prompts.py's
 // _TRANSCRIPT_CHECK) asks for an exact structure -- "the phrase as
 // transcribed / what you think it should probably be / why, in one line" --
 // and most compliant replies give it verbatim, with or without a leading
@@ -19,7 +19,14 @@
 //     AccuracyChecklist renders nothing at all when it parses zero findings
 //     (see its own render guard), which looks identical to a missing
 //     feature from the outside.
-// All three shapes are parsed; anything that matches none of them is simply
+//   - a fourth real report went one step plainer still: three bulleted
+//     lines with no bold marking either -- "* m * v^2 / r = q * v * B" /
+//     "* Notation: ..." -- distinguishable from an ordinary bulleted list
+//     only by being in groups of exactly three. Confirmed live the same day
+//     notation findings shipped: the report contained real, correctly
+//     marked notation findings, and the checklist -- badge included --
+//     never got a chance to render a single one of them.
+// All four shapes are parsed; anything that matches none of them is simply
 // left out of the checklist rather than guessed at -- the raw pasted text is
 // still right there either way, so nothing is lost, only not made clickable.
 
@@ -173,6 +180,47 @@ export function parseFindings(text) {
           reason: reasonLines.join(' ').trim(),
         });
         i = j - 1;
+        continue;
+      }
+    }
+
+    // The fourth real shape: three consecutive plain "* " bullets with NO
+    // marker at all -- no bold, no quotes, no label -- distinguished from
+    // every other shape only by POSITION. CONFIRMED LIVE: a real report
+    // delivering notation findings ("* m * v^2 / r = q * v * B" /
+    // "* Notation: ...") used exactly this shape and parsed into nothing
+    // at all -- the checklist, badge included, never got a chance to
+    // render, on the same day that badge shipped. Tried last, after every
+    // more specific shape above has already had a chance to claim the
+    // line, since a plain "* " bullet is the least distinctive marker of
+    // any shape this module recognises.
+    if ((m = line.match(BULLETED_PLAIN_RE)) && !BULLETED_BOLD_PHRASE_RE.test(line)) {
+      const suggestionLine = lines[i + 1] || '';
+      const reasonLine = lines[i + 2] || '';
+      const sm = suggestionLine.match(BULLETED_PLAIN_RE);
+      const rm = reasonLine.match(BULLETED_PLAIN_RE);
+      // Neither follow-on line may itself look like the START of a MORE
+      // SPECIFIC shape -- labelled or bulleted-bold, both checked, not
+      // just one. CONFIRMED LIVE (as a test failure, not just a worry):
+      // checking only LABELLED_PHRASE_RE let this branch swallow a bold
+      // "* **second**" as an ordinary suggestion line, because that
+      // regex has nothing to say about bold markers at all.
+      if (sm && !LABELLED_PHRASE_RE.test(suggestionLine) && !BULLETED_BOLD_PHRASE_RE.test(suggestionLine)
+          && rm && !LABELLED_PHRASE_RE.test(reasonLine) && !BULLETED_BOLD_PHRASE_RE.test(reasonLine)) {
+        flush();
+        findings.push({
+          phrase: stripQuotes(m[1]),
+          // NOT firstAlternative: a bare, unquoted "/" in this shape is
+          // dividing two numbers, not separating "X" / "Y" spelling
+          // alternatives -- that convention only ever appears quoted, and
+          // this shape has no quotes at all. CONFIRMED LIVE: "m * v^2 / r
+          // = q * v * B" split at the division sign and lost everything
+          // after it, because firstAlternative treats "/" as its
+          // alternatives separator regardless of what put it there.
+          suggestion: stripQuotes(sm[1]),
+          reason: rm[1].trim(),
+        });
+        i += 2;
         continue;
       }
     }
