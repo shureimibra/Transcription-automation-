@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseFindings, replaceFirst } from '../lib/accuracyFindings.js';
+import { containsPhrase, parseFindings, primaryPhrase, replaceFirst } from '../lib/accuracyFindings.js';
 
 // Real report shapes seen in practice, not invented ones -- the check
 // prompt asks for one exact structure, but a worker's own assistant does
@@ -137,5 +137,50 @@ describe('replaceFirst', () => {
 
   it('leaves the text unchanged when the phrase is not found', () => {
     expect(replaceFirst('Nothing to see here', 'missing', 'X')).toBe('Nothing to see here');
+  });
+
+  it('matches a straight-quoted phrase against curly-quoted transcript text, and vice versa', () => {
+    // CONFIRMED LIVE: real transcript text and a real pasted report
+    // disagree about which apostrophe character they use often enough
+    // that this has to work both directions.
+    expect(replaceFirst('the professor’s office', "professor's office", 'X'))
+      .toBe('the X');
+    expect(replaceFirst("the professor's office", 'professor’s office', 'X'))
+      .toBe('the X');
+  });
+});
+
+describe('primaryPhrase', () => {
+  // CONFIRMED LIVE: a rule-2 finding's phrase lists every wrong spelling
+  // ("X" / "Y" / "Z") -- real evidence, kept intact on `finding.phrase`
+  // for display -- but no transcript segment ever contains that whole
+  // joined string. Find it / Apply / the found-check all need the ONE
+  // alternative that could actually be on the page.
+
+  it('picks the first alternative out of several, quotes and all', () => {
+    expect(primaryPhrase('"Professor Esla\'s lectures" / "Professor Estlis lectures"'))
+      .toBe("Professor Esla's lectures");
+  });
+
+  it('leaves a single, unquoted phrase alone beyond normalising its quotes', () => {
+    expect(primaryPhrase('Professor Blondell’s course'))
+      .toBe("Professor Blondell's course");
+  });
+
+  it('is a no-op on a plain phrase with nothing to split or normalise', () => {
+    expect(primaryPhrase('first turn')).toBe('first turn');
+  });
+});
+
+describe('containsPhrase', () => {
+  it('matches regardless of which side used a curly apostrophe', () => {
+    expect(containsPhrase("in Professor Blondell's course, he covered it",
+      'Professor Blondell’s course')).toBe(true);
+    expect(containsPhrase('in Professor Blondell’s course, he covered it',
+      "Professor Blondell's course")).toBe(true);
+  });
+
+  it('is false when the phrase genuinely is not there', () => {
+    expect(containsPhrase('nothing relevant here', 'missing phrase')).toBe(false);
   });
 });

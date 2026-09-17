@@ -4,7 +4,7 @@ import DeadlineClock from './DeadlineClock.jsx';
 import { segments as segmentsApi, submission, taskMedia, transcript } from '../api/eagle.js';
 import { tasks as tasksApi } from '../api/workforce.js';
 import { ANNOTATION_TAGS, insertTagAtPosition } from '../lib/annotations.js';
-import { parseFindings, replaceFirst } from '../lib/accuracyFindings.js';
+import { containsPhrase, parseFindings, primaryPhrase, replaceFirst } from '../lib/accuracyFindings.js';
 import TranscriptionGuideModal from './TranscriptionGuideModal.jsx';
 import Verdict from '../components/Verdict.jsx';
 import DeliveredBanner, { isDelivered } from '../components/DeliveredBanner.jsx';
@@ -251,6 +251,25 @@ export default function ReviewWorkspace({ task, onTaskChange }) {
     checkLoad, [task.id, labelsSpeakers],
   );
 
+  // REHYDRATE THE BOX FROM WHAT WAS ALREADY SAVED. checkPrompt's own
+  // docstring promises "the screen can show the step as done across a
+  // reload" -- but showing `accuracy_check_by` is not the same as showing
+  // the actual checklist, and the checklist is driven entirely by
+  // `checkNotesInput`, which starts every mount as ''. Without this, the
+  // one thing a worker actually needs after a reload or a save -- the
+  // clickable Find it / Apply list -- was invisible even though the text
+  // that would produce it was sitting in `checkStatus` the whole time.
+  // Fires once per mount, and only into an empty box, so a worker who has
+  // deliberately cleared it to paste a fresh reply is never fought.
+  const hydratedCheckNotes = useRef(false);
+  useEffect(() => {
+    if (hydratedCheckNotes.current || !checkStatus) return;
+    if (checkStatus.accuracy_check_notes) {
+      setCheckNotesInput(checkStatus.accuracy_check_notes);
+    }
+    hydratedCheckNotes.current = true;
+  }, [checkStatus]);
+
   // DELIVERED WORK IS A RECORD, NOT A DRAFT.
   //
   // Once the platform has the document, editing a segment changes nothing
@@ -346,31 +365,43 @@ export default function ReviewWorkspace({ task, onTaskChange }) {
 
   const findings = useMemo(() => parseFindings(checkNotesInput), [checkNotesInput]);
   const enrichedFindings = useMemo(() => findings.map((finding) => {
-    const key = finding.phrase.toLowerCase();
-    const when = appliedAt.get(key);
+    // ONE MATCHABLE STRING, NOT THE CARD'S FULL DISPLAY TEXT. A rule-2
+    // finding's `phrase` legitimately lists several spellings ("X" / "Y" /
+    // "Z") -- real, valuable evidence, and left alone below so the card
+    // still shows all of it -- but no single transcript segment ever
+    // contains that whole joined string. CONFIRMED LIVE: every such
+    // finding showed "Not found in the transcript" regardless of whether
+    // it had been, because this used to search for the joined text
+    // itself. `primaryPhrase` is the one alternative actually worth
+    // searching for, quote-normalised the same way `containsPhrase` below
+    // normalises both sides -- see accuracyFindings.js for the other half
+    // of this (a curly apostrophe copied out of a chat UI silently
+    // defeating a match against straight-quoted ASR text).
+    const key = primaryPhrase(finding.phrase);
+    const when = appliedAt.get(key.toLowerCase());
     return {
       ...finding,
       applied: Boolean(when),
       appliedAt: when ? new Date(when).toLocaleDateString() : null,
-      found: rows.some((r) => (r.text || '').toLowerCase().includes(key)),
+      found: rows.some((r) => containsPhrase(r.text, key)),
     };
   }), [findings, appliedAt, rows]);
 
   const [applyingPhrase, setApplyingPhrase] = useState(null);
 
   const findFinding = (finding) => {
-    search.setQuery(finding.phrase);
+    search.setQuery(primaryPhrase(finding.phrase));
     if (!search.open) search.openSearch();
   };
 
   const applyFinding = async (finding) => {
-    const key = finding.phrase.toLowerCase();
-    const row = rows.find((r) => (r.text || '').toLowerCase().includes(key));
+    const key = primaryPhrase(finding.phrase);
+    const row = rows.find((r) => containsPhrase(r.text, key));
     if (!row) return;
     setApplyingPhrase(finding.phrase);
     setError('');
     try {
-      const newText = replaceFirst(row.text, finding.phrase, finding.suggestion);
+      const newText = replaceFirst(row.text, key, finding.suggestion);
       const updated = await segmentsApi.update(jobId, row.id, { text: newText });
       setData((current) => (current ? {
         ...current,
@@ -378,8 +409,10 @@ export default function ReviewWorkspace({ task, onTaskChange }) {
       } : current));
       // Recorded only once the segment write actually succeeded -- the
       // audit trail must never claim a correction was applied when it
-      // was not.
-      await tasksApi.applyFinding(task.id, finding.phrase, finding.suggestion);
+      // was not. Recorded under `key`, not the full display phrase, so a
+      // future reload's `appliedAt` lookup above (which also keys on
+      // `primaryPhrase`) finds it.
+      await tasksApi.applyFinding(task.id, key, finding.suggestion);
       await refreshEvents({ silent: true });
       setNotice(`Applied: "${finding.phrase}" → "${finding.suggestion}"`);
     } catch (err) {
@@ -494,6 +527,15 @@ export default function ReviewWorkspace({ task, onTaskChange }) {
    * `submit`: the gate now refuses a transcription task until this has run
    * once, so saving hands back the gate's fresh verdict immediately rather
    * than leaving the worker to discover it only inside the preview dialog.
+   *
+   * THE BOX IS LEFT ALONE ON SUCCESS, DELIBERATELY. Clearing it here used
+   * to wipe `checkNotesInput` the instant a save succeeded -- and the
+   * checklist below (Find it / Apply on each finding) is parsed from that
+   * same state, so the one moment a worker most needed it, right after
+   * pasting and saving, was exactly when it vanished, leaving nothing but
+   * the plain "Already saved by ..." line. What was pasted stays visible
+   * and actionable; a worker who wants a clean box for a fresh reply
+   * clears it themselves.
    */
   const saveAccuracyCheckNotes = async () => {
     const notes = checkNotesInput.trim();
@@ -502,7 +544,6 @@ export default function ReviewWorkspace({ task, onTaskChange }) {
     setError('');
     try {
       const result = await submission.saveAccuracyCheck(task.id, notes);
-      setCheckNotesInput('');
       await refreshCheckStatus();
       const count = result.findings?.length || 0;
       setNotice(

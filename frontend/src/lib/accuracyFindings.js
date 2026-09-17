@@ -54,6 +54,42 @@ function firstAlternative(text) {
   return stripQuotes(first);
 }
 
+// Smart/curly quotes are routine in text copied out of a chat UI's own
+// rendering -- ChatGPT and Gemini both typeset a straight ' as a curly '
+// on the page, and a worker copies what they see. ASR output never does
+// that. CONFIRMED LIVE: a report's "Professor Blondell's course" showed as
+// "Not found in the transcript" although the transcript had that exact
+// text, because the apostrophe on the clipboard was U+2019 and the one in
+// the transcript was U+0027 -- two different characters that render
+// identically and compare unequal. Both sides of every match go through
+// this before comparing, so which one either text happened to use stops
+// mattering.
+function normalizeQuotes(text) {
+  return (text || '').replace(/[‘’]/g, "'").replace(/[“”]/g, '"');
+}
+
+/**
+ * The one phrase actually worth searching for and applying, out of a
+ * `finding.phrase` that may list several alternative spellings of the SAME
+ * mishearing ("X" / "Y" / "Z" -- exactly the shape rule 2 of the check
+ * prompt asks for, and therefore exactly the findings most worth trusting).
+ *
+ * CONFIRMED LIVE: `finding.phrase` used to be handed to Find it / Apply /
+ * the "already found" check UNSPLIT. No single transcript segment ever
+ * contains the literal string `"X" / "Y" / "Z"` -- only X, or only Y -- so
+ * every multi-spelling finding showed "Not found in the transcript --
+ * likely already fixed" regardless of whether it had, and Apply, had it
+ * ever reached the replace, would have silently written nothing.
+ * `suggestion` already picked its own first alternative for the same
+ * reason; `phrase` never did. `finding.phrase` itself is left untouched by
+ * this -- the card still shows the full compound text, because seeing
+ * every variant IS the evidence for a rule-2 finding -- this is only for
+ * the three places that need one concrete, matchable string.
+ */
+export function primaryPhrase(phrase) {
+  return normalizeQuotes(firstAlternative(phrase));
+}
+
 /**
  * Parse a pasted accuracy-check report into `{ phrase, suggestion, reason }`
  * entries, in the order they appeared. Never throws -- a report that does
@@ -149,10 +185,24 @@ export function parseFindings(text) {
   return findings.filter((f) => f.suggestion.toLowerCase() !== 'not sure');
 }
 
-/** Replace the FIRST case-insensitive occurrence of `phrase` in `text`. */
+/**
+ * Whether `phrase` is present anywhere in `text`, quotes and case aside.
+ * The single source of truth for "is this finding still there" -- used
+ * directly for the checklist's found/not-found state, and by
+ * `replaceFirst` below so the two can never disagree with each other.
+ */
+export function containsPhrase(text, phrase) {
+  return normalizeQuotes(text || '').toLowerCase()
+    .includes(normalizeQuotes(phrase || '').toLowerCase());
+}
+
+/** Replace the FIRST case- and quote-insensitive occurrence of `phrase` in
+ * `text`. The match is quote/case-insensitive; the slice it replaces, and
+ * everything around it, is the original `text` untouched. */
 export function replaceFirst(text, phrase, suggestion) {
   const source = text || '';
-  const index = source.toLowerCase().indexOf((phrase || '').toLowerCase());
+  const index = normalizeQuotes(source).toLowerCase()
+    .indexOf(normalizeQuotes(phrase || '').toLowerCase());
   if (index === -1) return source;
-  return source.slice(0, index) + suggestion + source.slice(index + phrase.length);
+  return source.slice(0, index) + suggestion + source.slice(index + (phrase || '').length);
 }

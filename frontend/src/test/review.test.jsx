@@ -706,6 +706,130 @@ describe('the accuracy-check checklist', () => {
     ));
   });
 
+  it('finds and applies a finding that lists several spelling alternatives', async () => {
+    // CONFIRMED LIVE: a rule-2 finding ("the SAME name spelled two
+    // different wrong ways") reports its phrase as "X" / "Y" / "Z" -- and
+    // no single transcript segment ever contains that whole joined
+    // string, only X. Every such finding showed "Not found in the
+    // transcript -- likely already fixed" regardless of whether it had
+    // been, because Find it / Apply / the found-check searched for the
+    // joined text itself instead of the first alternative.
+    vi.spyOn(tasksApi, 'events').mockResolvedValue([]);
+    const update = vi.spyOn(segmentsApi, 'update').mockResolvedValue({
+      ...JOB.segments[0], text: 'First Turn',
+    });
+    vi.spyOn(tasksApi, 'applyFinding').mockResolvedValue({ recorded: true });
+    const MULTI_REPORT = (
+      '* the phrase as transcribed: "first turn" / "1st turn" / "furst turn"\n'
+      + '* what you think it should probably be: First Turn\n'
+      + '* why: The same phrase spelled three different wrong ways.'
+    );
+    render(<ReviewWorkspace task={TASK} />);
+    await screen.findByText('first turn');
+
+    await userEvent.type(screen.getByLabelText('What your assistant found'), MULTI_REPORT);
+    await screen.findByText('First Turn');
+
+    // The card still shows every alternative -- that IS the evidence for
+    // a rule-2 finding -- but it must not be a dead "Not found" label.
+    // (Only the outermost quotes are stripped by the parser; the inner
+    // ones, around the second and third alternatives, stay as typed.)
+    expect(screen.getByText('first turn" / "1st turn" / "furst turn')).toBeInTheDocument();
+    expect(screen.queryByText(/Not found in the transcript/)).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
+    await waitFor(() => expect(update).toHaveBeenCalledWith(
+      'job-1', 's1', { text: 'First Turn' },
+    ));
+  });
+
+  it('matches a phrase copied with a curly apostrophe against straight-quoted transcript text', async () => {
+    // CONFIRMED LIVE: "Professor Blondell's course" showed as "Not found
+    // in the transcript" although the transcript had that exact text --
+    // the apostrophe on the clipboard (copied out of a chat UI's own
+    // rendering) was a curly U+2019, and the one in the transcript was a
+    // straight U+0027. Two different characters, rendered identically,
+    // compared unequal.
+    vi.spyOn(tasksApi, 'events').mockResolvedValue([]);
+    vi.spyOn(transcript, 'get').mockResolvedValue({
+      ...JOB,
+      segments: [
+        { id: 's1', start_time: 0, end_time: 9, speaker_label: 'Male_1',
+          text: "in Professor Blondell's course, he already covered it" },
+      ],
+    });
+    const QUOTE_REPORT = (
+      '* the phrase as transcribed: Professor Blondell’s course\n'
+      + '* what you think it should probably be: Professor Blundell’s course\n'
+      + '* why: A real Oxford physics professor, misspelled phonetically.'
+    );
+    render(<ReviewWorkspace task={TASK} />);
+    await screen.findByText(/Professor Blondell/);
+
+    // PASTE, NOT TYPE. A worker gets this text onto the clipboard from a
+    // chat UI and pastes it — nobody types a report out character by
+    // character — and `userEvent.type`'s simulated keystrokes are not a
+    // reliable way to deliver a curly-quote code point in jsdom, which
+    // would make a real fix look broken here for a reason that has
+    // nothing to do with the fix.
+    const box = screen.getByLabelText('What your assistant found');
+    await userEvent.click(box);
+    await userEvent.paste(QUOTE_REPORT);
+
+    // Anchored: the checklist's parent line also contains this text as a
+    // substring ("Blondell's course → Blundell's course"), and an
+    // unanchored regex matches that ancestor too, on top of the specific
+    // span this is actually checking.
+    expect(await screen.findByText(/^Professor Blundell.s course$/)).toBeInTheDocument();
+    expect(screen.queryByText(/Not found in the transcript/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Find it' })).toBeInTheDocument();
+  });
+
+  it('keeps the checklist on screen after a successful save, instead of wiping the box', async () => {
+    // CONFIRMED LIVE: a worker pasted a real report, saved it, and saw
+    // nothing but "Already saved by ... — pasting again replaces it" — no
+    // checklist, nothing to click. The box used to be cleared to '' the
+    // instant the save succeeded, and the checklist is parsed straight out
+    // of that same box, so it vanished at exactly the moment it was needed.
+    vi.spyOn(tasksApi, 'events').mockResolvedValue([]);
+    vi.spyOn(submission, 'saveAccuracyCheck').mockResolvedValue({
+      saved: true, findings: [], blocking: false,
+    });
+    render(<ReviewWorkspace task={TASK} />);
+    await screen.findByText('first turn');
+
+    await userEvent.type(screen.getByLabelText('What your assistant found'), REPORT);
+    await screen.findByText('First Turn');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Save accuracy check' }));
+
+    await waitFor(() => expect(submission.saveAccuracyCheck).toHaveBeenCalled());
+    expect(screen.getByLabelText('What your assistant found')).toHaveValue(REPORT);
+    expect(screen.getByText('First Turn')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Find it' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Apply' })).toBeInTheDocument();
+  });
+
+  it('rehydrates the checklist from what was already saved, across a reload', async () => {
+    // checkPrompt's own docstring promises the screen can show the step as
+    // done "across a reload" -- but the checklist needs the actual saved
+    // TEXT, not just `accuracy_check_by`, or a worker reopening a task they
+    // checked earlier sees only "Completed by ..." with nothing to act on.
+    vi.spyOn(tasksApi, 'events').mockResolvedValue([]);
+    vi.spyOn(submission, 'checkPrompt').mockResolvedValue({
+      prompt: '', accuracy_check_notes: REPORT,
+      accuracy_check_by: 'W-01', accuracy_check_at: '2026-09-13T00:00:00Z',
+    });
+
+    render(<ReviewWorkspace task={TASK} />);
+    await screen.findByText('first turn');
+
+    expect(await screen.findByText('First Turn')).toBeInTheDocument();
+    expect(screen.getByLabelText('What your assistant found')).toHaveValue(REPORT);
+    expect(screen.getByRole('button', { name: 'Find it' })).toBeInTheDocument();
+  });
+
   it('shows an already-applied finding as done, from real history, not the notes text', async () => {
     // The whole point: accuracy_check_notes only ever holds the LATEST
     // pasted report, so this has to come from a permanent event, not from
