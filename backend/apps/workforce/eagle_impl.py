@@ -571,7 +571,16 @@ class EagleService(EagleIntegrationService):
 
         Returns whatever the platform reports, including the new balance
         where it gives one -- translation does, and it should be persisted
-        rather than inferred.
+        rather than inferred -- PLUS `deadline_at`, read back separately
+        below because neither product's claim response can be trusted to
+        carry it: transcription's `claim()` is a bare redirect with no body
+        at all, and translation's own `{minutes_balance, task}` shape has
+        never actually been inspected for a nested deadline. Without this,
+        the clock the rest of the system treats as the highest-stakes
+        number on the platform was starting on Eagle's side and simply
+        never being recorded on ours -- a worker could hold a task for an
+        hour with no timer ever appearing, because the one write that could
+        have populated it discarded the value.
         """
         logger.info('[EAGLE] claiming %s task %s', source, external_id)
         # retry_on_expiry stays False (the default): this spends minutes and
@@ -586,7 +595,25 @@ class EagleService(EagleIntegrationService):
             credential = get_credential((source or '').strip().lower())
             credential.minutes_balance = result['minutes_balance']
             credential.save(update_fields=['minutes_balance', 'updated_at'])
-        return result if isinstance(result, dict) else {'accepted': bool(result)}
+        result = result if isinstance(result, dict) else {'accepted': bool(result)}
+
+        # BEST-EFFORT, AND DELIBERATELY AFTER THE FACT. The claim itself
+        # already succeeded and already spent real minutes -- that cannot be
+        # undone, so a failure reading the deadline back must never fail the
+        # claim. `list_mine` is normalised through each client's own
+        # `_normalise`, the same code path every other deadline this service
+        # reports comes from, so it is a value known to work rather than one
+        # assumed to.
+        try:
+            mine = self._guard(source, lambda c: c.list_mine())
+            fresh = next((r for r in mine if str(r.external_id) == str(external_id)), None)
+            if fresh is not None and fresh.deadline_at:
+                result['deadline_at'] = fresh.deadline_at
+        except EagleIntegrationError:
+            logger.warning(
+                '[EAGLE] claimed %s task %s but could not read its deadline back',
+                source, external_id)
+        return result
 
     def submit_task(self, external_id: str, content: str, source: str = '',
                     metadata: Optional[Dict] = None) -> EagleSubmissionResult:

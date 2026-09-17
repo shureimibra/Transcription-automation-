@@ -46,6 +46,7 @@ from django.utils import timezone
 from . import services, states
 from .eagle import EagleAuthError, EagleIntegrationError, EagleNotConfigured
 from .models import Task, TaskEvent, WorkerProfile
+from .sync import _parse_deadline
 
 logger = logging.getLogger('eagle')
 
@@ -277,8 +278,19 @@ def claim_for_worker(task_id, worker: WorkerProfile, actor, service=None) -> Tas
                 'That task is no longer available.',
             )
 
+        # THE TIMER A WORKER ACTUALLY SEES DEPENDS ON THIS LINE. Eagle's own
+        # claim response cannot be trusted to carry the deadline it just
+        # started -- see EagleIntegrationService.claim_task's docstring --
+        # so that method reads it back separately and, when it succeeds,
+        # hands it here as a plain string exactly like the one the periodic
+        # sync parses. Parsed the same way here for the same reason: Eagle
+        # sends the literal string 'None' rather than a JSON null when it
+        # has not set one.
+        deadline_at = _parse_deadline((result or {}).get('deadline_at'))
+
         with transaction.atomic():
-            claimed = services.claim_task(task.id, worker=worker, actor=actor)
+            claimed = services.claim_task(
+                task.id, worker=worker, actor=actor, deadline_at=deadline_at)
             services.record_event(
                 claimed, TaskEvent.STATUS_CHANGED, actor=actor,
                 from_status=states.NEW, to_status=states.CLAIMED,
@@ -287,6 +299,7 @@ def claim_for_worker(task_id, worker: WorkerProfile, actor, service=None) -> Tas
                     'external_task_id': task.external_task_id,
                     'minutes_spent': check.required,
                     'minutes_remaining': (result or {}).get('minutes_balance'),
+                    'deadline_at': deadline_at.isoformat() if deadline_at else None,
                 },
             )
         logger.info('[CLAIM] %s claimed %s task %s (%d minutes)',

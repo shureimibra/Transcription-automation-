@@ -33,11 +33,16 @@ from .tests import make_task, make_worker
 
 
 class FakeEagle(EagleIntegrationService):
-    def __init__(self, minutes=100, accept=True, error=None):
+    def __init__(self, minutes=100, accept=True, error=None, deadline_at=None):
         self.minutes = minutes
         self.accept = accept
         self.error = error
         self.claims = []
+        # What EagleIntegrationService.claim_task would have read back via
+        # list_mine after the real claim -- a plain string, exactly as Eagle
+        # sends it, not a datetime. None means "could not be read back",
+        # the same as the real implementation's best-effort failure case.
+        self.deadline_at = deadline_at
 
     def is_configured(self):
         return True
@@ -52,7 +57,10 @@ class FakeEagle(EagleIntegrationService):
         if not self.accept:
             return {'accepted': False}
         self.minutes -= 10
-        return {'accepted': True, 'minutes_balance': self.minutes}
+        result = {'accepted': True, 'minutes_balance': self.minutes}
+        if self.deadline_at is not None:
+            result['deadline_at'] = self.deadline_at
+        return result
 
 
 def eagle_task(**kwargs):
@@ -169,6 +177,38 @@ class ClaimOrderingTestCase(TestCase):
         metadata = events.first().metadata
         self.assertEqual(metadata['minutes_spent'], 11)
         self.assertEqual(metadata['external_task_id'], '4333')
+
+    def test_the_deadline_eagle_hands_back_is_persisted_on_claim(self):
+        # CONFIRMED LIVE: a worker never saw a timer on any task, from claim
+        # to submit, on any screen. DeadlineClock was built, wired in, and
+        # tested correctly -- the gap was here. Eagle's own claim response
+        # cannot be trusted to carry the deadline it just started (one
+        # product's claim call is a bare redirect with no body), so
+        # EagleIntegrationService.claim_task reads it back separately and
+        # this is where that value has to actually land, or the whole chain
+        # was pointless.
+        task = eagle_task()
+
+        claim_for_worker(
+            task.id, self.worker, self.user,
+            service=FakeEagle(minutes=100, deadline_at='2026-09-16T15:00:00Z'),
+        )
+
+        task.refresh_from_db()
+        self.assertIsNotNone(task.deadline_at)
+        self.assertEqual(task.deadline_at.isoformat(), '2026-09-16T15:00:00+00:00')
+
+    def test_a_deadline_eagle_could_not_be_read_back_leaves_the_field_alone(self):
+        # The claim must never fail because the read-back did. A missing
+        # deadline is a missing timer, not a missing claim.
+        task = eagle_task()
+
+        claimed = claim_for_worker(
+            task.id, self.worker, self.user, service=FakeEagle(minutes=100),
+        )
+
+        self.assertEqual(claimed.status, states.CLAIMED)
+        self.assertIsNone(claimed.deadline_at)
 
 
 class ClaimRefusalTestCase(TestCase):

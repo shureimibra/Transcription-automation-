@@ -304,7 +304,7 @@ def unassign_task(task_id, actor: User) -> Task:
         )
 
 
-def claim_task(task_id, worker: WorkerProfile, actor: User) -> Task:
+def claim_task(task_id, worker: WorkerProfile, actor: User, deadline_at=None) -> Task:
     """
     THE OPERATION THAT MUST NOT RACE.
 
@@ -356,6 +356,13 @@ def claim_task(task_id, worker: WorkerProfile, actor: User) -> Task:
             )
 
         extra_fields = {'claimed_by': worker, 'claim_reserved_at': None}
+        # The one-hour countdown a worker actually sees starts here, if the
+        # caller could read it back from Eagle -- see eagle_claim.py and
+        # EagleIntegrationService.claim_task. Left untouched when absent
+        # rather than cleared, so a value the periodic sync already found
+        # (unlikely this early, but not impossible) is never thrown away.
+        if deadline_at is not None:
+            extra_fields['deadline_at'] = deadline_at
 
         # CLEAR ANY WORKFORCE_TRAINING_MODE RESIDUE, BUT ONLY ON THIS
         # TASK'S FIRST-EVER REAL CLAIM.
