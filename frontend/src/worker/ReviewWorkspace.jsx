@@ -4,7 +4,7 @@ import DeadlineClock from './DeadlineClock.jsx';
 import { segments as segmentsApi, submission, taskMedia, transcript } from '../api/eagle.js';
 import { tasks as tasksApi } from '../api/workforce.js';
 import { ANNOTATION_TAGS, insertTagAtPosition } from '../lib/annotations.js';
-import { containsPhrase, parseFindings, primaryPhrase, replaceFirst } from '../lib/accuracyFindings.js';
+import { locatePhrase, parseFindings, primaryPhrase, replaceFirst } from '../lib/accuracyFindings.js';
 import TranscriptionGuideModal from './TranscriptionGuideModal.jsx';
 import Verdict from '../components/Verdict.jsx';
 import DeliveredBanner, { isDelivered } from '../components/DeliveredBanner.jsx';
@@ -379,25 +379,47 @@ export default function ReviewWorkspace({ task, onTaskChange }) {
     // defeating a match against straight-quoted ASR text).
     const key = primaryPhrase(finding.phrase);
     const when = appliedAt.get(key.toLowerCase());
+    const located = locatePhrase(rows, key);
     return {
       ...finding,
       applied: Boolean(when),
       appliedAt: when ? new Date(when).toLocaleDateString() : null,
-      found: rows.some((r) => containsPhrase(r.text, key)),
+      found: Boolean(located),
+      // A SHORT-SEGMENT TASK MAKES THIS COMMON, NOT RARE. Confirmed live:
+      // "power limit matrices" was "...the power limit" at the end of one
+      // segment and "matrices is..." at the start of the next -- every
+      // word untouched, but no single row ever contained the whole
+      // phrase. Kept as its own flag rather than folded into `found`
+      // because Apply below has to treat the two cases differently: one
+      // segment is a safe, ordinary rewrite; two is not something
+      // replaceFirst can do at all.
+      spansSegments: Boolean(located && located.rows.length > 1),
     };
   }), [findings, appliedAt, rows]);
 
   const [applyingPhrase, setApplyingPhrase] = useState(null);
 
   const findFinding = (finding) => {
-    search.setQuery(primaryPhrase(finding.phrase));
+    const key = primaryPhrase(finding.phrase);
+    const located = locatePhrase(rows, key);
+    if (located && located.rows.length > 1) {
+      // The ordinary text search matches one row at a time, same as
+      // containsPhrase -- it would come back empty for exactly the
+      // phrase this button exists to help find. locatePhrase already
+      // knows exactly where it starts; jump straight there instead of
+      // asking the search bar to fail at the same boundary.
+      playerRef.current?.seekTo(located.rows[0].start_time);
+      searchRowRefs.current[located.rows[0].id]?.scrollIntoView?.({ block: 'center' });
+      return;
+    }
+    search.setQuery(key);
     if (!search.open) search.openSearch();
   };
 
   const applyFinding = async (finding) => {
     const key = primaryPhrase(finding.phrase);
-    const row = rows.find((r) => containsPhrase(r.text, key));
-    if (!row) {
+    const located = locatePhrase(rows, key);
+    if (!located) {
       // CONFIRMED LIVE: this returned silently, with no error and no
       // notice, so clicking Apply on a finding whose phrase the checklist
       // itself had just said WAS found (the button only renders when
@@ -411,6 +433,20 @@ export default function ReviewWorkspace({ task, onTaskChange }) {
       );
       return;
     }
+    if (located.rows.length > 1) {
+      // NOT SOMETHING TO GUESS AT. replaceFirst rewrites one segment's
+      // text; splitting a replacement across two would mean deciding
+      // where the cut falls, and getting that wrong risks corrupting
+      // text right at a boundary Eagle grades on timing. Told plainly
+      // rather than attempted automatically or failed silently.
+      setError(
+        `"${finding.phrase}" spans two lines in the transcript, starting `
+        + `around ${timestamp(located.rows[0].start_time)} -- edit both `
+        + 'lines by hand instead of using Apply here.'
+      );
+      return;
+    }
+    const row = located.rows[0];
     setApplyingPhrase(finding.phrase);
     setError('');
     try {

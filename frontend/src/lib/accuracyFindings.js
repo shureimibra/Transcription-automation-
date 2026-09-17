@@ -265,6 +265,41 @@ export function containsPhrase(text, phrase) {
     .includes(normalizeQuotes(phrase || '').toLowerCase());
 }
 
+/**
+ * Where `phrase` actually is among `rows` (each `{ text }`, already in
+ * time order) -- checked one row at a time first, then across every
+ * adjacent PAIR of rows read together.
+ *
+ * CONFIRMED LIVE: this task's segments run 5-8 seconds each, short enough
+ * that a real multi-word finding routinely straddles the exact point a
+ * clause happens to break at -- "power limit matrices" was "...the power
+ * limit" at the end of one segment and "matrices is..." at the start of
+ * the next; "mulching it by any other member" split the same way one
+ * segment later. `containsPhrase` alone, checked one row at a time,
+ * reported both as "Not found in the transcript -- likely already
+ * fixed" even though every word of them was sitting there untouched,
+ * because no SINGLE row's text ever contained the whole phrase.
+ *
+ * Returns `null` when the phrase is genuinely nowhere, `{ rows: [row] }`
+ * for an ordinary single-segment match, or `{ rows: [rowA, rowB] }` when
+ * it only appears once the two are joined -- the caller has to tell
+ * these apart, because only the first is safe to rewrite automatically;
+ * `replaceFirst` has no way to split a replacement across two rows.
+ */
+export function locatePhrase(rows, phrase) {
+  const list = rows || [];
+  const single = list.find((r) => containsPhrase(r.text, phrase));
+  if (single) return { rows: [single] };
+  for (let i = 0; i < list.length - 1; i += 1) {
+    const a = list[i];
+    const b = list[i + 1];
+    if (containsPhrase(`${a.text || ''} ${b.text || ''}`, phrase)) {
+      return { rows: [a, b] };
+    }
+  }
+  return null;
+}
+
 /** Replace the FIRST case- and quote-insensitive occurrence of `phrase` in
  * `text`. The match is quote/case-insensitive; the slice it replaces, and
  * everything around it, is the original `text` untouched. */

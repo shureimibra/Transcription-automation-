@@ -85,6 +85,21 @@ export default function AccuracyChecklist({ findings, hasText = false, onFind, o
                 <span className="text-2xs text-ink-mute">
                   Not found in the transcript — likely already fixed
                 </span>
+              ) : finding.spansSegments ? (
+                // A SHORT-SEGMENT TASK MAKES THIS COMMON, NOT RARE.
+                // Confirmed live: a phrase can straddle the exact point a
+                // clause breaks into the next segment. Find it still
+                // works -- it jumps straight to where the phrase starts --
+                // but Apply cannot rewrite across two segments, so it is
+                // not offered as a button that would only ever fail.
+                <>
+                  <Button size="sm" variant="secondary" onClick={() => onFind(finding)}>
+                    Find it
+                  </Button>
+                  <span className="text-2xs text-ink-mute">
+                    Spans two lines — edit both by hand
+                  </span>
+                </>
               ) : (
                 <>
                   <Button size="sm" variant="secondary" onClick={() => onFind(finding)}>

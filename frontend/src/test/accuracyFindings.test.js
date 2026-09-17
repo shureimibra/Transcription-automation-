@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { containsPhrase, parseFindings, primaryPhrase, replaceFirst } from '../lib/accuracyFindings.js';
+import {
+  containsPhrase, locatePhrase, parseFindings, primaryPhrase, replaceFirst,
+} from '../lib/accuracyFindings.js';
 
 // Real report shapes seen in practice, not invented ones -- the check
 // prompt asks for one exact structure, but a worker's own assistant does
@@ -250,5 +252,47 @@ describe('parseFindings: notation vs. mishearing findings', () => {
     const [finding] = parseFindings(report);
     expect(finding.notation).toBe(false);
     expect(finding.reason).toBe('A real Oxford physics professor, misspelled phonetically.');
+  });
+});
+
+describe('locatePhrase', () => {
+  // CONFIRMED LIVE on a real task: segments running 5-8 seconds each
+  // split "power limit matrices" into "...the power limit" at the end of
+  // one row and "matrices is..." at the start of the next -- every word
+  // untouched, but containsPhrase alone, checked one row at a time,
+  // never found it in either.
+  const ROWS = [
+    { id: 's1', text: 'So the procedure for generating the power limit' },
+    { id: 's2', text: 'matrices is completely general.' },
+    { id: 's3', text: 'We are just writing down a matrix.' },
+  ];
+
+  it('finds an ordinary phrase that sits inside one row', () => {
+    const located = locatePhrase(ROWS, 'writing down a matrix');
+    expect(located.rows).toEqual([ROWS[2]]);
+  });
+
+  it('finds a phrase only present once two adjacent rows are joined', () => {
+    const located = locatePhrase(ROWS, 'power limit matrices');
+    expect(located.rows).toEqual([ROWS[0], ROWS[1]]);
+  });
+
+  it('prefers a single-row match over a spanning one when both exist', () => {
+    const rows = [
+      { id: 'a', text: 'the whole phrase right here' },
+      { id: 'b', text: 'the whole' },
+      { id: 'c', text: 'phrase right here too' },
+    ];
+    expect(locatePhrase(rows, 'the whole phrase right here').rows).toEqual([rows[0]]);
+  });
+
+  it('returns null when the phrase is genuinely nowhere, not even split', () => {
+    expect(locatePhrase(ROWS, 'something entirely absent')).toBeNull();
+  });
+
+  it('does not match across two rows that are not adjacent', () => {
+    // "power limit" (end of s1) and "a matrix" (end of s3, not s2) must
+    // not be treated as a span -- only genuinely ADJACENT rows count.
+    expect(locatePhrase(ROWS, 'power limit ... a matrix')).toBeNull();
   });
 });

@@ -708,6 +708,70 @@ describe('the accuracy-check checklist', () => {
     expect(screen.queryByText('Notation fix — no audio check needed')).not.toBeInTheDocument();
   });
 
+  it('treats a phrase split across two short segments as found, not "already fixed"', async () => {
+    // CONFIRMED LIVE on a real task: segments running 5-8 seconds each
+    // split "power limit matrices" into "...the power limit" at the end
+    // of one row and "matrices is..." at the start of the next. Every
+    // word was untouched, but the checklist reported "Not found in the
+    // transcript -- likely already fixed", because the search only ever
+    // checked one segment's text at a time.
+    vi.spyOn(tasksApi, 'events').mockResolvedValue([]);
+    vi.spyOn(transcript, 'get').mockResolvedValue({
+      ...JOB,
+      segments: [
+        { id: 'sa', start_time: 0, end_time: 5, speaker_label: 'Male_1',
+          text: 'So the procedure for generating the power limit' },
+        { id: 'sb', start_time: 5, end_time: 9, speaker_label: 'Male_1',
+          text: 'matrices is completely general.' },
+      ],
+    });
+    const SPAN_REPORT = (
+      '* the phrase as transcribed: power limit matrices\n'
+      + '* what you think it should probably be: Pauli matrices\n'
+      + '* why: Phonetic mishearing of the standard quantum physics term.'
+    );
+    render(<ReviewWorkspace task={TASK} />);
+    await screen.findByText(/power limit/);
+
+    await userEvent.type(screen.getByLabelText('What your assistant found'), SPAN_REPORT);
+
+    expect(await screen.findByText('Pauli matrices')).toBeInTheDocument();
+    expect(screen.queryByText(/Not found in the transcript/)).not.toBeInTheDocument();
+    // Find it still works (it jumps straight to where the phrase starts);
+    // Apply is not offered, because replaceFirst cannot rewrite across
+    // two segments -- a plain note explains why instead.
+    expect(screen.getByRole('button', { name: 'Find it' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument();
+    expect(screen.getByText('Spans two lines — edit both by hand')).toBeInTheDocument();
+  });
+
+  it('"Find it" jumps straight to the first segment for a phrase that spans two', async () => {
+    vi.spyOn(tasksApi, 'events').mockResolvedValue([]);
+    vi.spyOn(transcript, 'get').mockResolvedValue({
+      ...JOB,
+      segments: [
+        { id: 'sa', start_time: 0, end_time: 5, speaker_label: 'Male_1',
+          text: 'So the procedure for generating the power limit' },
+        { id: 'sb', start_time: 5, end_time: 9, speaker_label: 'Male_1',
+          text: 'matrices is completely general.' },
+      ],
+    });
+    const SPAN_REPORT = (
+      '* the phrase as transcribed: power limit matrices\n'
+      + '* what you think it should probably be: Pauli matrices\n'
+      + '* why: Phonetic mishearing of the standard quantum physics term.'
+    );
+    render(<ReviewWorkspace task={TASK} />);
+    await screen.findByText(/power limit/);
+    await userEvent.type(screen.getByLabelText('What your assistant found'), SPAN_REPORT);
+    await screen.findByText('Pauli matrices');
+
+    // The real assertion is that this does not throw and does not open
+    // the (useless, for a spanning phrase) text search box.
+    await userEvent.click(screen.getByRole('button', { name: 'Find it' }));
+    expect(screen.queryByPlaceholderText('Search the transcript…')).not.toBeInTheDocument();
+  });
+
   it('"Find it" opens the search box already searching for the phrase', async () => {
     vi.spyOn(tasksApi, 'events').mockResolvedValue([]);
     render(<ReviewWorkspace task={TASK} />);
