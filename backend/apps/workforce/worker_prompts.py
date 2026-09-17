@@ -695,14 +695,21 @@ equation being dictated does not. The conventions:
     glyph -- "Sigma", "Mu", "Pi", not "Σ", "μ", "π".
   * Trigonometric functions: lowercase words -- "sine", "cosine", "tangent".
   * Operators: the real symbol, not the word -- "+", "-", "*", "/", "=", "()".
+    EXCEPT factorial: write it as the word "factorial", never the "!"
+    symbol. Eagle's house style bans exclamation marks outright (see
+    item 4b above) with no exception for mathematical notation, so "2!"
+    is not a valid correction here even though "!" is the standard
+    symbol everywhere else -- "2 factorial" is.
 
 Flag a phrase this way only where the surrounding sentence is clearly
-dictating a formula, not just using a number in conversation. Begin the
-reason with the word "Notation:" for every finding of this kind, and
-nothing else here -- that is what tells the checklist this is a
-formatting fix, not a content guess, so it does not need to say so again
-in your own words. A worker can act on it without listening to the audio
-first, unlike a name or a term.
+dictating a formula, not just using a number in conversation. Put the
+word "Notation:" at the very start of the REASON for every finding of
+this kind, and nothing else -- not on the corrected value, which must
+stay exactly the corrected text and nothing more, since it goes straight
+into the transcript if a worker applies it. That is what tells the
+checklist this is a formatting fix, not a content guess, so it does not
+need to say so again in your own words. A worker can act on it without
+listening to the audio first, unlike a name or a term.
 
 WHAT NOT TO DO:
 - Do not rewrite the transcript, or any part of it. You were not there and

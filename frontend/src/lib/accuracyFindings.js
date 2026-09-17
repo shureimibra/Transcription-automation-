@@ -232,7 +232,7 @@ export function parseFindings(text) {
   // of the actionable list rather than shown as a broken card.
   return findings
     .filter((f) => f.suggestion.toLowerCase() !== 'not sure')
-    .map((f) => ({ ...f, ...classifyReason(f.reason) }));
+    .map((f) => ({ ...f, ...classifyFinding(f) }));
 }
 
 // A NOTATION FINDING IS A DIFFERENT KIND OF LEAD FROM EVERYTHING ELSE ON
@@ -248,10 +248,29 @@ export function parseFindings(text) {
 // `notation` already says the same thing without the raw tag word.
 const NOTATION_REASON_RE = /^notation:\s*/i;
 
-function classifyReason(reason) {
-  const text = (reason || '').trim();
-  const notation = NOTATION_REASON_RE.test(text);
-  return { reason: notation ? text.replace(NOTATION_REASON_RE, '') : text, notation };
+/**
+ * CHECKED ON BOTH `reason` AND `suggestion`, NOT JUST `reason`.
+ *
+ * CONFIRMED LIVE: a real report put "Notation:" on the suggestion line
+ * instead of the reason line for four straight findings -- not a fluke,
+ * a pattern, from an assistant that read the instruction as labelling
+ * the corrected VALUE rather than the reason for it. Checked only on
+ * `reason`, this missed the marker entirely: no badge, AND the literal
+ * word "Notation:" got written straight into the transcript by Apply,
+ * four times, on a document about to be submitted. Whichever field it
+ * lands on, the marker means the same thing and must never reach the
+ * document.
+ */
+function classifyFinding(finding) {
+  const reason = (finding.reason || '').trim();
+  const suggestion = (finding.suggestion || '').trim();
+  const reasonMarked = NOTATION_REASON_RE.test(reason);
+  const suggestionMarked = NOTATION_REASON_RE.test(suggestion);
+  return {
+    reason: reasonMarked ? reason.replace(NOTATION_REASON_RE, '') : reason,
+    suggestion: suggestionMarked ? suggestion.replace(NOTATION_REASON_RE, '') : suggestion,
+    notation: reasonMarked || suggestionMarked,
+  };
 }
 
 /**

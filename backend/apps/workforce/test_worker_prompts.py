@@ -632,7 +632,34 @@ class TranscriptCheckPromptTestCase(TestCase):
         self.assertIn('not just the ones you recognise', prompt)
         self.assertIn('Greek letters', prompt)
         self.assertIn('Sigma', prompt)
-        self.assertIn('reason with the word "Notation:"', prompt)
+        self.assertIn('word "Notation:" at the very start of the REASON', prompt)
+
+    def test_it_puts_factorial_in_words_not_the_banned_exclamation_mark(self):
+        """
+        CONFIRMED LIVE: the notation section's own "Operators: the real
+        symbol, not the word" instruction, with no exception carved out,
+        led an assistant to correct spoken "2 factorial" to "2!" -- which
+        Eagle's own gate then rejected, because rule 4b bans exclamation
+        marks outright with no exception for mathematical notation. The
+        prompt was asking for something its own earlier rule refuses.
+        """
+        prompt = worker_prompts.build_transcript_check('edited_verbatim')
+        self.assertIn('EXCEPT factorial', prompt)
+        self.assertIn('"2 factorial" is', prompt)
+
+    def test_it_says_the_marker_must_not_reach_the_corrected_value(self):
+        """
+        CONFIRMED LIVE: a real report put "Notation:" on the corrected-
+        value line for four straight findings instead of the reason line
+        -- not a fluke, a pattern. Apply wrote the literal word
+        "Notation:" into a real transcript four times before this was
+        caught. The frontend now defends against this too (see
+        accuracyFindings.js's classifyFinding), but the prompt should say
+        so plainly as well, not rely on the workaround alone.
+        """
+        prompt = worker_prompts.build_transcript_check('edited_verbatim')
+        self.assertIn('not on the corrected value', prompt)
+        self.assertIn('goes straight\ninto the transcript', prompt)
 
 
 class ReplyScaffoldingTestCase(TestCase):

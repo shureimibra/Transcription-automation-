@@ -243,6 +243,23 @@ describe('parseFindings: notation vs. mishearing findings', () => {
     expect(finding.notation).toBe(true);
   });
 
+  it('strips the marker off the SUGGESTION too, when a report puts it there instead of the reason', () => {
+    // CONFIRMED LIVE: a real report put "Notation:" on the corrected-value
+    // line for four straight findings, not the reason line the prompt
+    // actually asks for. Checked only on `reason`, this missed the marker
+    // entirely -- no badge, and Apply wrote the literal word "Notation:"
+    // into the transcript, four times, on a document about to be
+    // submitted.
+    const report = (
+      '* the phrase as transcribed: psi squared over 2 factorial\n'
+      + '* what you think it should probably be: Notation: 2!\n'
+      + '* why: Factorial operator rendered in standard symbolic notation.'
+    );
+    const [finding] = parseFindings(report);
+    expect(finding.notation).toBe(true);
+    expect(finding.suggestion).toBe('2!');
+  });
+
   it('leaves an ordinary finding unmarked, with its reason untouched', () => {
     const report = (
       '* the phrase as transcribed: Professor Blondell\n'

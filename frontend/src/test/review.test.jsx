@@ -697,6 +697,46 @@ describe('the accuracy-check checklist', () => {
       .toBeInTheDocument();
   });
 
+  it('never writes the literal word "Notation:" into the transcript, even when a report puts the marker on the suggestion line', async () => {
+    // CONFIRMED LIVE: a real report put "Notation:" on the corrected-value
+    // line for four straight findings instead of the reason line the
+    // prompt asks for. Apply wrote it in literally -- "psi squared over
+    // Notation: 2!" -- into a document about to be submitted to Eagle.
+    vi.spyOn(tasksApi, 'events').mockResolvedValue([]);
+    const update = vi.spyOn(segmentsApi, 'update').mockResolvedValue({
+      ...JOB.segments[0], text: 'first turn 2!',
+    });
+    vi.spyOn(tasksApi, 'applyFinding').mockResolvedValue({ recorded: true });
+    const MISPLACED_MARKER_REPORT = (
+      '* the phrase as transcribed: first turn\n'
+      + '* what you think it should probably be: Notation: first turn 2!\n'
+      + '* why: Factorial operator rendered in standard symbolic notation.'
+    );
+    render(<ReviewWorkspace task={TASK} />);
+    await screen.findByText('first turn');
+
+    await userEvent.type(
+      screen.getByLabelText('What your assistant found'), MISPLACED_MARKER_REPORT);
+    // The badge still shows -- the marker was still recognised, just not
+    // where the prompt asked for it -- and the checklist CARD's displayed
+    // suggestion has no leftover "Notation:" in it either. (The raw
+    // textarea above is a separate element and legitimately still shows
+    // the pasted text verbatim, "Notation:" and all -- that box is the
+    // audit trail of what was actually pasted, not the parsed result.)
+    expect(await screen.findByText('Notation fix — no audio check needed'))
+      .toBeInTheDocument();
+    expect(screen.getByText('first turn 2!')).toBeInTheDocument();
+    const cards = screen.getAllByText(/Notation:/);
+    expect(cards).toHaveLength(1);
+    expect(cards[0].tagName).toBe('TEXTAREA');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
+    await waitFor(() => expect(update).toHaveBeenCalledWith(
+      'job-1', 's1', { text: 'first turn 2!' },
+    ));
+  });
+
   it('does not badge an ordinary mishearing finding', async () => {
     vi.spyOn(tasksApi, 'events').mockResolvedValue([]);
     render(<ReviewWorkspace task={TASK} />);
