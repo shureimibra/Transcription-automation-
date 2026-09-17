@@ -21,6 +21,7 @@ describe('parseFindings', () => {
       phrase: 'Sean, North Carolina',
       suggestion: 'Shaw, North Carolina',
       reason: 'Mishearing of Shaw University in Raleigh, North Carolina, where SNCC was founded.',
+      notation: false,
     });
     expect(findings[1].phrase).toBe('Richard daily');
     expect(findings[1].suggestion).toBe('Richard Daley');
@@ -80,6 +81,7 @@ The organization discussed is the Southern Christian Leadership Conference (SCLC
       phrase: "Moett's",
       suggestion: "Mowat's",
       reason: 'Farley Mowat was introduced just previously; this is a misspelling of his surname.',
+      notation: false,
     });
     expect(findings[1].phrase).toBe("Eskimo's");
     expect(findings[1].suggestion).toBe('Eskimos');
@@ -182,5 +184,46 @@ describe('containsPhrase', () => {
 
   it('is false when the phrase genuinely is not there', () => {
     expect(containsPhrase('nothing relevant here', 'missing phrase')).toBe(false);
+  });
+});
+
+describe('parseFindings: notation vs. mishearing findings', () => {
+  // The check prompt's math-notation section asks the assistant to start
+  // the reason with "Notation:" specifically so a formatting fix ("p minus
+  // q a" -> "p - qA") can be told apart from a claim about what was
+  // actually said -- the first needs no audio check, the second always
+  // does. Verified across two different parsed shapes, since the marker
+  // has to survive regardless of which one produced the finding.
+
+  it('marks a labelled finding as notation and strips the marker from the reason', () => {
+    const report = (
+      '* the phrase as transcribed: p minus q a\n'
+      + '* what you think it should probably be: p - qA\n'
+      + '* why: Notation: this is a written-out equation, not spoken language.'
+    );
+    const [finding] = parseFindings(report);
+    expect(finding.notation).toBe(true);
+    expect(finding.reason).toBe('this is a written-out equation, not spoken language.');
+  });
+
+  it('marks a bulleted-bold finding as notation the same way', () => {
+    const report = (
+      '* **Sigma**\n'
+      + '* Σ\n'
+      + '* Notation: the Greek letter should be spelled as a word, not the glyph.'
+    );
+    const [finding] = parseFindings(report);
+    expect(finding.notation).toBe(true);
+  });
+
+  it('leaves an ordinary finding unmarked, with its reason untouched', () => {
+    const report = (
+      '* the phrase as transcribed: Professor Blondell\n'
+      + '* what you think it should probably be: Professor Blundell\n'
+      + '* why: A real Oxford physics professor, misspelled phonetically.'
+    );
+    const [finding] = parseFindings(report);
+    expect(finding.notation).toBe(false);
+    expect(finding.reason).toBe('A real Oxford physics professor, misspelled phonetically.');
   });
 });

@@ -672,6 +672,42 @@ describe('the accuracy-check checklist', () => {
     expect(screen.getByRole('button', { name: 'Apply' })).toBeInTheDocument();
   });
 
+  it('badges a notation finding as not needing an audio check, unlike an ordinary one', async () => {
+    // The check prompt's math-notation section asks the assistant to start
+    // the reason with "Notation:" precisely so the checklist can tell a
+    // formatting fix apart from a claim about what was actually said --
+    // see accuracyFindings.js's classifyReason for where that marker gets
+    // turned into `finding.notation` and stripped from the visible reason.
+    vi.spyOn(tasksApi, 'events').mockResolvedValue([]);
+    const NOTATION_REPORT = (
+      '* the phrase as transcribed: first turn\n'
+      + '* what you think it should probably be: First Turn\n'
+      + '* why: Notation: this is a written-out equation, not spoken language.'
+    );
+    render(<ReviewWorkspace task={TASK} />);
+    await screen.findByText('first turn');
+
+    await userEvent.type(screen.getByLabelText('What your assistant found'), NOTATION_REPORT);
+
+    expect(await screen.findByText('Notation fix — no audio check needed'))
+      .toBeInTheDocument();
+    // The raw marker word is not shown twice -- the badge says it once.
+    expect(screen.queryByText(/^Notation:/)).not.toBeInTheDocument();
+    expect(screen.getByText('this is a written-out equation, not spoken language.'))
+      .toBeInTheDocument();
+  });
+
+  it('does not badge an ordinary mishearing finding', async () => {
+    vi.spyOn(tasksApi, 'events').mockResolvedValue([]);
+    render(<ReviewWorkspace task={TASK} />);
+    await screen.findByText('first turn');
+
+    await userEvent.type(screen.getByLabelText('What your assistant found'), REPORT);
+    await screen.findByText('First Turn');
+
+    expect(screen.queryByText('Notation fix — no audio check needed')).not.toBeInTheDocument();
+  });
+
   it('"Find it" opens the search box already searching for the phrase', async () => {
     vi.spyOn(tasksApi, 'events').mockResolvedValue([]);
     render(<ReviewWorkspace task={TASK} />);

@@ -55,6 +55,17 @@ export default function AccuracyChecklist({ findings, hasText = false, onFind, o
       <ol className="space-y-2">
         {findings.map((finding, i) => (
           <li key={i} className="rounded-lg border border-edge bg-canvas p-3">
+            {/* NOTATION FINDINGS ARE FLAGGED UP FRONT, before the phrase
+                itself -- the whole point is that a worker can tell at a
+                glance this is a formatting fix and act on it without
+                listening first, the opposite default from everything else
+                on this list. See accuracyFindings.js's classifyReason. */}
+            {finding.notation && (
+              <span className="mb-1 inline-block rounded-full bg-accent/10 px-1.5 py-0.5
+                                text-2xs font-medium text-accent">
+                Notation fix — no audio check needed
+              </span>
+            )}
             <p className="text-xs text-ink">
               <span className="text-ink-mute line-through decoration-status-rejected/60">
                 {finding.phrase}

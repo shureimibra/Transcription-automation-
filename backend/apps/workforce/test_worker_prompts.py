@@ -608,6 +608,32 @@ class TranscriptCheckPromptTestCase(TestCase):
         prompt = worker_prompts.build_transcript_check('edited_verbatim')
         self.assertIn('Only list something here if you are proposing an actual change', prompt)
 
+    def test_it_asks_for_spoken_math_converted_to_notation_on_any_subject(self):
+        """
+        ADDED after a design discussion prompted by a real audit: this
+        document's mishearing checks were solid, but nothing asked the
+        assistant to convert genuinely written-out equations into Eagle's
+        symbolic house style ("p minus q a" -> "p - qA"), and every
+        heavily mathematical transcript audited this session left that
+        gap unfilled.
+
+        DELIBERATELY NOT SCOPED TO A FIXED SUBJECT LIST -- a future
+        recording may be about a subject nobody has written a rule for
+        yet, and a hardcoded list of "math, physics, chemistry" would
+        silently miss it. The prompt says so explicitly.
+
+        The "Notation:" marker is load-bearing, not decorative: it is
+        what accuracyFindings.js's classifyReason (frontend) uses to tell
+        a formatting fix apart from a claim about what was actually
+        said, so the checklist can stop asking a worker to verify a pure
+        notation change against audio it does not need.
+        """
+        prompt = worker_prompts.build_transcript_check('edited_verbatim')
+        self.assertIn('not just the ones you recognise', prompt)
+        self.assertIn('Greek letters', prompt)
+        self.assertIn('Sigma', prompt)
+        self.assertIn('reason with the word "Notation:"', prompt)
+
 
 class ReplyScaffoldingTestCase(TestCase):
     """

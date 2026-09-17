@@ -182,7 +182,28 @@ export function parseFindings(text) {
   // "not sure" is a real, correct answer from the check prompt -- not a
   // usable correction. Nothing to search for or apply, so it is left out
   // of the actionable list rather than shown as a broken card.
-  return findings.filter((f) => f.suggestion.toLowerCase() !== 'not sure');
+  return findings
+    .filter((f) => f.suggestion.toLowerCase() !== 'not sure')
+    .map((f) => ({ ...f, ...classifyReason(f.reason) }));
+}
+
+// A NOTATION FINDING IS A DIFFERENT KIND OF LEAD FROM EVERYTHING ELSE ON
+// THIS CHECKLIST. The check prompt's own math-notation section asks the
+// assistant to start the reason with "Notation:" for exactly this reason
+// -- a phrase like "p minus q a" -> "p - qA" is a formatting fix a worker
+// can act on by reading it, not a claim about what was actually said, so
+// it does not need the "go verify against audio first" caution that every
+// other finding here genuinely does. Detected once, here, regardless of
+// which of the three shapes above produced the finding, rather than
+// duplicated at each push site -- and the marker itself is stripped from
+// what gets shown, since the badge AccuracyChecklist renders from
+// `notation` already says the same thing without the raw tag word.
+const NOTATION_REASON_RE = /^notation:\s*/i;
+
+function classifyReason(reason) {
+  const text = (reason || '').trim();
+  const notation = NOTATION_REASON_RE.test(text);
+  return { reason: notation ? text.replace(NOTATION_REASON_RE, '') : text, notation };
 }
 
 /**

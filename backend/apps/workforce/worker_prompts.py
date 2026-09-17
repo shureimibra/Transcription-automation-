@@ -676,6 +676,34 @@ WHAT TO LOOK FOR, IN ORDER OF VALUE:
    that shape usually means one continuous speaker was split into two
    labels, not that there are genuinely two people talking.
 
+ALSO, IF ANY PART OF THIS RECORDING IS TECHNICAL OR MATHEMATICAL -- on any
+subject, not just the ones you recognise, since a future recording may be
+about a subject nobody has written a rule for yet: look for places where
+spoken mathematical or scientific language should be converted to Eagle's
+written notation, and report those the same way as everything above.
+
+This is not about mishearings -- the words themselves may be exactly
+right -- it is about whether a genuinely WRITTEN-OUT equation is rendered
+in the symbols this house style requires. A casual number in ordinary
+speech ("with two kids plus three dogs, it's chaotic") stays as words; an
+equation being dictated does not. The conventions:
+  * Variables and coefficients: digits and letters together, never spelled
+    out -- "3x", "12y".
+  * Superscripts and subscripts: ^ and _ -- "x^4", "y_2".
+  * Molecules: subscript digits -- "H_2O", "CO_2".
+  * Greek letters: spelled out as a capitalized word, never the actual
+    glyph -- "Sigma", "Mu", "Pi", not "Σ", "μ", "π".
+  * Trigonometric functions: lowercase words -- "sine", "cosine", "tangent".
+  * Operators: the real symbol, not the word -- "+", "-", "*", "/", "=", "()".
+
+Flag a phrase this way only where the surrounding sentence is clearly
+dictating a formula, not just using a number in conversation. Begin the
+reason with the word "Notation:" for every finding of this kind, and
+nothing else here -- that is what tells the checklist this is a
+formatting fix, not a content guess, so it does not need to say so again
+in your own words. A worker can act on it without listening to the audio
+first, unlike a name or a term.
+
 WHAT NOT TO DO:
 - Do not rewrite the transcript, or any part of it. You were not there and
   cannot hear the audio, so a guess at a name is a lead for the person who
@@ -684,7 +712,7 @@ WHAT NOT TO DO:
   it. Only flag it if something about its spelling looks phonetically
   garbled, or if it contradicts itself elsewhere in this same document.
 - Do not comment on writing style, word choice, or anything outside the
-  six things above.
+  seven things above.
 
 For each thing you flag, give me exactly this and nothing else:
 
