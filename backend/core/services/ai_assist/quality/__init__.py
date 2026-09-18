@@ -52,6 +52,7 @@ from .deterministic import (
     check_foreign_language,
     check_invented_references,
     check_duplication,
+    check_duplicate_entity,
     check_length_anomaly,
     check_numbers,
     check_source_leakage,
@@ -135,7 +136,8 @@ __all__ = [
     # deterministic checks
     'run_deterministic_checks', 'check_numbers', 'check_verbatim_tokens',
     'check_invented_references', 'check_foreign_language',
-    'check_duplication', 'check_length_anomaly', 'check_commentary',
+    'check_duplication', 'check_duplicate_entity', 'check_length_anomaly',
+    'check_commentary',
     'check_encoding', 'check_autocorrect', 'check_address_consistency',
     'check_source_leakage', 'check_common_word_leakage',
     'check_currency_format', 'extract_numbers',

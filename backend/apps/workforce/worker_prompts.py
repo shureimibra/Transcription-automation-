@@ -59,6 +59,16 @@ stylistic preference:
                                 "don't" for "dont", called an
                                 English/French typo in the reviewer's own
                                 words
+  * no invented word forms   -- written from a FAILED review: a real
+                                submission used "modérément monastisée" --
+                                not a real French word, however derivable
+                                it looks from "monastère"
+  * real wording for honours -- written from the same failed review: a
+                                ceremonial phrase ("named to an order")
+                                has fixed, established {target} wording,
+                                the same way a statute name does, and a
+                                close paraphrase reads as an error even
+                                when the meaning survives
 
 WRITTEN FOR SOMEBODY WHO DOES NOT READ THE TARGET LANGUAGE. That is the
 normal case on a translation task, so every instruction has to be one the
@@ -142,6 +152,18 @@ WHAT YOU MUST NOT DO — these cause automatic rejection:
   a real submission left the English word "core" untranslated a dozen
   times in one document, consistently — consistency is not the same as
   correctness.
+- HONOURS, AWARDS AND CEREMONIAL TITLES HAVE REAL, FIXED {target} WORDING —
+  research and use it, the same way you would for a statute or a court.
+  Being appointed to an order, elected to a society, or awarded a prize
+  each has an established phrase in {target} usage; a close paraphrase of
+  your own construction reads as an error even when the meaning survives.
+  A reviewer rejected a real submission partly for exactly this.
+- NEVER COIN A {target} WORD THAT DOES NOT ALREADY EXIST, even when it
+  looks like a plausible derivation from a real one. If you are not
+  certain a word is standard, established {target} vocabulary, use a real
+  synonym or a short descriptive phrase instead. A reviewer rejected a
+  real submission for "modérément monastisée" — not a real French word,
+  however derivable it looks from "monastère".
 - SHORT WORDS ARE NOT EXEMPT. A pronoun, a contraction, or a quantifier
   ("I'm", "I'll", "it's", "all", "each", "anyone", "one", "they") must be
   translated every time, however common it is or however it is
@@ -172,6 +194,21 @@ WHAT TO FIX:
    "toucher" or "avoir une incidence sur" is more standard in writing.
    These are correct {target} words used in the wrong sense -- nothing a
    spellchecker or a dictionary lookup on the word alone would catch.
+1c. DO NOT LEAVE A MODIFIER SITTING WHERE IT COULD ATTACH TO TWO DIFFERENT
+   THINGS. If an adjective or descriptive phrase placed next to a noun
+   could plausibly describe either that noun alone or the larger phrase
+   around it, and the source does not settle which, restructure the
+   {target} sentence so only one reading survives -- even if that makes it
+   a few words longer. A shorter, ambiguous rendering is not more faithful
+   to the source than a longer, unambiguous one; it only moves the
+   guesswork onto the reader, which in practice means onto the reviewer.
+1d. WHEN TWO {target} WORDS ARE BOTH CORRECT, THE MORE COMMON ONE IS THE
+   SAFER DEFAULT. {target} sometimes offers a more literary or elevated
+   word alongside a plainer, more standard one for the same idea, and both
+   can be genuinely correct. Where the source gives no specific reason to
+   reach for the elevated option, prefer the plainer, more common word --
+   save literary vocabulary for places where the source's own register
+   clearly calls for it.
 2. Terminology consistency. Once you choose a {target} term for a recurring
    concept, use that same term everywhere. Never render one source term
    three different ways.
@@ -421,6 +458,14 @@ that cost a submission:
      address anywhere? Name every place it does.
   7. Anything that reads as translated rather than written. Literal
      renderings of idioms, and phrases a native speaker would not say.
+  8. A person credited more than once. Scan any list of names — speakers,
+     authors, honorees, committee members — for the same person appearing
+     twice. A reviewer rejected a real submission for exactly this: the
+     same name listed twice in one introduction, with nothing else wrong
+     on the page. Also check any invented-looking word (does it actually
+     exist in {target}?) and any honour, award or ceremonial title (does
+     the translation use the real, established {target} phrase for it,
+     rather than a plausible paraphrase?).
 
 If you find nothing at all, reply with exactly this and nothing else:
 

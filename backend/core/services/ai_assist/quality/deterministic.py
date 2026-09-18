@@ -1506,6 +1506,87 @@ def check_duplication(text: str, segment_index: Optional[int] = None) -> List[Qu
     return []
 
 
+# ---------------------------------------------------------------------- #
+# A named person credited twice in the same passage
+# ---------------------------------------------------------------------- #
+
+#: A title immediately followed by a full name -- the shape of a speaker or
+#: author credit ("professeur Dominic Lieven", "Professor Christopher
+#: Clark"), in both English and French. Deliberately does NOT match a bare
+#: capitalized phrase with no title in front of it, because ordinary prose
+#: is full of repeated capitalized noun phrases ("la Grande Guerre", "the
+#: Cold War") that are not names and repeat legitimately throughout a
+#: document.
+_TITLED_NAME_RE = re.compile(
+    r'\b(?:[Ll]e |[Ll]a |[Ll]es |[Tt]he )?'
+    r'(?:[Pp]rofesseur|[Pp]rofessor|[Dd]octeur|[Dd]octor|'
+    r'[Mm]onsieur|[Mm]adame|[Mm]ademoiselle|'
+    r'M\.|Mme\.?|Mlle\.?|Mr\.?|Mrs\.?|Ms\.?|Dr\.?|Pr\.?|Prof\.?)\s+'
+    r'([A-ZÀÂÄÉÈÊËÎÏÔÖÙÛÜÇ][a-zàâäéèêëîïôöùûüç\'-]+'
+    r'(?: [A-ZÀÂÄÉÈÊËÎÏÔÖÙÛÜÇ][a-zàâäéèêëîïôöùûüç\'-]+)+)'
+)
+
+#: How close together (in characters) two mentions of the same titled name
+#: have to land for a second mention to read as a listing mistake rather
+#: than ordinary reintroduction of the document's own subject much later.
+_DUPLICATE_NAME_WINDOW = 800
+
+
+def check_duplicate_entity(text: str, segment_index: Optional[int] = None) -> List[QualityIssue]:
+    """
+    The same titled name -- "Professor X", "le professeur X" -- credited
+    twice in one passage.
+
+    WHY THIS IS ITS OWN CHECK, NOT PART OF `check_duplication`. That check
+    only catches a whole PARAGRAPH repeated verbatim -- a loop symptom.
+    This catches something much easier to miss by eye: a speaker or author
+    credit list that names the same person twice, with everything else in
+    the passage different. A reader who skims six titled names in a row
+    stops treating each one as a fact to verify -- which is exactly why
+    this defect reaches a submission.
+
+    Found on a real rejected task: a lecture introduction's speaker list
+    named "le professeur Dominic Lieven" twice. Nothing else about the
+    passage was wrong; the rejection was earned on this alone.
+
+    REQUIRES A TITLE before the name, on purpose. Historical and academic
+    material repeats bare capitalized phrases constantly and legitimately
+    ("la Grande Guerre", "the Cold War", "l'Union Soviétique") -- matching
+    those would make this check noise, not signal. A title immediately
+    before a full name is specifically the shape of a credit or
+    introduction, which is the one place a same-document repeat is almost
+    always a slip rather than a choice.
+
+    WINDOWED, not document-wide. The subject of a whole document can
+    legitimately be titled and named more than once across many
+    paragraphs; it is a SECOND mention landing close to the first that
+    reads as a duplication mistake rather than normal reintroduction.
+    """
+    issues = []
+    last_seen: Dict[str, Tuple[int, str]] = {}
+    for match in _TITLED_NAME_RE.finditer(text or ''):
+        name = match.group(1)
+        key = name.strip().lower()
+        previous = last_seen.get(key)
+        if previous is not None:
+            prev_pos, prev_name = previous
+            if match.start() - prev_pos <= _DUPLICATE_NAME_WINDOW:
+                issues.append(QualityIssue(
+                    category=IssueCategory.ENTITY, severity=Severity.HIGH,
+                    problem=f'"{prev_name}" is credited twice in the same passage.',
+                    correction=(
+                        'Check whether this name belongs in both places, or '
+                        'a different name was intended for one of the two '
+                        'mentions.'
+                    ),
+                    target_span=name,
+                    rule='entity.duplicate-name',
+                    segment_index=segment_index, detector='deterministic',
+                ))
+        last_seen[key] = (match.start(), name)
+    return issues
+
+
 def check_empty_output(
     source: str, target: str, segment_index: Optional[int] = None
 ) -> List[QualityIssue]:
@@ -1665,6 +1746,7 @@ def run_deterministic_checks(
     issues += check_common_word_leakage(target, target_language, segment_index)
     issues += check_currency_format(target, target_language, segment_index)
     issues += check_duplication(target, segment_index)
+    issues += check_duplicate_entity(target, segment_index)
     issues += check_length_anomaly(source, target, segment_index)
     issues += check_typography(target, target_language, segment_index)
     # Corruption from a broken paste. Cheap, certain, and invisible to

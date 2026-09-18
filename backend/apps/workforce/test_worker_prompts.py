@@ -449,6 +449,66 @@ class WorkerPromptTestCase(TestCase):
         # Never a silent empty string where a language name belongs.
         self.assertIn('XX', prompts['translate'])
 
+    def test_every_prompt_bans_inventing_a_word_that_does_not_exist(self):
+        """
+        FROM A REAL REJECTED SUBMISSION: "modérément monastisée" -- not a
+        real French word, however derivable it looks from "monastère".
+        Nothing else about that passage was flagged; this rule exists so
+        the same slip does not recur.
+        """
+        for name, text in self.prompts.items():
+            with self.subTest(prompt=name):
+                self.assertIn('NEVER COIN A', text)
+                self.assertIn('modérément monastisée', text)
+
+    def test_every_prompt_asks_for_real_wording_on_honours_and_awards(self):
+        """
+        FROM THE SAME REAL REJECTION: a ceremonial phrase ("named to an
+        order") has fixed, established wording in the target language, the
+        same way a statute name does -- a close paraphrase reads as an
+        error even when the meaning survives.
+        """
+        for name, text in self.prompts.items():
+            with self.subTest(prompt=name):
+                self.assertIn('HONOURS, AWARDS AND CEREMONIAL TITLES', text)
+
+    def test_every_prompt_asks_for_modifier_placement_to_resolve_ambiguity(self):
+        """
+        Two real rejected passages turned on exactly this: a modifier
+        placed so it could describe either the noun beside it or the
+        larger phrase around it, with the source never settling which.
+        """
+        for name, text in self.prompts.items():
+            with self.subTest(prompt=name):
+                self.assertIn(
+                    'DO NOT LEAVE A MODIFIER SITTING WHERE IT COULD '
+                    'ATTACH TO TWO DIFFERENT', text)
+
+    def test_every_prompt_prefers_the_more_common_word_when_both_are_correct(self):
+        """
+        A soft tie-breaker, not a hard ban: several weak/debatable items
+        across two real rejections shared one shape -- the reviewer
+        preferred the plainer, more common word over a correct but more
+        literary one. Worded as a default, not a rule against the elevated
+        option outright, since this pattern is evidence from two
+        rejections, not a settled fact about every reviewer.
+        """
+        for name, text in self.prompts.items():
+            with self.subTest(prompt=name):
+                self.assertIn(
+                    'THE MORE COMMON ONE IS THE', text)
+
+    def test_the_review_prompt_asks_to_scan_for_a_person_credited_twice(self):
+        """
+        THE RULE THAT COST A REAL SUBMISSION: a lecture introduction's
+        speaker list named "le professeur Dominic Lieven" twice. Nothing
+        else on the page was wrong -- the rejection was earned on this
+        alone, and nothing in the review checklist would have caught it
+        before this rule was added.
+        """
+        review = self.prompts['review']
+        self.assertIn('A person credited more than once', review)
+
 
 class TranscriptCheckPromptTestCase(TestCase):
     """

@@ -10866,6 +10866,66 @@ class QualityDeterministicCheckTestCase(TestCase):
         self.assertTrue(check_duplication(block + '\n\n' + block))
         self.assertEqual(check_duplication(block + '\n\nsomething else entirely'), [])
 
+    def test_a_titled_name_credited_twice_is_flagged(self):
+        """
+        A REAL REJECTED TASK: a lecture introduction's speaker list named
+        "le professeur Dominic Lieven" twice in the same passage. Nothing
+        else about the passage was wrong -- the rejection was earned on
+        this alone, and the gate had no check that would have caught it.
+        """
+        from core.services.ai_assist.quality import check_duplicate_entity
+        text = (
+            'Parmi nos invités figurent le professeur Dominic Lieven, '
+            'le professeur Margaret MacMillan et le professeur Dominic Lieven, '
+            'qui nous feront l\'honneur de leur présence.'
+        )
+        issues = check_duplicate_entity(text)
+        self.assertTrue(issues)
+        self.assertEqual(issues[0].rule, 'entity.duplicate-name')
+        self.assertEqual(issues[0].category.value, 'entity')
+
+    def test_the_same_name_used_once_is_silent(self):
+        from core.services.ai_assist.quality import check_duplicate_entity
+        text = (
+            'Parmi nos invités figurent le professeur Dominic Lieven, '
+            'le professeur Margaret MacMillan et le professeur Christopher Clark.'
+        )
+        self.assertEqual(check_duplicate_entity(text), [])
+
+    def test_a_bare_repeated_phrase_with_no_title_is_not_a_name(self):
+        """
+        Historical material repeats capitalized noun phrases constantly and
+        legitimately -- a check that fired on any repeated capitalized
+        phrase would be noise, not signal, on exactly the kind of document
+        this platform handles.
+        """
+        from core.services.ai_assist.quality import check_duplicate_entity
+        text = (
+            'La Grande Guerre a bouleversé l\'Europe. '
+            'Rien ne serait plus comme avant la Grande Guerre.'
+        )
+        self.assertEqual(check_duplicate_entity(text), [])
+
+    def test_the_same_person_named_again_much_later_is_not_flagged(self):
+        """The subject of a whole document is reintroduced across many
+        paragraphs as a matter of course -- only a SECOND mention landing
+        close to the first reads as a duplication mistake."""
+        from core.services.ai_assist.quality import check_duplicate_entity
+        text = (
+            'Le professeur Dominic Lieven a ouvert la conférence. '
+            + ('Il a parlé longuement de la Russie impériale. ' * 40)
+            + 'Pour conclure, le professeur Dominic Lieven a remercié le public.'
+        )
+        self.assertEqual(check_duplicate_entity(text), [])
+
+    def test_an_english_title_is_also_recognised(self):
+        from core.services.ai_assist.quality import check_duplicate_entity
+        text = (
+            'Our speakers include Professor Christopher Clark and '
+            'Professor Margaret MacMillan and Professor Christopher Clark.'
+        )
+        self.assertTrue(check_duplicate_entity(text))
+
     def test_a_truncated_output_is_flagged_as_incomplete(self):
         from core.services.ai_assist.quality import check_length_anomaly
         source = 'word ' * 200
