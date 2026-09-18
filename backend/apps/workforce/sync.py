@@ -178,6 +178,52 @@ def _note_unknown_outcome(product: str, external_status: str) -> None:
         product, external_status,
     )
 
+def _format_reject_reason(raw: str) -> str:
+    """
+    Eagle's translation rejection reason arrives as one string holding a
+    tab-separated table: a header row (`Mistake / Issue`, `Correction /
+    Suggested version`, `Explanation`), then one row per item as `number
+    \\t issue \\t correction \\t explanation`. Confirmed against a real
+    rejected task's raw API response on 2026-09-18 -- this is not a guess.
+
+    Shown raw, the tabs collapse to single spaces in HTML and the whole
+    thing reads as one run-on sentence. This turns it back into the numbered
+    list it actually is.
+
+    TOLERANT OF ANYTHING ELSE. A plain-text reason (or a rejection from the
+    transcription product, whose real shape has never been confirmed) has
+    no tabs at all and is returned unchanged -- this only ever reformats
+    the one shape it has actually seen, never guesses at another.
+    """
+    text = (raw or '').strip()
+    if '\t' not in text:
+        return text
+
+    lines = text.split('\n')
+    blocks = []
+    for line in lines:
+        fields = line.split('\t')
+        # A genuine item row is "number, issue, correction, explanation".
+        # The header row (3 fields, no leading number) and anything else
+        # unrecognised is skipped rather than mangled into a fake item.
+        if len(fields) < 3 or not fields[0].strip().isdigit():
+            continue
+        n = fields[0].strip()
+        issue = fields[1].strip() if len(fields) > 1 else ''
+        correction = fields[2].strip() if len(fields) > 2 else ''
+        explanation = fields[3].strip() if len(fields) > 3 else ''
+        block = f'{n}. {issue}'
+        if correction:
+            block += f'\n   -> {correction}'
+        if explanation:
+            block += f'\n   {explanation}'
+        blocks.append(block)
+
+    # Nothing recognisable as a row: safer to hand back the original text
+    # than to return an empty string and lose the reason entirely.
+    return '\n\n'.join(blocks) if blocks else text
+
+
 def _reconcile_outcomes(product: str, service, report) -> int:
     """
     Bring back the platform's verdict on work we already sent.
@@ -233,6 +279,24 @@ def _reconcile_outcomes(product: str, service, report) -> int:
             continue
 
         reason = str(raw.get('reject_reason') or '').strip()
+        # THE BULK AWARDED LIST MAY NOT CARRY THE REASON PER ROW -- only
+        # confirmed, against a real task, for the single-task detail
+        # response (see eagle_impl.py::_to_task). If the list gave us
+        # nothing for a rejection, ask for that one task directly rather
+        # than settle for the generic fallback while a real reason exists
+        # one call away.
+        if verdict != states.APPROVED and not reason:
+            getter = getattr(service, 'get_task', None)
+            if getter is not None:
+                try:
+                    detail = getter(external.external_id, product)
+                    reason = str((detail.raw or {}).get('reject_reason') or '').strip()
+                except Exception as exc:
+                    logger.warning(
+                        '[SYNC] could not fetch reject reason for %s task %s: %s',
+                        product, external.external_id, exc,
+                    )
+        reason = _format_reject_reason(reason)
         try:
             if verdict == states.APPROVED:
                 services.mark_approved(task.id, actor=None,

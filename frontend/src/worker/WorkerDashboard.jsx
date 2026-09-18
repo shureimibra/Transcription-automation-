@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { tasks as tasksApi } from '../api/workforce.js';
 import { useAsync, usePolling } from '../hooks/useAsync.js';
@@ -19,7 +19,11 @@ import { HomeIcon } from '../components/icons.jsx';
 // already claimed is the one with a deadline attached. Putting the queue on
 // top would invite claiming a second task before finishing the first.
 
-const HELD = ['claimed', 'in_progress', 'review', 'ready_to_submit', 'rejected'];
+// REJECTED IS NOT HELD. It is a terminal, unappealable decision -- a
+// worker cannot act on it, so it never occupies a "current work" slot or
+// counts against claim capacity. It still shows up in RECENT, below, as
+// something to read, never as something to resume.
+const HELD = ['claimed', 'in_progress', 'review', 'ready_to_submit'];
 const RECENT = ['submitted', 'approved', 'rejected', 'cancelled', 'failed'];
 
 export default function WorkerDashboard() {
@@ -74,12 +78,6 @@ export default function WorkerDashboard() {
   // Ready work first, so the four tasks shown are the four worth taking.
   const upNext = [...available].sort(
     (a, b) => (b.is_ready === true) - (a.is_ready === true)
-  );
-  // Rejected work is the only closed state a worker can still act on, so it
-  // gets its own section with its buttons intact.
-  const rejected = useMemo(
-    () => (data?.recent || []).filter((t) => t.status === 'rejected'),
-    [data?.recent]
   );
 
   const capacity = profile?.max_concurrent_tasks ?? null;
@@ -207,17 +205,6 @@ export default function WorkerDashboard() {
           same tasks without the one fact a worker actually needs: whether
           the work was accepted, and if not, why. */}
       <ReviewOutcomes tasks={data?.recent || []} loading={loading} />
-
-      {/* Rejected work comes back for rework, so it keeps its actions. */}
-      {rejected.length > 0 && (
-        <Card title="Sent back to you" subtitle="Rejected work you can revise and resubmit">
-          <div className="grid gap-3 lg:grid-cols-2">
-            {rejected.map((task) => (
-              <TaskCard key={task.id} task={task} onChange={replaceTask} />
-            ))}
-          </div>
-        </Card>
-      )}
     </div>
   );
 }

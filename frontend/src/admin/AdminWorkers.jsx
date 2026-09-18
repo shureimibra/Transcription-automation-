@@ -76,6 +76,16 @@ export default function AdminWorkers() {
 
   const rows = performance.data?.workers || [];
   const totals = performance.data?.totals;
+  const rejections = performance.data?.recent_rejections || [];
+  const passRatePct = totals?.pass_rate_target != null ? Math.round(totals.pass_rate_target * 100) : null;
+  const belowPassRateTarget = (
+    totals?.approval_rate != null && passRatePct != null
+    && Math.round(totals.approval_rate * 100) < passRatePct
+  );
+  const belowDailyTarget = (
+    totals?.avg_submitted_per_day != null && totals?.daily_target != null
+    && totals.avg_submitted_per_day < totals.daily_target
+  );
 
   return (
     <div className="space-y-6">
@@ -126,13 +136,23 @@ export default function AdminWorkers() {
       <LiveRegion message={notice} />
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Stat label="Submitted" value={totals?.submitted ?? null} hint="in this range" />
+        <Stat
+          label="Submitted / day"
+          value={totals ? totals.avg_submitted_per_day : null}
+          hint={totals?.daily_target ? `target ${totals.daily_target}/day` : undefined}
+          tone={belowDailyTarget ? 'warn' : 'default'}
+        />
         <Stat label="Approved" value={totals?.approved ?? null} tone="good" />
         <Stat label="Rejected" value={totals?.rejected ?? null} tone={totals?.rejected ? 'bad' : 'default'} />
         <Stat
           label="Approval rate"
           value={totals ? percent(totals.approval_rate) : null}
-          hint={totals?.decided ? `${totals.decided} decided` : 'nothing decided yet'}
+          hint={
+            totals?.decided
+              ? `${totals.decided} decided · target ${passRatePct}%+`
+              : 'nothing decided yet'
+          }
+          tone={belowPassRateTarget ? 'warn' : 'default'}
         />
       </div>
 
@@ -193,6 +213,45 @@ export default function AdminWorkers() {
               </tbody>
             </table>
           </div>
+        )}
+      </Card>
+
+      {/* WHERE A DEFECT PATTERN ACTUALLY SHOWS UP. A pass-rate number says
+          how the team is doing; only the reasons, read together across
+          every worker, say whether the same mistake keeps recurring (a
+          prompt problem) or outcomes are scattered (something else). A
+          rejection is permanent and unappealable, so this is real data,
+          never a sample. */}
+      <Card
+        title="Recent rejections"
+        subtitle={rejections.length ? 'Look for the same defect recurring' : undefined}
+      >
+        {rejections.length === 0 ? (
+          <EmptyState
+            title="No rejections in this range"
+            message="Nothing the platform rejected shows up here."
+          />
+        ) : (
+          <ul className="divide-y divide-edge/60">
+            {rejections.map((task) => (
+              <li key={task.id} className="py-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-2xs text-ink-mute">
+                  <span>
+                    {task.external_task_id ? `Task ${task.external_task_id}` : task.id.slice(0, 8)}
+                    {task.kind ? ` · ${task.kind}` : ''}
+                    {task.worker_code ? ` · ${task.worker_code}` : ''}
+                  </span>
+                  <span>{task.rejected_at ? relative(task.rejected_at) : ''}</span>
+                </div>
+                {task.rejection_reason && (
+                  <p className="mt-1 whitespace-pre-wrap rounded-lg border border-status-rejected/30
+                                bg-status-rejected/10 px-3 py-2 text-2xs leading-relaxed text-ink">
+                    {task.rejection_reason}
+                  </p>
+                )}
+              </li>
+            ))}
+          </ul>
         )}
       </Card>
 

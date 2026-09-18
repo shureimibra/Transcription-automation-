@@ -298,6 +298,92 @@ class OutcomeReconciliationTestCase(TestCase):
         self.assertEqual(task.status, states.REJECTED)
         self.assertIn('Speaker labels', task.rejection_reason)
 
+    def test_a_real_tab_table_reason_is_reformatted_into_readable_items(self):
+        """
+        THE REAL SHAPE, confirmed against a real rejected task's raw API
+        response on 2026-09-18: Eagle's reject reason is one string holding
+        a tab-separated table, a header row plus one numbered row per
+        mistake. Shown as-is, the tabs collapse to spaces and it reads as
+        an unreadable run-on sentence -- this checks it comes back as the
+        numbered list it actually is, using an excerpt of that real
+        response so the shape is not invented.
+        """
+        raw = (
+            'Mistake / Issue\tCorrection / Suggested version\tExplanation\n'
+            '1\tDuplicate name: « le professeur Dominic Lieven » appears twice'
+            '\tKeep only one mention of le professeur Dominic Lieven'
+            '\tThe same person is listed twice in the list of conference participants.\n'
+            '2\t« dans la catégorie non-fiction »'
+            '\t« dans la catégorie des ouvrages de non-fiction »'
+            '\tNon-fiction is an English borrowing.'
+        )
+
+        task = self._submitted('6021')
+        sync_product('translation', service=self._service([('6021', 'rejected', raw)]))
+        task.refresh_from_db()
+
+        self.assertIn('1. Duplicate name', task.rejection_reason)
+        self.assertIn('-> Keep only one mention of le professeur Dominic Lieven',
+                      task.rejection_reason)
+        self.assertIn('2. « dans la catégorie non-fiction »', task.rejection_reason)
+        # The header row is not a mistake and must not appear as item "0"
+        # or leak into the output at all.
+        self.assertNotIn('Mistake / Issue', task.rejection_reason)
+
+    def test_a_plain_text_reason_is_left_exactly_as_sent(self):
+        """No tabs, no table -- pass it through untouched rather than risk
+        mangling a reason that was never in the table shape at all."""
+        task = self._submitted('4130')
+        sync_product('translation', service=self._service(
+            [('4130', 'rejected', 'Speaker labels were wrong throughout.')]))
+        task.refresh_from_db()
+
+        self.assertEqual(task.rejection_reason, 'Speaker labels were wrong throughout.')
+
+    def test_a_missing_reason_on_the_list_falls_back_to_the_single_task_fetch(self):
+        """
+        THE BULK AWARDED LIST MAY NOT CARRY THE REASON PER ROW -- confirmed
+        only for the single-task detail response. When the list hands back
+        nothing for a rejection, this asks for that one task directly
+        rather than settle for the generic message while a real reason is
+        one call away.
+        """
+        class WithDetail(FakeEagle):
+            def list_available_tasks(inner, source=''):
+                return []
+            def list_my_tasks(inner, source=''):
+                return [EagleTask(external_id='6021', source=source,
+                                  raw={'external_status': 'rejected', 'reject_reason': ''})]
+            def get_task(inner, external_id, source=''):
+                return EagleTask(external_id=external_id, source=source,
+                                 raw={'reject_reason': 'Fetched from the detail endpoint.'})
+
+        task = self._submitted('6021')
+        sync_product('translation', service=WithDetail())
+        task.refresh_from_db()
+
+        self.assertEqual(task.status, states.REJECTED)
+        self.assertEqual(task.rejection_reason, 'Fetched from the detail endpoint.')
+
+    def test_a_failed_detail_fetch_still_falls_back_to_the_generic_message(self):
+        """The fallback call is best-effort -- its failure must not block
+        recording the rejection itself, just leave the reason generic."""
+        class BrokenDetail(FakeEagle):
+            def list_available_tasks(inner, source=''):
+                return []
+            def list_my_tasks(inner, source=''):
+                return [EagleTask(external_id='6021', source=source,
+                                  raw={'external_status': 'rejected', 'reject_reason': ''})]
+            def get_task(inner, external_id, source=''):
+                raise EagleIntegrationError('boom', 'boom')
+
+        task = self._submitted('6021')
+        sync_product('translation', service=BrokenDetail())
+        task.refresh_from_db()
+
+        self.assertEqual(task.status, states.REJECTED)
+        self.assertEqual(task.rejection_reason, 'The platform did not accept this submission.')
+
     def test_a_submission_still_under_review_is_left_alone(self):
         # `submitted` on the feed means the review has NOT happened. Treating
         # it as an outcome would report every pending task as decided.

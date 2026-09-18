@@ -149,7 +149,9 @@ export default function TaskWorkspace() {
 
         {task.status === 'rejected' && task.rejection_reason && (
           <div className="mt-4 rounded-lg border border-status-rejected/30 bg-status-rejected/10 px-3 py-2">
-            <p className="text-2xs font-medium text-status-rejected">Returned for revision</p>
+            <p className="text-2xs font-medium text-status-rejected">
+              Rejected — this decision is final and cannot be revised
+            </p>
             <p className="mt-1 whitespace-pre-wrap text-xs text-ink">{task.rejection_reason}</p>
           </div>
         )}
@@ -184,13 +186,17 @@ export default function TaskWorkspace() {
         </div>
       </section>
 
-      {/* THE SURFACE DEPENDS ON WHETHER THERE IS WORK TO REVIEW.
-          A task carrying a transcript gets the review workspace: audio,
-          speakers, segments, submit. A task without one -- created by hand,
-          or still pre-processing -- falls back to the studio, which is the
-          right tool when someone has to source the media themselves.
-          Dashboard.jsx is unchanged in both cases. */}
-      {task.job && task.kind === 'translation' ? (
+      {/* A REJECTED TASK IS READ-ONLY, NOT REOPENED FOR EDITING. The
+          decision is final -- states.py offers no transition out of
+          REJECTED to anyone -- so mounting the live editable studio here
+          would invite edits nothing can ever be done with. This shows the
+          frozen document Eagle actually saw instead, which the live studio
+          cannot: `job`/`polished_text` keep changing after submission, so
+          only the stored snapshot can still answer "what did the reviewer
+          see". */}
+      {task.status === 'rejected' ? (
+        <RejectedSubmission task={task} />
+      ) : task.job && task.kind === 'translation' ? (
         /* A TRANSLATION IS A DIFFERENT JOB. ReviewWorkspace renders
            job.segments, which here are the ENGLISH source -- while the
            submitter renders the French. Sending a translation task there
@@ -258,6 +264,60 @@ function NotReadyYet({ task }) {
       {failed && (
         <p className="mt-4 text-2xs text-ink-mute">
           The audio has not been downloaded yet. It appears here shortly.
+        </p>
+      )}
+    </Card>
+  );
+}
+
+/**
+ * The frozen document Eagle actually received, for a rejected task.
+ *
+ * READ-ONLY, ON PURPOSE. The task cannot be reopened -- there is no button
+ * that would do anything here -- so this exists purely to let a worker (or
+ * an admin) read and copy exactly what was submitted, next to the reason
+ * it was rejected, without the live studio inviting an edit that goes
+ * nowhere.
+ */
+function RejectedSubmission({ task }) {
+  const [copied, setCopied] = useState(false);
+  const content = task.submitted_content || '';
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(false);
+    }
+  };
+
+  return (
+    <Card title="What was submitted" padded>
+      {content ? (
+        <>
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-2xs text-ink-mute">
+              Exactly what was sent to the platform — nothing has changed
+              since.
+            </p>
+            <button
+              onClick={copy}
+              className={`shrink-0 rounded text-2xs font-medium text-accent hover:text-accent-strong ${FOCUS}`}
+            >
+              {copied ? 'Copied' : 'Copy'}
+            </button>
+          </div>
+          <pre className="max-h-[32rem] overflow-auto whitespace-pre-wrap rounded-lg
+                           border border-edge bg-raised p-3 font-mono text-xs text-ink-dim">
+            {content}
+          </pre>
+        </>
+      ) : (
+        <p className="text-xs text-ink-dim">
+          No stored copy of the submitted content for this task — it was
+          rejected before this was recorded.
         </p>
       )}
     </Card>

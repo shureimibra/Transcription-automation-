@@ -117,7 +117,7 @@ export default function TaskCard({ task, onChange, showWorker = false, actions =
         </div>
 
         {task.status === 'rejected' && task.rejection_reason && (
-          <Band tone="rejected" label="Returned">{task.rejection_reason}</Band>
+          <Band tone="rejected" label="Rejected — final">{task.rejection_reason}</Band>
         )}
         {task.status === 'failed' && task.failure_reason && (
           <Band tone="failed" label="Failed">{task.failure_reason}</Band>

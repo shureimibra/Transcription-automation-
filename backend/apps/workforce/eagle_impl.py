@@ -673,5 +673,16 @@ class EagleService(EagleIntegrationService):
                 'payout': raw.payout,
                 'deadline_at': raw.deadline_at,
                 'claimed': raw.claimed,
+                # CONFIRMED, against a real rejected task's raw response
+                # (2026-09-18): Eagle's translation API names this field
+                # exactly `reject_reason`, a tab-separated
+                # mistake/correction/explanation table as one string. This
+                # used to be discarded here -- sync.py already looked for
+                # this exact key and always got an empty string, because
+                # nothing forwarded it this far. See _to_task's caller in
+                # sync.py for what happens when the AWARDED LIST response
+                # (unlike the single-task response this was verified
+                # against) turns out not to carry it per row.
+                'reject_reason': str((raw.raw or {}).get('reject_reason') or ''),
             },
         )

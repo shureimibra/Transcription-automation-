@@ -909,7 +909,8 @@ def submit_task(task_id, actor, service=None, force: bool = False,
 
     if not task.external_task_id:
         # Local task: nothing external to submit to. Record and move on.
-        return services.mark_submitted(task.id, actor=actor, reference='local')
+        return services.mark_submitted(
+            task.id, actor=actor, reference='local', content=preview.content)
 
     # WALK TO READY BEFORE SPENDING A REQUEST, NOT AFTER.
     #
@@ -987,6 +988,7 @@ def submit_task(task_id, actor, service=None, force: bool = False,
     with transaction.atomic():
         submitted = services.mark_submitted(
             task.id, actor=actor, reference=result.reference or task.external_task_id,
+            content=preview.content,
         )
         services.record_event(
             submitted, TaskEvent.SUBMISSION_COMPLETED, actor=actor,

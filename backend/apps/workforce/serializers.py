@@ -146,6 +146,7 @@ class TaskSerializer(serializers.ModelSerializer):
             'assigned_to', 'assigned_to_code', 'claimed_by', 'claimed_by_code',
             'job', 'deliverable_revision', 'is_claimable', 'is_ready',
             'available_transitions', 'rejection_reason', 'failure_reason',
+            'submitted_content',
             'deadline_at',
             'created_at', 'assigned_at', 'claimed_at', 'started_at',
             'review_started_at', 'ready_at', 'submitted_at',

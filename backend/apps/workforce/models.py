@@ -152,6 +152,13 @@ class Task(models.Model):
     into the existing engine; the words live where they already lived. A
     task carries only what the workforce layer needs: who owns it, what
     state it is in, and when each state was entered.
+
+    THE ONE DELIBERATE EXCEPTION is `submitted_content` (below): a frozen
+    copy of what was actually sent to Eagle, captured at the moment of
+    submission. `job` and `polished_text` are LIVE and keep changing, so
+    they cannot answer "what did the reviewer actually see" once a task
+    exists that was rejected -- and a rejection is a permanent, unappealable
+    decision, so that question has to have a real answer forever after.
     """
 
     TRANSCRIPTION = 'transcription'
@@ -308,6 +315,13 @@ class Task(models.Model):
         null=True, blank=True, related_name='workforce_tasks',
         help_text='The AI revision chosen as the submission deliverable.',
     )
+
+    # A frozen snapshot of the exact document handed to Eagle, captured the
+    # moment submission succeeds (see the class docstring's "ONE DELIBERATE
+    # EXCEPTION"). Blank until first submitted. Never edited afterwards --
+    # a resubmission (of a DIFFERENT, later task) would overwrite it for
+    # that new task, never for this one.
+    submitted_content = models.TextField(blank=True, default='')
 
     # ---- lifecycle timestamps ----------------------------------------- #
     # One per state entry. Written by the service layer from

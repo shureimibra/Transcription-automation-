@@ -68,6 +68,47 @@ describe('review outcomes', () => {
     expect(screen.getByText('Nothing submitted yet')).toBeInTheDocument();
   });
 
+  it('says nothing about a pass rate on a small sample', () => {
+    // 1 of 2 is technically 50%, but a rate computed from two outcomes is
+    // noise, not a verdict -- showing a precise-looking number here would
+    // mislead more than it would inform.
+    wrap(<ReviewOutcomes tasks={TASKS} />);
+
+    expect(screen.queryByText(/%/)).not.toBeInTheDocument();
+  });
+
+  it('shows the pass rate against the 92% target once there is enough decided work', () => {
+    const many = Array.from({ length: 10 }, (_, i) => ({
+      id: `t${i}`, external_task_id: `500${i}`, kind: 'translation',
+      status: i < 9 ? 'approved' : 'rejected',
+      approved_at: i < 9 ? '2026-09-01T00:00:00Z' : undefined,
+      rejected_at: i >= 9 ? '2026-09-01T00:00:00Z' : undefined,
+    }));
+    wrap(<ReviewOutcomes tasks={many} />);
+
+    // 9 of 10 accepted = 90%, below the 92% target.
+    expect(screen.getByText(/90%, target 92%\+/)).toBeInTheDocument();
+  });
+
+  it('flags the rate when it is below target, and not when it clears it', () => {
+    const below = Array.from({ length: 10 }, (_, i) => ({
+      id: `b${i}`, external_task_id: `600${i}`, kind: 'translation',
+      status: i < 8 ? 'approved' : 'rejected',
+      approved_at: i < 8 ? '2026-09-01T00:00:00Z' : undefined,
+      rejected_at: i >= 8 ? '2026-09-01T00:00:00Z' : undefined,
+    }));
+    const { container: belowContainer } = wrap(<ReviewOutcomes tasks={below} />);
+    expect(belowContainer.querySelector('header p .text-status-rejected.font-semibold')).toBeTruthy();
+
+    const above = Array.from({ length: 10 }, (_, i) => ({
+      id: `a${i}`, external_task_id: `700${i}`, kind: 'translation',
+      status: i < 10 ? 'approved' : 'rejected',
+      approved_at: '2026-09-01T00:00:00Z',
+    }));
+    const { container: aboveContainer } = wrap(<ReviewOutcomes tasks={above} />);
+    expect(aboveContainer.querySelector('header p .text-status-rejected.font-semibold')).toBeFalsy();
+  });
+
   it('ignores task states that are not a review outcome', () => {
     // A cancelled or failed task was never reviewed; listing it under
     // outcomes would misreport what the platform decided.

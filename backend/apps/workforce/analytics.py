@@ -39,6 +39,14 @@ MAX_WINDOW_DAYS = 400
 
 DEFAULT_WINDOW_DAYS = 29
 
+#: The business's own stated targets -- 90 tasks submitted a day, 92%+ of
+#: decided outcomes accepted. Both are business facts, not measurements, so
+#: they live here as constants rather than being derived from the data --
+#: the frontend compares the real numbers against these rather than each
+#: computing (or hardcoding, twice, and drifting) its own copy.
+DAILY_SUBMISSION_TARGET = 90
+PASS_RATE_TARGET = 0.92
+
 
 def _parse_day(raw):
     """A YYYY-MM-DD query parameter, or None. Raises ValueError on garbage."""
@@ -134,6 +142,27 @@ class WorkforcePerformanceView(views.APIView):
         approved = sum(row['approved'] for row in rows)
         rejected = sum(row['rejected'] for row in rows)
         decided = approved + rejected
+        window_days = (end - start).days + 1
+
+        # PATTERN-SPOTTING, NOT JUST A COUNT. A rejection is a permanent,
+        # unappealable loss (states.py's TERMINAL_STATES), so seeing the
+        # real reasons together -- across every worker, in one place -- is
+        # what tells an operator whether the same defect keeps recurring
+        # (a prompt problem) or outcomes are scattered (something else).
+        recent_rejections = [
+            {
+                'id': str(task.id),
+                'external_task_id': task.external_task_id,
+                'kind': task.kind,
+                'rejected_at': task.rejected_at,
+                'rejection_reason': task.rejection_reason,
+                'worker_code': task.claimed_by.worker_code if task.claimed_by_id else None,
+            }
+            for task in Task.objects.filter(
+                status=states.REJECTED,
+                rejected_at__gte=window_start, rejected_at__lt=window_end,
+            ).select_related('claimed_by').order_by('-rejected_at')[:30]
+        ]
 
         return Response({
             'range': {'from': start.isoformat(), 'to': end.isoformat()},
@@ -146,8 +175,12 @@ class WorkforcePerformanceView(views.APIView):
                 'rejection_rate': round(rejected / decided, 4) if decided else None,
                 'created': Task.objects.filter(
                     created_at__gte=window_start, created_at__lt=window_end).count(),
+                'avg_submitted_per_day': round(submitted / window_days, 1),
+                'daily_target': DAILY_SUBMISSION_TARGET,
+                'pass_rate_target': PASS_RATE_TARGET,
             },
             'workers': rows,
+            'recent_rejections': recent_rejections,
         })
 
     @staticmethod

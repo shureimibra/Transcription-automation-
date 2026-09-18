@@ -474,6 +474,29 @@ class NormalisationTestCase(NoNetworkMixin, TestCase):
         self.assertEqual(task.duration_seconds, 1539)
         self.assertFalse(task.raw['media_needs_session'])
 
+    def test_the_reject_reason_survives_normalisation(self):
+        """
+        FOUND, AND FIXED, FROM A REAL REJECTED TASK'S RAW RESPONSE
+        (2026-09-18): `_to_task` used to build its own narrow `raw` dict
+        from a fixed list of keys that never included `reject_reason` --
+        so sync.py's own lookup for that exact key always found an empty
+        string, no matter what Eagle actually sent. Every rejection reason
+        was silently replaced by the generic fallback message.
+        """
+        task = EagleService._to_task(RawTask(
+            external_id='6021', product=TRANSLATION, status='rejected',
+            raw={'reject_reason': 'Duplicate name in the speaker list.'},
+        ))
+
+        self.assertEqual(task.raw['reject_reason'], 'Duplicate name in the speaker list.')
+
+    def test_a_missing_reject_reason_normalises_to_an_empty_string(self):
+        task = EagleService._to_task(RawTask(
+            external_id='4333', product=TRANSLATION, status='completed',
+        ))
+
+        self.assertEqual(task.raw['reject_reason'], '')
+
     def test_available_listing_excludes_tasks_someone_else_holds(self):
         store(TRANSCRIPTION)
         rows = [

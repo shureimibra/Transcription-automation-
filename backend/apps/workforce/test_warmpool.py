@@ -454,7 +454,11 @@ class RetentionTestCase(TempCacheMixin, TestCase):
         self.assertGreaterEqual(result['files_removed'], 1)
 
     def test_recent_finished_work_keeps_its_audio(self):
-        """A rejection means reworking it, and that needs the audio back."""
+        """
+        A recent rejection is still worth listening to -- a worker or admin
+        reviewing why it was rejected wants the audio, even though the
+        decision itself is final and the task cannot be reworked.
+        """
         task = make_task(external_source='transcription', external_task_id='1',
                          status=states.REJECTED)
         path = self._with_audio(task)

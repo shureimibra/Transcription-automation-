@@ -271,17 +271,26 @@ class TaskServiceTestCase(TestCase):
         self.assertFalse(event.success)
         self.assertIn('ffmpeg', event.message)
 
-    def test_a_rejected_task_goes_back_for_revision_keeping_its_history(self):
+    def test_a_rejected_task_is_permanently_closed_keeping_its_history(self):
+        """
+        THE EXTERNAL PLATFORM'S DECISION IS FINAL. There is no appeal and no
+        resubmission -- a rejection is a permanent loss of the task, not a
+        note to act on. Nobody, not even an admin, can move it anywhere
+        else; the only way to do this work again is a brand new task.
+        """
         task = services.create_task(actor=self.admin_user)
         services.claim_task(task.id, self.alice, self.alice_user)
         services.start_task(task.id, self.alice_user)
         services.begin_review(task.id, self.alice_user)
         services.mark_ready(task.id, self.alice_user)
         services.mark_submitted(task.id, self.alice_user)
-        services.mark_rejected(task.id, self.admin_user, reason='Terminology drift')
-        revised = services.transition(task.id, states.IN_PROGRESS, self.alice_user)
-        self.assertEqual(revised.status, states.IN_PROGRESS)
-        self.assertEqual(revised.rejection_reason, 'Terminology drift')
+        rejected = services.mark_rejected(task.id, self.admin_user, reason='Terminology drift')
+        self.assertEqual(rejected.status, states.REJECTED)
+        self.assertTrue(rejected.is_terminal)
+        with self.assertRaises(states.IllegalTransition):
+            services.transition(task.id, states.IN_PROGRESS, self.alice_user)
+        with self.assertRaises(states.IllegalTransition):
+            services.transition(task.id, states.IN_PROGRESS, self.admin_user)
         # Nothing was overwritten: the whole arc is still on the record.
         types = set(task.events.values_list('event_type', flat=True))
         self.assertIn(TaskEvent.REJECTED, types)

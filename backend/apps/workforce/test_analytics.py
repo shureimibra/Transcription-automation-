@@ -187,6 +187,65 @@ class PerformanceReportTestCase(APITestCase):
 
         self.assertIsNone(response.data['totals']['approval_rate'])
 
+    # -- business targets ------------------------------------------------ #
+
+    def test_the_business_targets_travel_with_every_response(self):
+        """
+        90 tasks/day and 92%+ accepted are the business's own stated
+        targets, not something the frontend should hardcode (and risk
+        drifting from a second hardcoded copy) or the operator should have
+        to remember unlabelled.
+        """
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.data['totals']['daily_target'], 90)
+        self.assertEqual(response.data['totals']['pass_rate_target'], 0.92)
+
+    def test_avg_submitted_per_day_divides_by_the_window_length_not_the_default(self):
+        self._submitted(days=1)
+        self._submitted(days=3)
+
+        response = self.client.get(self.url, {
+            'from': days_ago(4).date().isoformat(),
+            'to': days_ago(0).date().isoformat(),
+        })
+
+        # 2 submitted over a 5-day inclusive window (days_ago(4)..days_ago(0)).
+        self.assertAlmostEqual(response.data['totals']['avg_submitted_per_day'], 2 / 5, places=3)
+
+    # -- recent rejections, for pattern-spotting ------------------------- #
+
+    def test_recent_rejections_carry_the_real_reason_and_who_submitted_it(self):
+        task = self._submitted(days=1, rejected_at=days_ago(1), status='rejected',
+                               rejection_reason='Duplicate name in the speaker list.')
+
+        response = self.client.get(self.url)
+
+        rows = response.data['recent_rejections']
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]['id'], str(task.id))
+        self.assertEqual(rows[0]['rejection_reason'], 'Duplicate name in the speaker list.')
+        self.assertEqual(rows[0]['worker_code'], 'W-01')
+
+    def test_recent_rejections_outside_the_window_are_excluded(self):
+        self._submitted(days=200, rejected_at=days_ago(200), status='rejected',
+                        rejection_reason='Old, out of range.')
+
+        response = self.client.get(self.url)  # default window is the last 30 days
+
+        self.assertEqual(response.data['recent_rejections'], [])
+
+    def test_recent_rejections_are_newest_first(self):
+        self._submitted(days=5, rejected_at=days_ago(5), status='rejected',
+                        rejection_reason='Older.')
+        self._submitted(days=1, rejected_at=days_ago(1), status='rejected',
+                        rejection_reason='Newer.')
+
+        response = self.client.get(self.url)
+
+        reasons = [r['rejection_reason'] for r in response.data['recent_rejections']]
+        self.assertEqual(reasons, ['Newer.', 'Older.'])
+
     # -- helper -------------------------------------------------------- #
 
     def _row_for(self, worker_code, **params):

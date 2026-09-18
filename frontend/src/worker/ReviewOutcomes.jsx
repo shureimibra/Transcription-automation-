@@ -23,6 +23,10 @@ import { dateTime, taskLabel } from '../lib/format.js';
  * "no news" reading as "something went wrong".
  */
 
+//: The business's own stated target -- see worker_prompts.py's rationale
+//: comments for the prompt-tightening work this number motivated.
+const PASS_RATE_TARGET = 92;
+
 const DECIDED = {
   approved: {
     label: 'Reviewed',
@@ -61,14 +65,31 @@ export default function ReviewOutcomes({ tasks = [], loading = false }) {
   }, [rows]);
 
   const decided = counts.approved + counts.rejected;
+  // 92% is the business's own stated pass-rate target -- shown here so a
+  // tasker sees the same bar the platform is judged against, not just an
+  // unlabelled fraction. NULL, not just unstyled, below 8 decided tasks: a
+  // rate computed from one or two outcomes swings wildly on the very next
+  // one, and a precise-looking "50%" from a single rejection would read as
+  // a verdict it is not.
+  const passRate = decided >= 8 ? Math.round((counts.approved / decided) * 100) : null;
+  const belowTarget = passRate !== null && passRate < PASS_RATE_TARGET;
 
   return (
     <Card
       title="Your reviews"
       subtitle={
-        decided
-          ? `${counts.approved} of ${decided} accepted so far`
-          : 'What the platform decided about work you sent'
+        decided ? (
+          <>
+            {counts.approved} of {decided} accepted so far
+            {passRate !== null && (
+              <span className={belowTarget ? 'font-semibold text-status-rejected' : undefined}>
+                {' '}({passRate}%, target {PASS_RATE_TARGET}%+)
+              </span>
+            )}
+          </>
+        ) : (
+          'What the platform decided about work you sent'
+        )
       }
       padded={false}
     >

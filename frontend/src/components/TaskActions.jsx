@@ -105,7 +105,8 @@ const ACTIONS = {
                      } },
   rejected:        { label: 'Reject',           call: (t, reason) => tasksApi.reject(t.id, reason), variant: 'danger', prompt: {
                        title: 'Reject this task',
-                       body: 'The worker sees this reason and can revise the task.',
+                       body: 'The worker sees this reason. This is final -- the task '
+                         + 'cannot be revised or resubmitted afterwards.',
                        field: 'Reason',
                        required: true,
                        confirmLabel: 'Reject',

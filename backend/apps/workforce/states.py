@@ -50,7 +50,15 @@ ALL_STATES: FrozenSet[str] = frozenset(code for code, _ in STATUS_CHOICES)
 # Nothing leaves these. A task here is finished, and the only way to work on
 # it again is a new task -- which keeps the audit trail of the first attempt
 # intact instead of overwriting it.
-TERMINAL_STATES: FrozenSet[str] = frozenset({APPROVED, CANCELLED})
+#
+# REJECTED IS TERMINAL, NOT A DETOUR BACK TO WORK. The external platform's
+# review decision is final and cannot be appealed or redone -- a rejection
+# is a permanent loss of the task, not a note to act on and resubmit. This
+# used to be modelled the other way (REJECTED -> IN_PROGRESS was a legal
+# transition, and the worker dashboard offered "Start work" on a rejected
+# task as if it were revisable) on the assumption that Eagle's rejections
+# could be corrected and resent. They cannot.
+TERMINAL_STATES: FrozenSet[str] = frozenset({APPROVED, REJECTED, CANCELLED})
 
 # States in which a worker holds the task and nobody else may take it.
 WORKER_HELD_STATES: FrozenSet[str] = frozenset({
@@ -86,7 +94,7 @@ _ROLE_IMPLIES: Dict[str, Set[str]] = {
 #
 # Read this as the definition of the workflow. Anything absent is illegal:
 # there is no NEW -> SUBMITTED, no REJECTED -> APPROVED, and no path out of
-# APPROVED at all.
+# APPROVED or REJECTED at all.
 TRANSITIONS: Dict[Tuple[str, str], FrozenSet[str]] = {
     # Intake and assignment -- administrative.
     (NEW, ASSIGNED):              frozenset({ROLE_ADMIN}),
@@ -128,10 +136,11 @@ TRANSITIONS: Dict[Tuple[str, str], FrozenSet[str]] = {
     (SUBMITTED, APPROVED):        frozenset({ROLE_ADMIN, ROLE_SYSTEM}),
     (SUBMITTED, REJECTED):        frozenset({ROLE_ADMIN, ROLE_SYSTEM}),
 
-    # A rejected task goes back for revision rather than being redone from
-    # scratch, which is what preserves its history.
-    (REJECTED, IN_PROGRESS):      frozenset({ROLE_WORKER, ROLE_ADMIN}),
-    (REJECTED, CANCELLED):        frozenset({ROLE_ADMIN}),
+    # REJECTED HAS NO WAY OUT. The external platform's decision is final --
+    # there is no appeal and no resubmission, so a rejected task cannot move
+    # to IN_PROGRESS, CANCELLED, or anywhere else. The only way to do this
+    # work again is a brand new task, which is exactly what TERMINAL_STATES
+    # is for.
 
     # Failure. Any active state can fail, and only a retry brings it back.
     (CLAIMED, FAILED):            frozenset({ROLE_SYSTEM, ROLE_ADMIN}),

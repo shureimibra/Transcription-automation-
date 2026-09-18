@@ -445,17 +445,25 @@ def mark_ready(task_id, actor: User, revision=None) -> Task:
         )
 
 
-def mark_submitted(task_id, actor: Optional[User], reference: str = '') -> Task:
+def mark_submitted(
+    task_id, actor: Optional[User], reference: str = '', content: str = '',
+) -> Task:
     """
     Records that submission happened. Does NOT perform it -- Phase 4's
     integration service does, and calls this once the external platform has
     acknowledged.
+
+    `content`, when given, is stored as `submitted_content` -- the frozen
+    record of exactly what Eagle received, since a rejection can land on
+    this task long after `job`/`polished_text` have moved on. See Task's
+    own docstring for why this is the one document body the model keeps.
     """
     with transaction.atomic():
         task = _locked(task_id)
         return _apply_transition(
             task, states.SUBMITTED, actor, TaskEvent.SUBMISSION_COMPLETED,
             metadata={'reference': reference} if reference else None,
+            extra_fields={'submitted_content': content} if content else None,
         )
 
 
