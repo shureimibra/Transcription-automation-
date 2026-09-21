@@ -203,18 +203,30 @@ def get_standard(name: Optional[str]) -> Optional[TranscriptionStandard]:
 # Intelligence". Nothing a listener can hear is a reliable signal. The
 # project label on the task is, so that is the only input here.
 PROJECT_STANDARDS: Dict[str, str] = {
-    'legal dictation':   STRICT_VERBATIM,
-    'legal proceedings': STRICT_VERBATIM,
-    'law':               STRICT_VERBATIM,
-    'law class':         STRICT_VERBATIM,
+    'legal dictation':        STRICT_VERBATIM,
+    'legal proceedings':      STRICT_VERBATIM,
+    'court proceedings':      STRICT_VERBATIM,
+    'law-related recordings': STRICT_VERBATIM,
+    'law':                    STRICT_VERBATIM,
+    'law class':              STRICT_VERBATIM,
 
-    'all':               EDITED_VERBATIM,
-    'speech':            EDITED_VERBATIM,
-    'lecture':           EDITED_VERBATIM,
-    'lectures':          EDITED_VERBATIM,
-    'zoom meeting':      EDITED_VERBATIM,
-    'news report':       EDITED_VERBATIM,
-    'news reports':      EDITED_VERBATIM,
+    'all':                EDITED_VERBATIM,
+    'speech':             EDITED_VERBATIM,
+    'lecture':            EDITED_VERBATIM,
+    'lectures':           EDITED_VERBATIM,
+    'zoom meeting':       EDITED_VERBATIM,
+    'news report':        EDITED_VERBATIM,
+    'news reports':       EDITED_VERBATIM,
+    # Added from the coach's 2026-09-21 project/standard list. Both used to
+    # land on EDITED_VERBATIM only by falling through to the function's
+    # default -- the right answer by luck, not by an entry that says so.
+    # An explicit entry here is what the table is FOR: see standard_for_project's
+    # own docstring for why "the project label is the only input", not a
+    # coincidence of what the fallback happens to be today.
+    'interview':          EDITED_VERBATIM,
+    'interviews':         EDITED_VERBATIM,
+    'business meeting':   EDITED_VERBATIM,
+    'business meetings':  EDITED_VERBATIM,
 }
 
 # CHANGED 2026-09-15, FROM STRICT TO EDITED -- 'all' was originally sent to

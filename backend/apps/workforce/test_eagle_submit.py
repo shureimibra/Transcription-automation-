@@ -615,6 +615,53 @@ class CoachStandardGateTestCase(TestCase):
         )
         self.assertNotIn('transcript.fillers-not-removed', codes)
 
+    def test_court_proceedings_gets_strict_verbatim(self):
+        """
+        A REAL BUG, CONFIRMED ON THE COACH'S 2026-09-21 project/standard
+        list: "Court proceedings" had no entry in PROJECT_STANDARDS at
+        all, so it fell through to the EDITED_VERBATIM default -- the
+        wrong standard for a category whose whole point is court-
+        admissible, unedited accuracy.
+        """
+        from core.services.ai_assist.quality.transcription import (
+            STRICT_VERBATIM, standard_for_project,
+        )
+        self.assertEqual(standard_for_project('Court proceedings'), STRICT_VERBATIM)
+
+    def test_interviews_and_business_meetings_have_explicit_entries(self):
+        """
+        Both used to land on EDITED_VERBATIM only via the function's
+        generic fallback -- the right answer today, but an accident, not
+        an entry that says so. From the coach's 2026-09-21 list.
+        """
+        from core.services.ai_assist.quality.transcription import (
+            EDITED_VERBATIM, PROJECT_STANDARDS, standard_for_project,
+        )
+        for label in ('Interview', 'Interviews', 'Business meeting', 'Business meetings'):
+            with self.subTest(label=label):
+                self.assertEqual(standard_for_project(label), EDITED_VERBATIM)
+        # Explicit, not accidental: the normalised label must be a real key.
+        self.assertIn('interview', PROJECT_STANDARDS)
+        self.assertIn('business meeting', PROJECT_STANDARDS)
+
+    def test_all_is_deliberately_left_as_edited_verbatim(self):
+        """
+        THE ONE ITEM ON THE COACH'S 2026-09-21 LIST NOT APPLIED HERE. That
+        list places "All" under strict verbatim, but "all" is the single
+        largest project label on the platform (see the dated comment on
+        PROJECT_STANDARDS) and real production tasks checked directly
+        under it have carried zero legal content. Flipping this from a
+        one-line list item, without confirming what "All" actually meant
+        there, would very likely regress the majority of the platform's
+        transcription work. This test exists so that change, if it is
+        ever made, is a deliberate edit to this test, not a silent
+        consequence of reordering the table.
+        """
+        from core.services.ai_assist.quality.transcription import (
+            EDITED_VERBATIM, standard_for_project,
+        )
+        self.assertEqual(standard_for_project('All'), EDITED_VERBATIM)
+
     def test_the_checks_do_not_run_on_a_translation(self):
         """A French translation has no Male_1: labels and no timestamp
         chain; running transcript rules over it would produce nothing but
