@@ -100,6 +100,17 @@ export function taskRoute(task) {
   return source || 'Auto-detect';
 }
 
+// EAGLE'S OWN PRODUCT NAME, LEADING SOME FILENAMES IT SENDS US --
+// "EagleTranscribe-task-39005-source.mp3". The task number in it is worth
+// keeping (it is the id a follow-up gets filed under), but the platform's
+// own branding sitting in front of it is not something a worker needs to
+// see. Stripped here rather than dropping the filename outright, so
+// "EagleTranscribe-task-39005-source.mp3" becomes "task-39005-source.mp3"
+// -- same identifying information, just without Eagle's own name on it.
+// Narrow on purpose: only a leading "Eagle<Word>-" is touched, so a real
+// filename ("A 116.mp3", "T 39.mp3") is never at risk of matching.
+const _EAGLE_BRAND_PREFIX_RE = /^Eagle[A-Za-z]*-/;
+
 export function taskLabel(task) {
   if (!task) return '';
   // THE EAGLE ID LEADS. It is the only identifier that means anything on
@@ -107,11 +118,12 @@ export function taskLabel(task) {
   // what you search for when something is disputed. Eagle's own `title` is
   // just the media filename ("C 64.mp3"), which identifies nothing and made
   // our screens impossible to line up against the platform's.
+  const title = task.title ? task.title.replace(_EAGLE_BRAND_PREFIX_RE, '') : '';
   if (task.external_task_id) {
-    return task.title
-      ? `${task.external_task_id} · ${task.title}`
+    return title
+      ? `${task.external_task_id} · ${title}`
       : `Task ${task.external_task_id}`;
   }
-  if (task.title) return task.title;
+  if (title) return title;
   return `Task ${String(task.id).slice(0, 8)}`;
 }

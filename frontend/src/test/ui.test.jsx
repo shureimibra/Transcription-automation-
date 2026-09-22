@@ -4,7 +4,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import StatusBadge, { statusMeta } from '../components/StatusBadge.jsx';
 import { Button, ExpandableText, Stat } from '../components/ui/index.jsx';
-import { duration, elapsed, percent, taskRoute } from '../lib/format.js';
+import { duration, elapsed, percent, taskLabel, taskRoute } from '../lib/format.js';
 
 // Small pieces, but each one encodes a decision that is easy to reverse by
 // accident: an unknown status must stay visibly unknown, a missing number
@@ -114,5 +114,29 @@ describe('formatting', () => {
       .toMatch(/→/);
     expect(taskRoute({ kind: 'transcription', source_language: '' }))
       .toBe('Auto-detect');
+  });
+
+  it('shows a real filename beside the task id', () => {
+    expect(taskLabel({ external_task_id: '6021', title: 'A 116.mp3' }))
+      .toBe('6021 · A 116.mp3');
+  });
+
+  it('keeps the task id in the filename but drops Eagle\'s own name from it', () => {
+    // Eagle itself sends this for some batches. The id is worth keeping --
+    // it is what a follow-up gets filed under -- but the platform's own
+    // branding in front of it is not something a worker needs to see.
+    expect(taskLabel({
+      external_task_id: '39005', title: 'EagleTranscribe-task-39005-source.mp3',
+    })).toBe('39005 · task-39005-source.mp3');
+    expect(taskLabel({
+      external_task_id: '4210', title: 'EagleTranslate-task-4210-source.wav',
+    })).toBe('4210 · task-4210-source.wav');
+  });
+
+  it('does not touch a real filename that merely contains the word task', () => {
+    // Only a leading "Eagle<Word>-" is stripped -- it must not eat a real,
+    // distinguishing filename by accident.
+    expect(taskLabel({ external_task_id: '501', title: 'task force meeting.mp3' }))
+      .toBe('501 · task force meeting.mp3');
   });
 });
