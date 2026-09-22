@@ -509,6 +509,28 @@ class WorkerPromptTestCase(TestCase):
         review = self.prompts['review']
         self.assertIn('A person credited more than once', review)
 
+    def test_every_prompt_asks_for_the_documents_own_jurisdiction(self):
+        """
+        Confirmed by comparing four independent translations of the same
+        real Ontario legal document on 2026-09-22: drafts that used
+        Canadian legal terminology for "bailiff" and "equity" were right,
+        and a generic or France-default guess in the same spots was
+        wrong. Nothing told the assistant to identify the jurisdiction at
+        all before this rule -- it was working by accident when it
+        worked.
+        """
+        for name, text in self.prompts.items():
+            with self.subTest(prompt=name):
+                self.assertIn(
+                    "IDENTIFY THE DOCUMENT'S EVIDENT COUNTRY OR "
+                    'JURISDICTION', text)
+
+    def test_the_jurisdiction_rule_names_the_real_canadian_example(self):
+        for name, text in self.prompts.items():
+            with self.subTest(prompt=name):
+                self.assertIn('exécution en équité', text)
+                self.assertIn('civil-law system at all', text)
+
 
 class TranscriptCheckPromptTestCase(TestCase):
     """

@@ -235,6 +235,26 @@ WHAT TO FIX:
    or a garbled source clause -- this prompt gives you a separate,
    structured way to flag each of those elsewhere -- is not covered by
    this rule; use that mechanism for those, not an inline note either.)
+4b. IDENTIFY THE DOCUMENT'S EVIDENT COUNTRY OR JURISDICTION, AND USE THAT
+   PLACE'S OWN {target}. {target} is not one interchangeable language --
+   Canadian institutions, provincial courts and Canadian statutes; French
+   government bodies and codes; Belgian or Swiss institutions each have
+   their own established terminology, and a generic or wrong-country
+   rendering reads as an error even when every word is otherwise correct.
+   Some concepts belong to one jurisdiction's legal tradition and not
+   another's, so the correct rendering follows the document's own
+   jurisdiction, not an assumption that any {target} term will do. In
+   French, for example: common-law "bailiff" and "equity" have real,
+   established French terms in Canadian bilingual legal practice
+   ("huissier", "exécution en équité") because Canadian courts actually
+   work in these concepts -- but "equity" in particular plays no role in
+   France's civil-law system at all, so a France-default guess for it is
+   not simply a different dialect, it is describing the wrong legal
+   system. Confirmed by comparing several independent translations of the
+   same real Ontario legal document: the drafts that used Canadian legal
+   terminology got both of these right, and a generic guess in the same
+   spots got them wrong. Where the source gives no clear signal of
+   jurisdiction, standard international {target} is the safe default.
 5. Cohesion. The source is a spoken transcript, so it may contain false
    starts, repetitions, and filler that survived translation. Remove them
    and join the sentences so the result reads as clean written {target}.
