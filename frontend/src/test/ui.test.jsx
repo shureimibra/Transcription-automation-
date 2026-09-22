@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import StatusBadge, { statusMeta } from '../components/StatusBadge.jsx';
-import { Button, Stat } from '../components/ui/index.jsx';
+import { Button, ExpandableText, Stat } from '../components/ui/index.jsx';
 import { duration, elapsed, percent, taskRoute } from '../lib/format.js';
 
 // Small pieces, but each one encodes a decision that is easy to reverse by
@@ -56,6 +56,35 @@ describe('Button', () => {
 
     await userEvent.click(button, { pointerEventsCheck: 0 });
     expect(onClick).not.toHaveBeenCalled();
+  });
+});
+
+describe('ExpandableText', () => {
+  it('shows short text in full, with no toggle at all', () => {
+    render(<ExpandableText text="Speaker labels were wrong throughout." />);
+    expect(screen.getByText('Speaker labels were wrong throughout.')).toBeInTheDocument();
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  it('collapses long text to a preview, and expands it on click', async () => {
+    const long = 'Mistake. '.repeat(40); // well past the default 220-char preview
+    render(<ExpandableText text={long} />);
+
+    expect(screen.getByText(/…$/)).toBeInTheDocument();
+    expect(screen.queryByText(long)).not.toBeInTheDocument();
+    const toggle = screen.getByRole('button', { name: 'Show full feedback' });
+
+    await userEvent.click(toggle);
+
+    // getByText normalises whitespace when matching, so compare against the
+    // trimmed form -- the rendered text is identical either way.
+    expect(screen.getByText(long.trim())).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Show less' })).toBeInTheDocument();
+  });
+
+  it('renders nothing at all for empty text, not an empty toggle', () => {
+    const { container } = render(<ExpandableText text="" />);
+    expect(container).toBeEmptyDOMElement();
   });
 });
 

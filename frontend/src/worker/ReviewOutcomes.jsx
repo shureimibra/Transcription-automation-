@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { Card, Chip, EmptyState, FOCUS } from '../components/ui/index.jsx';
+import { Card, Chip, EmptyState, ExpandableText, FOCUS } from '../components/ui/index.jsx';
 import { CheckIcon, ClockIcon, AlertIcon } from '../components/icons.jsx';
 import { dateTime, taskLabel } from '../lib/format.js';
 
@@ -126,15 +126,20 @@ export default function ReviewOutcomes({ tasks = [], loading = false }) {
                   {task.kind ? ` · ${task.kind}` : ''}
                 </p>
 
-                {/* THE REASON, IN FULL. This is the only part of the panel
-                    that can change what somebody does next, so it is never
-                    truncated or hidden behind a click. */}
+                {/* THE REASON IS THE ONLY PART OF THIS PANEL THAT CAN CHANGE
+                    WHAT SOMEBODY DOES NEXT -- but a real rejection can carry
+                    eight or more numbered items, and showing every one of
+                    them in full on every row pushed the rest of the page
+                    below the fold the moment there was more than a
+                    rejection or two. Collapsed to a preview by default,
+                    same as the admin's "Recent rejections" panel; nothing
+                    is shortened, only hidden behind an explicit click. */}
                 {task.status === 'rejected' && task.rejection_reason && (
-                  <p className="mt-2 rounded-lg border border-status-rejected/30
-                                bg-status-rejected/10 px-3 py-2 text-2xs leading-relaxed text-ink">
-                    <span className="font-semibold">Why: </span>
-                    {task.rejection_reason}
-                  </p>
+                  <div className="mt-2 rounded-lg border border-status-rejected/30
+                                  bg-status-rejected/10 px-3 py-2 text-2xs leading-relaxed text-ink">
+                    <span className="font-semibold">Why:</span>
+                    <ExpandableText text={task.rejection_reason} className="mt-1" />
+                  </div>
                 )}
               </li>
             );

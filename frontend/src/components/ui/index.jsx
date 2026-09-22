@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 
 // Interface primitives. Small on purpose: enough to keep spacing, focus and
 // loading behaviour consistent across every screen, and no more. A component
@@ -208,6 +208,45 @@ export function ClaimNotice({ message }) {
     <div className="flex items-center gap-2 rounded-xl2 border border-status-ready/30
                      bg-status-ready/10 px-4 py-2.5">
       <Notice message={message} />
+    </div>
+  );
+}
+
+/**
+ * Long feedback text, collapsed to a preview with an explicit toggle to
+ * see the rest.
+ *
+ * WHY THIS EXISTS. A real rejection can carry eight or more numbered
+ * items of reviewer feedback. Shown in full on every row of a list --
+ * "Your reviews", "Recent rejections" -- that pushes everything else on
+ * the page below the fold the moment there is more than one or two of
+ * them. The fix is a preview plus an explicit expand, never shortening
+ * the feedback itself: the worker still gets to read every word, just
+ * not all of it by default.
+ *
+ * COLLAPSED BY DEFAULT, remembered per row via its own local state --
+ * each instance is independent, so expanding one rejection's feedback
+ * does not expand every other row on the same screen.
+ */
+export function ExpandableText({ text, previewLength = 220, className = '' }) {
+  const [expanded, setExpanded] = useState(false);
+  if (!text) return null;
+  const isLong = text.length > previewLength;
+  const shown = !isLong || expanded
+    ? text
+    : `${text.slice(0, previewLength).trimEnd()}…`;
+  return (
+    <div>
+      <p className={`whitespace-pre-wrap ${className}`}>{shown}</p>
+      {isLong && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className={`mt-1.5 rounded text-2xs font-medium text-accent hover:text-accent-strong ${FOCUS}`}
+        >
+          {expanded ? 'Show less' : 'Show full feedback'}
+        </button>
+      )}
     </div>
   );
 }

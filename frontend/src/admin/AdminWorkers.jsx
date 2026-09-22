@@ -2,7 +2,8 @@ import React, { useCallback, useState } from 'react';
 import { stats as statsApi, workers as workersApi } from '../api/workforce.js';
 import { useAsync } from '../hooks/useAsync.js';
 import {
-  Button, Card, EmptyState, ErrorState, Field, inputClass, LiveRegion, Skeleton, Stat,
+  Button, Card, EmptyState, ErrorState, ExpandableText, Field, inputClass,
+  LiveRegion, Skeleton, Stat,
 } from '../components/ui/index.jsx';
 import { daysAgo, elapsed, isoDay, percent, relative } from '../lib/format.js';
 
@@ -244,10 +245,13 @@ export default function AdminWorkers() {
                   <span>{task.rejected_at ? relative(task.rejected_at) : ''}</span>
                 </div>
                 {task.rejection_reason && (
-                  <p className="mt-1 whitespace-pre-wrap rounded-lg border border-status-rejected/30
-                                bg-status-rejected/10 px-3 py-2 text-2xs leading-relaxed text-ink">
-                    {task.rejection_reason}
-                  </p>
+                  <div className="mt-1 rounded-lg border border-status-rejected/30
+                                  bg-status-rejected/10 px-3 py-2">
+                    <ExpandableText
+                      text={task.rejection_reason}
+                      className="text-2xs leading-relaxed text-ink"
+                    />
+                  </div>
                 )}
               </li>
             ))}
