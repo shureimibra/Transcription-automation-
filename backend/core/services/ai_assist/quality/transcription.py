@@ -8,10 +8,22 @@ module exists:
     fillers (um, uh)    remove                 preserve
     contractions        expand (I'm -> I am)   preserve (don't stays)
     slang (gonna)       standardize            preserve
-    grammar, run-ons    correct                do NOT correct
+    grammar, run-ons    do NOT correct         do NOT correct
+    sentence starts     capitalize             leave as spoken
     mispronunciations   correct obvious slips  preserve ("supposably")
     false starts        remove                 preserve
     vocalizations       omit ([cough])         record ([coughs])
+
+    THIS TABLE ONCE SAID "correct" FOR EDITED VERBATIM'S GRAMMAR/RUN-ONS ROW.
+    That stopped being true on 2026-09-13, when `correct_grammar` was turned
+    off for Edited Verbatim too (Eagle's General Guidelines: "do not fix the
+    speaker's grammar" -- see the `STANDARDS` dict's own comment on this
+    below for the full history, including the still-unresolved tension with
+    a coach source that says the opposite). The table went stale; this line
+    now matches the `STANDARDS` dict beneath it, not the other way around.
+    A SEPARATE FLAG, `capitalize_sentences`, still differs between the two
+    standards -- it is not the same rule as grammar/run-on correction, and
+    is listed on its own row above rather than folded back into this one.
 
 A transcript that is flawless under one standard is a guaranteed rejection
 under the other. This is not a quality gradient -- it is a mode switch, and
@@ -300,9 +312,16 @@ def standard_for_project(
 # Shared format rules (identical under both standards)
 # --------------------------------------------------------------------- #
 
-# Male_1: / Female_12: -- the ONLY permitted speaker form. Both standards
-# forbid names, titles and court roles.
-SPEAKER_LABEL_RE = re.compile(r'^(Male|Female)_\d+:$')
+# Male_1: / Female_12: / Unknown_1: -- the ONLY permitted speaker forms.
+# Both standards forbid names, titles and court roles. Unknown_N: was
+# confirmed as a real approved label by the coach's own 2026-09-22 prompt
+# (for a speaker whose gender genuinely cannot be determined) -- before
+# that, this pattern only matched Male/Female, so a transcript correctly
+# using Unknown_1: was itself flagged CRITICAL by check_speaker_labels,
+# the exact "checker that fires on correct work" failure this module's own
+# comments warn about elsewhere (see ALLOWED_TAGS' [foreign]/[background]
+# story just below).
+SPEAKER_LABEL_RE = re.compile(r'^(Male|Female|Unknown)_\d+:$')
 _SPEAKER_LINE_RE = re.compile(r'^\s*([A-Za-z_][\w ]*?)\s*:\s*$')
 
 # [HH:MM:SS.mmm --> HH:MM:SS.mmm]
@@ -354,7 +373,8 @@ def _seconds(match, offset: int) -> float:
 
 def check_speaker_labels(text: str) -> List[QualityIssue]:
     """
-    Every speaker label is `Male_N:` or `Female_N:` on its own line.
+    Every speaker label is `Male_N:`, `Female_N:` or `Unknown_N:` on its
+    own line.
 
     Both standards state this identically, and both forbid names, titles and
     court roles -- so "THE COURT:" or "Attorney Smith:" is a defect even
@@ -376,10 +396,10 @@ def check_speaker_labels(text: str) -> List[QualityIssue]:
             category=IssueCategory.STRUCTURE, severity=Severity.CRITICAL,
             problem=(
                 f'Line {number + 1} uses the speaker label "{line}". Only '
-                f'Male_N: and Female_N: are permitted; names, titles and '
-                f'court roles are not.'
+                f'Male_N:, Female_N: and Unknown_N: are permitted; names, '
+                f'titles and court roles are not.'
             ),
-            correction='Replace with the gender-numbered label for that speaker.',
+            correction='Replace with the gender-numbered (or Unknown-numbered) label for that speaker.',
             target_span=line[:60],
             rule='transcript.speaker-label-format',
             detector='deterministic',
@@ -1036,7 +1056,7 @@ _BLOCK_START_RE = re.compile(r'\A\s*([a-z])')
 _CURLY_QUOTE_RE = re.compile('[“”‘’]')
 _SINGLE_QUOTED_RE = re.compile(r"(?<=\s)'[^']{3,}'")
 
-_SPEAKER_NUMBER_RE = re.compile(r'^(Male|Female)_(\d+):$', re.MULTILINE)
+_SPEAKER_NUMBER_RE = re.compile(r'^(Male|Female|Unknown)_(\d+):$', re.MULTILINE)
 
 # A single speaker block longer than this, with no blank line in it, is a
 # wall of text. Eagle asks for logical paragraphs "for academic

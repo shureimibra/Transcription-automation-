@@ -620,7 +620,7 @@ def standard_instruction(standard) -> str:
     # reason Eagle sends work back, and they are cheap to state.
     lines += [
         '- Never write a name, title or role as a speaker; speakers are '
-        'identified only as Male_1, Female_2 and so on.',
+        'Male_1, Female_2, Unknown_1 (gender unclear) and so on.',
         f'- Bracket tags, ONLY from this list: {tag_list}. [foreign] marks '
         f'a foreign-language stretch (English around it stays); '
         f'[background] marks noise with no discernible words.',

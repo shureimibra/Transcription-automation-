@@ -13671,6 +13671,30 @@ class TranscriptionStandardTestCase(TestCase):
         self.assertTrue(issues)
         self.assertEqual(issues[0].severity.value, 'critical')
 
+    def test_unknown_numbered_speaker_labels_are_accepted(self):
+        """
+        THE COACH'S OWN 2026-09-22 PROMPT LISTS Unknown_1: AS APPROVED, for
+        a speaker whose gender genuinely cannot be told. Before this,
+        SPEAKER_LABEL_RE only matched Male/Female, so a transcript that
+        correctly used Unknown_1: was itself flagged CRITICAL -- a checker
+        firing on correct work, the exact failure this module's own
+        comments warn about for the [foreign]/[background] tags.
+        """
+        text = self.GOOD_EDITED.replace('Male_1:', 'Unknown_1:')
+        for standard in ('edited_verbatim', 'strict_verbatim'):
+            with self.subTest(standard=standard):
+                self.assertNotIn(
+                    'transcript.speaker-label-format',
+                    self._rules(text, standard),
+                )
+
+    def test_unknown_speakers_are_numbered_consecutively_too(self):
+        from core.services.ai_assist.quality import check_speaker_numbering
+        text = 'Unknown_1:\n[00:00:00.000 --> 00:00:02.000]\nSpeech.\nUnknown_3:\n[00:00:02.000 --> 00:00:04.000]\nMore speech.\n'
+        issues = check_speaker_numbering(text)
+        self.assertTrue(issues)
+        self.assertEqual(issues[0].rule, 'transcript.speaker-numbering-gap')
+
     def test_timestamp_continuity_is_enforced(self):
         """
         End time must equal the next start time -- the chain-of-custody
