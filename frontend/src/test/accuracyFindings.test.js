@@ -158,6 +158,54 @@ The organization discussed is the Southern Christian Leadership Conference (SCLC
   });
 });
 
+describe('parseFindings: backtick-quoted phrases', () => {
+  // CONFIRMED LIVE, 2026-09-22: a worker's assistant started wrapping the
+  // phrase in backticks instead of the straight/curly quotes every report
+  // before this used. Left unstripped, "Not found in the transcript --
+  // likely already fixed" showed on every single finding in every report
+  // using this shape, across multiple tasks -- because Find it / Apply /
+  // the "already found" check all searched the transcript for the literal
+  // string with backticks still attached, which real transcript text can
+  // never contain.
+  it('strips backticks from both the phrase and the suggestion', () => {
+    const report = `
+* the phrase as transcribed: \`laredal word\`
+* what you think it should probably be: \`Lardil word\`
+* why: The Australian Aboriginal language famous in linguistics for phonological rule ordering is Lardil.
+`;
+    const findings = parseFindings(report);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].phrase).toBe('laredal word');
+    expect(findings[0].suggestion).toBe('Lardil word');
+  });
+
+  it('strips a backtick-quoted phrase even with trailing annotation after the closing backtick', () => {
+    // A real speaker-label finding: the phrase is followed by a timestamp
+    // in parentheses, outside the backticks, to disambiguate which
+    // occurrence of a repeated label is meant.
+    const report = `
+* the phrase as transcribed: \`Male_2:\` (at timestamp [00:08:02.400 --> 00:08:23.340])
+* what you think it should probably be: \`Male_1:\`
+* why: Speaker check: Male_2 produces purely transitional filler that immediately continues into Male_1.
+`;
+    const findings = parseFindings(report);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].phrase).toBe('Male_2:');
+    expect(findings[0].suggestion).toBe('Male_1:');
+  });
+
+  it('actually finds a backtick-reported phrase against real transcript text', () => {
+    // The end-to-end regression: the bug was never in parsing alone --
+    // Find it / Apply used the unstripped phrase to search real segment
+    // text, which never contains a literal backtick.
+    const found = locatePhrase(
+      [{ text: 'The laredal word is not, in fact, how you spell it.' }],
+      primaryPhrase('`laredal word`'),
+    );
+    expect(found).not.toBeNull();
+  });
+});
+
 describe('replaceFirst', () => {
   it('replaces the first case-insensitive occurrence only', () => {
     expect(replaceFirst('Meridale said this, Meridale said that', 'meridale', 'Mayor Daley'))

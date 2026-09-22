@@ -47,8 +47,27 @@ const BARE_PROBABLY_RE = /^probably\s+(.+)$/i;
 const BULLETED_BOLD_PHRASE_RE = /^\*\s+\*\*(.+?)\*\*\s*$/;
 const BULLETED_PLAIN_RE = /^\*\s+(.+)$/;
 
+// CONFIRMED LIVE, 2026-09-22: a worker's assistant started wrapping the
+// phrase in backticks -- "`Lardil word`" -- markdown-code-span style,
+// instead of the straight/curly quotes every report before this used. Left
+// unstripped, the backticks became part of `finding.phrase` itself, so
+// Find it / Apply / the "already found" check all searched the transcript
+// for the literal string "`Lardil word`" (backticks included) -- which
+// cannot exist in real transcript text, so EVERY finding in EVERY report
+// using this shape showed "Not found in the transcript -- likely already
+// fixed", correct or not.
+//
+// A backtick-quoted phrase can also carry trailing annotation AFTER the
+// closing backtick -- a speaker-label finding wrote
+// "`Male_2:` (at timestamp [00:08:02.400 --> 00:08:23.340])" -- so this
+// pulls out just the backtick-delimited span itself rather than only
+// trimming from the ends of the whole string, which is enough for a plain
+// quoted phrase but would leave that trailing timestamp attached here.
 function stripQuotes(text) {
-  return (text || '').trim().replace(/^["“]|["”]$/g, '').trim();
+  const trimmed = (text || '').trim();
+  const backticked = trimmed.match(/^`([^`]+)`/);
+  if (backticked) return backticked[1].trim();
+  return trimmed.replace(/^["“]|["”]$/g, '').trim();
 }
 
 // "SNCC" / "SNCC's" -- several alternatives offered for one phrase. There
