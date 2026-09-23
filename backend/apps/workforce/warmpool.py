@@ -300,6 +300,12 @@ def select_candidates(limit: int, product: Optional[str] = None,
         | Q(job__status='failed')
         | Q(kind=Task.TRANSLATION, job__status='completed',
             deliverable_revision__isnull=True, polished_text='')
+        # A transcription whose topic-generation attempt was lost to a
+        # transient provider failure (see warm_task's own comment on this
+        # exact branch) -- fully warm and claimable either way, but never
+        # otherwise reachable again to give the header a real subject line
+        # instead of the raw Eagle filename.
+        | Q(kind=Task.TRANSCRIPTION, job__status='completed', topic='')
     )
     if product:
         queryset = queryset.filter(external_source=product)
@@ -351,6 +357,30 @@ def warm_task(task: Task, service=None, allow_ai: bool = True) -> bool:
         logger.info('[WARM] %s already has a transcript; translating only',
                     task.external_task_id)
         return _warm_translation(task, task.job)
+
+    # THE SAME RESUME, FOR A MUCH SMALLER GAP: a transcription whose
+    # transcript is already done but whose header topic never got
+    # generated. `generate_topic` is deliberately one attempt, fire-and-
+    # forget -- "a missing topic is a worse header, not a failed task" --
+    # which is right for not blocking the task, but it also means a topic
+    # lost to a transient Gemini 503 was NEVER retried: select_candidates
+    # used to treat any completed transcription job as fully warm, so a
+    # task in exactly this state could never be selected again. Confirmed
+    # live: a run of Gemini 503s left a string of real tasks titled with
+    # their raw Eagle filename ("EagleTranscribe-task-39095-source.mp3")
+    # instead of a real subject line, permanently, because nothing was
+    # ever going to ask again. This is that second ask -- cheap (the same
+    # few-hundred-word opening, no re-transcription) and never touches
+    # claimability either way.
+    if (task.job_id and task.job and task.job.status == 'completed'
+            and task.kind == Task.TRANSCRIPTION and not (task.topic or '').strip()):
+        if not allow_ai:
+            return False
+        topic = generate_topic(task.job)
+        if topic:
+            Task.objects.filter(pk=task.pk).update(topic=topic)
+            logger.info('[WARM] %s titled %r (retry)', task.external_task_id, topic)
+        return True
 
     cache_path = fetch_media(task, service=service)
 

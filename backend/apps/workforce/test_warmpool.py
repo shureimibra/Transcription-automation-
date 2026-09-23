@@ -879,6 +879,80 @@ class WarmMeansClaimableTestCase(TestCase):
 
         self.assertIn(task, warmpool.select_candidates(5))
 
+    def test_a_transcription_missing_only_its_topic_is_offered_again(self):
+        """
+        A THIRD DOOR TO THE SAME DEADLOCK, smaller than the other two: a
+        transcription task is fully warm and fully claimable with no topic
+        at all (see test_a_transcription_is_warm_once_transcribed above),
+        so this must NOT change is_warm -- but a topic lost to a transient
+        provider failure (generate_topic is one attempt, fire-and-forget)
+        used to have no way back in, because a completed transcription job
+        read as fully done to select_candidates. Confirmed live: a run of
+        Gemini 503s left real tasks permanently titled with their raw
+        Eagle filename instead of a subject line.
+        """
+        task = self._task(Task.TRANSCRIPTION)
+        self.assertEqual(task.topic, '')
+
+        self.assertTrue(warmpool.is_warm(task), 'must still be claimable')
+        self.assertIn(task, warmpool.select_candidates(5))
+
+    def test_a_transcription_with_a_topic_is_not_offered_again(self):
+        """The retry door must close once a topic actually lands, or every
+        cycle re-spends a request on a task that no longer needs one."""
+        task = self._task(Task.TRANSCRIPTION)
+        Task.objects.filter(pk=task.pk).update(topic='A Real Subject Line')
+        task.refresh_from_db()
+
+        self.assertNotIn(task, warmpool.select_candidates(5))
+
+    def test_warm_task_retries_only_the_topic_not_the_whole_transcript(self):
+        """
+        RESUME MEANS RESUME, NOT RESTART -- same principle as the
+        translation branch right above this one in warm_task itself. The
+        transcript already exists; re-fetching the audio or re-running the
+        pipeline would waste real machine time reproducing work already
+        sitting there, exactly the mistake that branch was written to
+        avoid for translation.
+        """
+        task = self._task(Task.TRANSCRIPTION)
+
+        with mock.patch.object(warmpool, 'generate_topic',
+                               return_value='A Generated Subject') as gen, \
+             mock.patch.object(warmpool, 'fetch_media') as fetch, \
+             mock.patch('apps.transcriptions.tasks.run_transcription_pipeline') as pipeline:
+            ok = warmpool.warm_task(task, service=None, allow_ai=True)
+
+        self.assertTrue(ok)
+        gen.assert_called_once_with(self.job)
+        fetch.assert_not_called()
+        pipeline.assert_not_called()
+        task.refresh_from_db()
+        self.assertEqual(task.topic, 'A Generated Subject')
+
+    def test_warm_task_leaves_the_topic_empty_when_generation_still_fails(self):
+        """A second 503 must not be mistaken for progress, or the retry
+        door (select_candidates) would close on a task that still needs
+        one -- see generate_topic's own '' on any failure contract."""
+        task = self._task(Task.TRANSCRIPTION)
+
+        with mock.patch.object(warmpool, 'generate_topic', return_value=''):
+            ok = warmpool.warm_task(task, service=None, allow_ai=True)
+
+        self.assertTrue(ok, 'not a crash -- generate_topic already reports its own failure')
+        task.refresh_from_db()
+        self.assertEqual(task.topic, '')
+        self.assertIn(task, warmpool.select_candidates(5))
+
+    def test_warm_task_defers_the_topic_retry_without_ai_budget(self):
+        task = self._task(Task.TRANSCRIPTION)
+
+        with mock.patch.object(warmpool, 'generate_topic') as gen:
+            ok = warmpool.warm_task(task, service=None, allow_ai=False)
+
+        gen.assert_not_called()
+        self.assertFalse(ok)
+
 
 class StageSplitTestCase(TestCase):
     """
