@@ -300,8 +300,20 @@ _TYPOGRAPHY_DEFAULT = """\
 
 _STRUCTURE = """\
 STRUCTURE:
-- Keep the paragraph breaks of the input. One blank line between
-  paragraphs. Do not merge everything into one block and do not add
+- Write in real paragraphs. Group several related sentences into one
+  paragraph wherever they develop the same point, the way professionally
+  published {target} actually reads -- one blank line between paragraphs,
+  not between every sentence. Start a new paragraph only where the
+  content genuinely turns to a new point, example, or speaker turn.
+  CONFIRMED ACROSS EVERY REAL TRANSLATION REVIEWED: the source's line
+  breaks come from how a speech-recognition engine chunked the audio into
+  segments, not from where a paragraph should actually end -- copying
+  them produces one sentence per paragraph for the whole document, which
+  reads as a machine transcript, not the "professional publication
+  standard" this prompt asks for. Do not go the other direction either:
+  the whole document collapsed into one unbroken block is just as wrong
+  as one paragraph per sentence, and a real paragraph break still belongs
+  wherever the content actually turns to something new. Do not add
   headings that are not in the input."""
 
 

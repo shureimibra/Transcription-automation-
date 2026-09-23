@@ -447,6 +447,25 @@ class WorkerPromptTestCase(TestCase):
                               'reorganise', text)
                 self.assertIn('in the same order', text)
 
+    def test_every_prompt_asks_for_real_paragraphs_not_one_sentence_each(self):
+        """
+        CONFIRMED ACROSS EVERY REAL TRANSLATION REVIEWED THIS PROJECT: the
+        source text fed to these prompts is built by joining ASR segments
+        with a blank line (worker_views.py's TranslationDraftView.get),
+        so the old "keep the paragraph breaks of the input" instruction
+        meant literally one sentence per paragraph for the whole
+        document -- reading as a machine transcript, not the
+        "professional publication standard" the prompt itself asks for.
+        """
+        for name, text in self.prompts.items():
+            with self.subTest(prompt=name):
+                self.assertIn('Write in real paragraphs', text)
+                self.assertIn('one sentence per paragraph', text)
+                # The old failure mode's opposite must still be guarded
+                # against -- this is not permission to produce one giant
+                # unbroken block instead.
+                self.assertIn('collapsed into one unbroken block', text)
+
     def test_the_prompts_end_where_the_worker_pastes(self):
         # The text is appended by the caller, so each prompt has to finish
         # on its handover line rather than trailing off mid-sentence.
