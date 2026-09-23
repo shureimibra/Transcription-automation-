@@ -795,7 +795,21 @@ def run_quality_gate(task: Task, content: str) -> List[Dict]:
         # is the only piece of this pipeline that scales to a niche nobody
         # has audited yet, and it costs nothing on our own token budget --
         # so it stops being optional the moment it exists.
-        if task.accuracy_check_by_id is None:
+        #
+        # CHECKED BY TIMESTAMP, NOT BY WHO. `accuracy_check_by` is a
+        # WorkerProfile -- and an admin account with no WorkerProfile row
+        # (there is no requirement that one exist; see worker_profile's own
+        # None return) saves accuracy_check_notes and accuracy_check_at
+        # exactly the same way a tasker does, but with `by` stuck at None
+        # forever. That admin could paste the same real reply back a
+        # hundred times and this finding would never clear -- a real,
+        # reported case of "I saved it and the gate still blocks me."
+        # accuracy_check_at is set in the identical request, only once
+        # accuracy_check_notes was confirmed non-empty (see
+        # TranscriptCheckPromptView.post), so it proves the step ran just
+        # as reliably, without also demanding an attribution this platform
+        # does not require every account to have.
+        if task.accuracy_check_at is None:
             findings.append({
                 'severity': 'critical', 'code': 'self-check-not-completed',
                 'message': 'Copy the accuracy-check prompt, run it through '
@@ -823,12 +837,20 @@ def run_quality_gate(task: Task, content: str) -> List[Dict]:
         # costs no additional request.
         findings.extend(_semantic_audit_findings(task))
         # THE SELF-CHECK IS REQUIRED, NOT ADVISORY -- same reasoning as the
-        # transcription branch above. `polished_by` being set is what
+        # transcription branch above. `polished_at` being set is what
         # proves the copy/paste-through-the-worker's-own-assistant loop
         # actually ran; a task can otherwise reach here having never left
         # the machine draft, which is exactly the vocabulary-blind spot a
         # hand-maintained blocklist can never keep up with on its own.
-        if task.polished_by_id is None:
+        #
+        # `polished_at`, NOT `polished_by`. Same reasoning as
+        # accuracy_check_at above: `polished_by` is a WorkerProfile, an
+        # admin account can genuinely run this whole step with no
+        # WorkerProfile row to record, and TranslationDraftView.post
+        # already refuses an empty paste before either field is touched --
+        # so the timestamp alone is just as solid a proof the step ran,
+        # for every account this platform lets do it.
+        if task.polished_at is None:
             findings.append({
                 'severity': 'critical', 'code': 'self-check-not-completed',
                 'message': 'Copy the prompt and the translation into your '

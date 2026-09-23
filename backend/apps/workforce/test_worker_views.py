@@ -495,6 +495,54 @@ class TranslationDraftTestCase(WorkerEndpointBase):
         self.assertIn('quick brown fox', response.data['source'][0]['text'])
         self.assertIn('renard brun', response.data['draft'][0]['text'])
 
+    def test_a_reload_shows_the_saved_verify_note_too(self):
+        """
+        A REAL REPORT: reloading the page after saving showed the polish
+        box and the VERIFY AGAINST AUDIO list both empty, with only "a
+        polished version is already saved" left to say anything happened.
+        verify_against_audio has no column on Task -- it lives only in
+        the TRANSLATION_POLISHED event's metadata -- so a fresh GET has
+        to read it back from there, not just from the save response that
+        already vanished on refresh.
+        """
+        task = self.translation_task(claimed_by=self.ana)
+        self.client.force_authenticate(self.ana_user)
+        raw_reply = (
+            '=== TRANSLATION START ===\n'
+            + ('Une phrase polie par le tasker. ' * 100)
+            + '\n=== TRANSLATION END ===\n'
+            + 'VERIFY AGAINST AUDIO: "the judge\'s exact title" -- garbled '
+              'in the source audio.'
+        )
+        self.client.post(f'/api/v1/workforce/tasks/{task.id}/translation/',
+                         {'text': raw_reply}, format='json')
+
+        response = self.client.get(f'/api/v1/workforce/tasks/{task.id}/translation/')
+
+        self.assertIn('polie par le tasker', response.data['polished_text'])
+        self.assertIn('judge', response.data['verify_against_audio'])
+
+    def test_a_clean_later_save_clears_the_stale_verify_note_on_reload(self):
+        """A second, clean polish must not leave the FIRST save's verify
+        note showing forever -- only the LATEST save's note is still
+        true."""
+        task = self.translation_task(claimed_by=self.ana)
+        self.client.force_authenticate(self.ana_user)
+        self.client.post(
+            f'/api/v1/workforce/tasks/{task.id}/translation/',
+            {'text': 'Une phrase. ' * 100
+                     + 'VERIFY AGAINST AUDIO: "a name" -- unclear.'},
+            format='json')
+        self.client.post(
+            f'/api/v1/workforce/tasks/{task.id}/translation/',
+            {'text': 'Une autre phrase, revue. ' * 100
+                     + 'VERIFY AGAINST AUDIO: NONE'},
+            format='json')
+
+        response = self.client.get(f'/api/v1/workforce/tasks/{task.id}/translation/')
+
+        self.assertIsNone(response.data['verify_against_audio'])
+
     def test_the_pool_can_be_read_but_not_written(self):
         """Deciding whether to take a task means reading it. Writing to one
         you do not hold is a different thing entirely."""
@@ -681,6 +729,50 @@ class TranslationDraftTestCase(WorkerEndpointBase):
         self.assertEqual(task.polished_by_id, self.ana.id)
         self.assertIsNotNone(task.polished_at)
 
+    def test_an_admin_with_no_worker_profile_still_clears_the_self_check_gate(self):
+        """
+        A REAL REPORT: an admin pasted the polished translation back,
+        clicked save, and the preview kept showing 'self-check-not-
+        completed' no matter how many times they saved.
+
+        make_worker (used for every other admin fixture in this file)
+        always creates a WorkerProfile, even with is_admin=True -- which
+        hid this from every existing test. A real admin account has no
+        such guarantee: worker_profile() returns None for one with no
+        WorkerProfile row, TranslationDraftView._task lets an admin
+        through regardless (see its own is_admin check), and the POST
+        below used to set polished_by=None on every single save -- so
+        the gate that keys off polished_by_id could never clear for this
+        account, forever, however many times it saved.
+        """
+        from django.contrib.auth.models import User
+        from apps.workforce.eagle_submit import preview_submission
+
+        admin_no_profile = User.objects.create_user(
+            username='profileless-admin',
+            password='an-adequately-long-passphrase', is_staff=True,
+        )
+        task = self.translation_task()
+        self.client.force_authenticate(admin_no_profile)
+
+        response = self.client.post(
+            f'/api/v1/workforce/tasks/{task.id}/translation/',
+            {'text': 'Bonjour tout le monde. ' * 100}, format='json')
+
+        self.assertEqual(response.status_code, 200)
+        codes = {f.get('code') for f in response.data['findings']}
+        self.assertNotIn('self-check-not-completed', codes)
+
+        task.refresh_from_db()
+        self.assertIsNone(task.polished_by_id)
+        self.assertIsNotNone(task.polished_at)
+        # AND IT STAYS CLEARED ON A LATER, INDEPENDENT PREVIEW -- not just
+        # in the save response, which is the exact moment the real report
+        # said it was still showing as blocked.
+        preview = preview_submission(task)
+        self.assertNotIn(
+            'self-check-not-completed', {f['code'] for f in preview.findings})
+
 
 class TranscriptCheckPromptTestCase(WorkerEndpointBase):
     """
@@ -770,6 +862,36 @@ class TranscriptCheckPromptTestCase(WorkerEndpointBase):
 
         codes = {f.get('code') for f in response.data['findings']}
         self.assertNotIn('self-check-not-completed', codes)
+
+    def test_an_admin_with_no_worker_profile_still_clears_the_self_check_gate(self):
+        """
+        Same real report as TranslationDraftTestCase's own version of this
+        test, on the transcription side of the same gate: an admin with no
+        WorkerProfile row saves accuracy_check_notes exactly like a
+        tasker does, but accuracy_check_by (a WorkerProfile FK) has no
+        profile to record and used to stay None forever -- so the finding
+        this endpoint exists to clear never cleared for that account.
+        """
+        from django.contrib.auth.models import User
+
+        admin_no_profile = User.objects.create_user(
+            username='profileless-admin2',
+            password='an-adequately-long-passphrase', is_staff=True,
+        )
+        task = self.warm_task(status=states.READY_TO_SUBMIT)
+        self.client.force_authenticate(admin_no_profile)
+
+        response = self.client.post(
+            f'/api/v1/workforce/tasks/{task.id}/transcript-check-prompt/',
+            {'notes': 'Nothing to report.'},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        codes = {f.get('code') for f in response.data['findings']}
+        self.assertNotIn('self-check-not-completed', codes)
+        task.refresh_from_db()
+        self.assertIsNone(task.accuracy_check_by_id)
+        self.assertIsNotNone(task.accuracy_check_at)
 
     def test_an_empty_paste_back_is_refused(self):
         task = self.warm_task(claimed_by=self.ana, status=states.IN_PROGRESS)

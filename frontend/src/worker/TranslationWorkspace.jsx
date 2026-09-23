@@ -163,6 +163,34 @@ export default function TranslationWorkspace({ task, onTaskChange }) {
 
   const body = data?.polished_text || data?.draft_text || '';
 
+  // A RELOAD MUST NOT LOOK LIKE THE WORK DISAPPEARED.
+  //
+  // THE BUG THIS FIXES: `pasted` and `verifyItems` started life as local
+  // component state, filled only by typing or by a fresh save -- so a
+  // page reload (or just reopening the task later) showed an empty box
+  // and no VERIFY AGAINST AUDIO list, with only "a polished version is
+  // already saved" to say the work was still there. It was: the server
+  // already returns `polished_text` (the exact saved document, cleaned
+  // of markers) and, now, `verify_against_audio` (the latest save's
+  // note, read back from the TRANSLATION_POLISHED event -- see
+  // TranslationDraftView.get's own comment on why it lives there and
+  // not on the Task itself). This just stops discarding them.
+  //
+  // ONCE PER TASK, NOT ON EVERY REFRESH. `save()` calls `refresh({silent:
+  // true})` after already setting `pasted`/`verifyItems` itself from the
+  // save response; re-running this from that same refresh would not be
+  // wrong (the server now agrees with what save() just set), but running
+  // it on EVERY data change is one `useEffect` doing two jobs for no
+  // reason. Keyed on `data.task` so switching to a different translation
+  // task re-fills the box for that task's own last save.
+  const loadedForTask = useRef(null);
+  useEffect(() => {
+    if (!data || loadedForTask.current === data.task) return;
+    loadedForTask.current = data.task;
+    setPasted(data.polished_text || '');
+    setVerifyItems(parseVerifyItems(data.verify_against_audio));
+  }, [data]);
+
   // NOT TRANSLATED YET IS A STATE, NOT AN EMPTY TABLE.
   //
   // A translation task whose translate pass has not finished has a full

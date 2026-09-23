@@ -378,6 +378,42 @@ describe('the polish round trip', () => {
 
     expect(screen.getByRole('button', { name: 'Save polished version' })).toBeDisabled();
   });
+
+  it('shows a previously saved polish and its verify note again after a reload', async () => {
+    // A REAL REPORT: reloading the page after saving showed an empty box
+    // and no VERIFY AGAINST AUDIO list, with only "a polished version is
+    // already saved" left to say the work was still there. The server
+    // already has both -- polished_text on the task itself, and now
+    // verify_against_audio read back from the save event -- this just
+    // has to stop discarding them on load.
+    vi.spyOn(translation, 'get').mockResolvedValue({
+      ...DRAFT,
+      polished_text: 'Texte poli deja enregistre.',
+      polished_by: 'W-01',
+      polished_at: '2026-09-23T00:00:00Z',
+      verify_against_audio: '"nicknamed LGM1" -- unsure if this is the official designation',
+    });
+
+    render(<TranslationWorkspace task={TASK} />);
+
+    expect(await screen.findByDisplayValue('Texte poli deja enregistre.')).toBeInTheDocument();
+    expect(await screen.findByText('“nicknamed LGM1”')).toBeInTheDocument();
+  });
+
+  it('does not show a verify note when the saved task has none', async () => {
+    vi.spyOn(translation, 'get').mockResolvedValue({
+      ...DRAFT,
+      polished_text: 'Texte poli deja enregistre.',
+      polished_by: 'W-01',
+      polished_at: '2026-09-23T00:00:00Z',
+      verify_against_audio: null,
+    });
+
+    render(<TranslationWorkspace task={TASK} />);
+
+    await screen.findByDisplayValue('Texte poli deja enregistre.');
+    expect(screen.queryByRole('button', { name: 'Find' })).not.toBeInTheDocument();
+  });
 });
 
 describe('retranslating a single line', () => {

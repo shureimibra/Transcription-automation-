@@ -371,6 +371,25 @@ class TranslationDraftView(views.APIView):
             'polished_by': (task.polished_by.worker_code
                             if task.polished_by_id else None),
             'polished_at': task.polished_at,
+            # A REAL REPORT: reloading the page after saving showed
+            # 'a polished version is already saved' and nothing else --
+            # the box was empty and the VERIFY AGAINST AUDIO list was
+            # gone, as though the work had vanished. It had not:
+            # polished_text above is exactly that saved work, just never
+            # used to fill the box back in. verify_against_audio has
+            # nowhere on Task to live (see TRANSLATION_POLISHED's own
+            # docstring -- it is written to the event log, not a column),
+            # so the most recent save's note is read back from there
+            # instead of adding a migration nobody asked for. Only the
+            # LATEST polish's note matters -- an older one belongs to a
+            # version that is no longer what is saved.
+            'verify_against_audio': (
+                task.events
+                    .filter(event_type=TaskEvent.TRANSLATION_POLISHED)
+                    .order_by('-id')
+                    .values_list('metadata', flat=True)
+                    .first() or {}
+            ).get('verify_against_audio'),
         })
 
     def post(self, request, pk):
