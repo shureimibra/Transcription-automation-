@@ -99,7 +99,7 @@ Every one has a working default. Change them when you have a reason.
 
 | Setting | Default | What it changes |
 |---|---|---|
-| `EAGLE_WARM_POOL_SIZE` | 12 | How many tasks to keep prepared |
+| `EAGLE_WARM_POOL_SIZE` | 12 | How many tasks to keep prepared, **per kind** — transcription and translation each pursue this many ready tasks independently, so combined ready tasks can run above this number when one kind has more supply than the other |
 | `EAGLE_WARM_CONCURRENCY` | 2 | Pipelines at once. **A memory budget** — roughly 750 MB each |
 | `EAGLE_WARM_AI_LIMIT` | 12 | How many tasks per cycle may spend Gemini quota |
 | `EAGLE_AUDIO_RETENTION_DAYS` | 4 | How long cached audio is kept |

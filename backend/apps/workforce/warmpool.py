@@ -72,27 +72,18 @@ DEFAULT_CONCURRENCY = int(os.environ.get('EAGLE_WARM_CONCURRENCY', '2'))
 #: which is what warming exists to provide.
 DEFAULT_AI_LIMIT = int(os.environ.get('EAGLE_WARM_AI_LIMIT', '12'))
 
-#: Slots reserved for transcription every cycle, off the top of whatever
-#: shortfall exists, before the rest falls back to shortest-duration-first
-#: across both kinds.
-#:
-#: THE COMBINED POOL STARVES THE SMALLER KIND, NOT JUST HIDES IT. Both
-#: `warm_now` and `select_candidates` treat translation and transcription as
-#: one pool with one ranking. That is fine while supply is comparable, but
-#: translation is posted up to twice a day against transcription's once
-#: every two -- so translation's backlog can sit at 2-3x pool_size
-#: indefinitely. Confirmed live: transcription last got a job warmed at
-#: 2026-09-07 13:32 UTC; over 22 hours and hundreds of warm cycles later, 22
-#: transcription tasks sat completely untouched (job=None on every one)
-#: while translation, with 64 unclaimed tasks against a pool_size of 24,
-#: filled every single slot every cycle. Raising pool_size alone does not
-#: fix this: translation's backlog regularly exceeds even a much larger
-#: pool, so it can still win every slot on its own.
-#:
-#: A small reserve is enough. Transcription's posting rate is low, so a
-#: guaranteed few slots per ~90s cycle clears any realistic backlog quickly
-#: without meaningfully denting translation's throughput.
-TRANSCRIPTION_RESERVE = int(os.environ.get('EAGLE_WARM_TRANSCRIPTION_RESERVE', '3'))
+#: TRANSCRIPTION_RESERVE (formerly here, `EAGLE_WARM_TRANSCRIPTION_RESERVE`)
+#: is RETIRED, not just renamed. It carved a few slots for transcription off
+#: the top of a single COMBINED shortfall -- which fixed translation's
+#: backlog starving transcription, but only while that combined shortfall
+#: was nonzero. One kind alone can make it zero (confirmed live: 34
+#: transcription ready against a pool_size of 12 made the combined
+#: shortfall 0 while translation sat at 6 ready against 30 waiting, and
+#: NOTHING warmed for either kind that cycle -- the reserve itself never
+#: got to run). run_cycle now gives each kind its own shortfall against
+#: pool_size independently, which fixes both directions of this at once
+#: and needs no separate reserve constant for either kind. See run_cycle's
+#: own comment on the exact mechanism.
 
 #: How long cached audio outlives the task that needed it.
 AUDIO_RETENTION_DAYS = int(os.environ.get('EAGLE_AUDIO_RETENTION_DAYS', '4'))
@@ -944,40 +935,59 @@ def run_cycle(pool_size: int = None, concurrency: int = None,
     # entire window despite 76 unclaimed tasks sitting available -- the
     # other 6 of the 24 were transcript-done-translation-not-done tasks
     # this query was silently counting as finished.
-    warm_now = Task.objects.filter(
+    warm_base = Task.objects.filter(
         status=states.NEW, claimed_by__isnull=True, job__isnull=False,
         job__status='completed',
     ).exclude(
         kind=Task.TRANSLATION, deliverable_revision__isnull=True, polished_text='',
-    ).count()
+    )
+    warm_now = warm_base.count()
     report.already_warm = warm_now
 
-    shortfall = max(0, pool_size - warm_now)
-    if not shortfall:
+    # EACH KIND PURSUES ITS OWN TARGET, NOT A SHARED ONE.
+    #
+    # THE INCIDENT THIS REPLACES A NARROWER FIX FOR. A single combined
+    # shortfall (pool_size - warm_now) used to gate everything, with a
+    # small TRANSCRIPTION_RESERVE carved off the top of it for one kind.
+    # That carve-out only ever ran when a combined shortfall existed to
+    # carve from -- and one kind alone can make that shortfall zero.
+    # Confirmed live: transcription sitting at 34 ready against a
+    # pool_size of 12 (translation running behind Gemini's own 503s, see
+    # generate_topic's retry) made the combined shortfall 0 even though
+    # translation had 6 ready against 30 waiting in its own backlog --
+    # so NOTHING warmed, for either kind, including transcription's own
+    # reserve, which never got a chance to run either.
+    #
+    # Computing each kind's shortfall against pool_size independently
+    # fixes this the same way the original TRANSCRIPTION_RESERVE fixed
+    # translation's backlog starving transcription -- one kind's supply
+    # can no longer affect whether the OTHER kind keeps getting warmed.
+    # The trade-off is real and deliberate: combined ready tasks can now
+    # run above pool_size whenever supply is this lopsided, which spends
+    # more machine time (transcription's free Stage A) and, gated by
+    # ai_limit exactly as before, more AI budget than a single shared
+    # target would. That is the fix, not a side effect of it -- a shared
+    # target is exactly what let a surplus in one kind block the other.
+    warm_transcription = warm_base.filter(kind=Task.TRANSCRIPTION).count()
+    warm_translation = warm_base.filter(kind=Task.TRANSLATION).count()
+    transcription_shortfall = max(0, pool_size - warm_transcription)
+    translation_shortfall = max(0, pool_size - warm_translation)
+
+    if not transcription_shortfall and not translation_shortfall:
         return report
 
-    # RESERVE TRANSCRIPTION'S SLICE BEFORE THE COMBINED POOL SEES IT.
-    #
-    # See TRANSCRIPTION_RESERVE's docstring for the production evidence:
-    # translation's backlog runs 2-3x pool_size often enough that the
-    # combined shortest-first selection below can starve transcription
-    # completely, indefinitely, however large pool_size is. Picking
-    # transcription's reserve from a kind-filtered query FIRST -- before
-    # the general query even runs -- guarantees it a minimum regardless of
-    # how the two kinds compare on duration or supply.
-    reserved_slots = min(TRANSCRIPTION_RESERVE, shortfall)
-    reserved = (
-        select_candidates(reserved_slots, product=product, kind=Task.TRANSCRIPTION)
-        if reserved_slots else []
+    transcription_candidates = (
+        select_candidates(transcription_shortfall, product=product,
+                          kind=Task.TRANSCRIPTION)
+        if transcription_shortfall else []
     )
-
-    remaining = shortfall - len(reserved)
-    rest = (
-        select_candidates(remaining, product=product,
-                           exclude_ids=[t.id for t in reserved])
-        if remaining else []
+    translation_candidates = (
+        select_candidates(translation_shortfall, product=product,
+                          kind=Task.TRANSLATION,
+                          exclude_ids=[t.id for t in transcription_candidates])
+        if translation_shortfall else []
     )
-    candidates = reserved + rest
+    candidates = transcription_candidates + translation_candidates
 
     # STAGE B IS RATIONED; STAGE A IS NOT.
     #
