@@ -597,22 +597,55 @@ class EagleService(EagleIntegrationService):
             credential.save(update_fields=['minutes_balance', 'updated_at'])
         result = result if isinstance(result, dict) else {'accepted': bool(result)}
 
-        # BEST-EFFORT, AND DELIBERATELY AFTER THE FACT. The claim itself
-        # already succeeded and already spent real minutes -- that cannot be
-        # undone, so a failure reading the deadline back must never fail the
-        # claim. `list_mine` is normalised through each client's own
-        # `_normalise`, the same code path every other deadline this service
-        # reports comes from, so it is a value known to work rather than one
-        # assumed to.
+        # A REAL, INDEPENDENT CHECK, NOT JUST A DEADLINE LOOKUP.
+        #
+        # THE FALSE-POSITIVE CLAIM THIS CATCHES: TranscriptionClient.claim is
+        # a plain authenticated GET, and its only signal is "did we land off
+        # Eagle's domain" plus "was the status under 400" -- neither of those
+        # can tell a genuine accept apart from Eagle quietly rendering an
+        # ordinary 200 page that says the task is no longer available. A real
+        # incident: a worker's claim, submission and "awaiting review" state
+        # all looked normal on our side while Eagle had never registered the
+        # task as claimed at all -- minutes untouched, nothing in Eagle's own
+        # queue. Read-level bugs like that one are invisible to a status-code
+        # check; they are not invisible to asking Eagle what it actually has
+        # on file.
+        #
+        # `list_mine` is that independent read -- normalised through each
+        # client's own `_normalise`, the same code path every other deadline
+        # this service reports comes from. If the task the accept call just
+        # reported as claimed is not in it, the claim did not land, whatever
+        # the accept response itself said.
+        #
+        # A FAILED READ IS NOT THE SAME AS A NEGATIVE READ. The claim itself
+        # may already have spent real minutes, so a network hiccup on THIS
+        # follow-up read must never fail a claim that could easily be genuine
+        # -- that is still reported as before, best-effort, deadline omitted.
+        # It is only a READ THAT SUCCEEDS AND SHOWS THE TASK ABSENT that is
+        # trusted as a real negative, because that is Eagle's own account of
+        # what it holds, not a guess about why a request failed.
         try:
             mine = self._guard(source, lambda c: c.list_mine())
-            fresh = next((r for r in mine if str(r.external_id) == str(external_id)), None)
-            if fresh is not None and fresh.deadline_at:
-                result['deadline_at'] = fresh.deadline_at
         except EagleIntegrationError:
             logger.warning(
                 '[EAGLE] claimed %s task %s but could not read its deadline back',
                 source, external_id)
+            return result
+
+        fresh = next((r for r in mine if str(r.external_id) == str(external_id)), None)
+        if fresh is None:
+            logger.error(
+                '[EAGLE] claim for %s task %s reported success but the task '
+                'does not appear in the platform\'s own list of held tasks',
+                source, external_id)
+            raise EagleIntegrationError(
+                f'Claim for {source} task {external_id} was not confirmed: '
+                f'the task does not appear in list_mine.',
+                'The platform did not confirm this task was actually '
+                'claimed. Please try again.',
+            )
+        if fresh.deadline_at:
+            result['deadline_at'] = fresh.deadline_at
         return result
 
     def submit_task(self, external_id: str, content: str, source: str = '',

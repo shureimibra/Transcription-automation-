@@ -1497,6 +1497,95 @@ class ReloginRetryTestCase(NoNetworkMixin, TestCase):
 
 
 # ===================================================================== #
+# A claim is only real once Eagle's own records agree
+# ===================================================================== #
+
+class ClaimConfirmationTestCase(NoNetworkMixin, TestCase):
+    """
+    A REAL INCIDENT: a worker claimed and submitted a task, our side showed
+    it as done, and Eagle had never registered the claim at all -- minutes
+    untouched, nothing in Eagle's own queue.
+
+    ROOT CAUSE: TranscriptionClient.claim is a plain authenticated GET whose
+    only signal is "did we stay on Eagle's domain" and "was the status under
+    400" -- neither tells a genuine accept apart from Eagle quietly
+    rendering an ordinary 200 page saying the task is no longer available
+    (already claimed by someone else on Eagle's own marketplace, a stale
+    link, anything else that isn't a hard redirect-off-domain or a 4xx/5xx).
+
+    THE FIX: `claim_task` already called `list_mine()` afterward, but only
+    to fetch a deadline for display -- a failure to find the task there was
+    logged and ignored. That same read is now authoritative: a genuine read
+    that shows the task absent from Eagle's own held-tasks list raises,
+    instead of the caller ever seeing a false success.
+    """
+
+    def test_a_claim_not_reflected_in_list_mine_is_refused(self):
+        store(TRANSCRIPTION)
+        service = EagleService()
+
+        with mock.patch.object(TranscriptionClient, 'claim', return_value=True), \
+             mock.patch.object(TranscriptionClient, 'list_mine', return_value=[]):
+            with self.assertRaises(EagleIntegrationError):
+                service.claim_task('4452', TRANSCRIPTION)
+
+    def test_a_claim_reflected_in_list_mine_succeeds_and_carries_the_deadline(self):
+        store(TRANSCRIPTION)
+        service = EagleService()
+        mine = [RawTask(external_id='4452', product=TRANSCRIPTION,
+                        deadline_at='2026-09-24T00:00:00Z')]
+
+        with mock.patch.object(TranscriptionClient, 'claim', return_value=True), \
+             mock.patch.object(TranscriptionClient, 'list_mine', return_value=mine):
+            result = service.claim_task('4452', TRANSCRIPTION)
+
+        self.assertEqual(result['deadline_at'], '2026-09-24T00:00:00Z')
+
+    def test_a_claim_for_a_different_task_id_does_not_count_as_confirmation(self):
+        """The check matches on the SPECIFIC external_id just claimed, not
+        merely "list_mine returned something" -- a held task from earlier
+        must not paper over this one never landing."""
+        store(TRANSCRIPTION)
+        service = EagleService()
+        mine = [RawTask(external_id='9999', product=TRANSCRIPTION)]
+
+        with mock.patch.object(TranscriptionClient, 'claim', return_value=True), \
+             mock.patch.object(TranscriptionClient, 'list_mine', return_value=mine):
+            with self.assertRaises(EagleIntegrationError):
+                service.claim_task('4452', TRANSCRIPTION)
+
+    def test_a_failed_read_back_does_not_fail_a_claim_that_may_be_genuine(self):
+        """The claim itself may already have spent real minutes -- a
+        network hiccup on the FOLLOW-UP read must not manufacture a
+        refusal. Only a read that succeeds and shows the task absent is
+        trusted as a real negative."""
+        store(TRANSCRIPTION)
+        service = EagleService()
+
+        with mock.patch.object(TranscriptionClient, 'claim', return_value=True), \
+             mock.patch.object(
+                 TranscriptionClient, 'list_mine',
+                 side_effect=EagleHTTPError('unreachable', 502)):
+            result = service.claim_task('4452', TRANSCRIPTION)
+
+        self.assertNotIn('deadline_at', result)
+
+    def test_the_same_confirmation_applies_to_translation_claims(self):
+        """claim_task is product-agnostic -- this guards both clients with
+        one check, regardless of whether each client's own status-code
+        detection is itself trustworthy."""
+        store(TRANSLATION)
+        service = EagleService()
+
+        with mock.patch.object(
+                 TranslationClient, 'claim',
+                 return_value={'accepted': True, 'minutes_balance': 40}), \
+             mock.patch.object(TranslationClient, 'list_mine', return_value=[]):
+            with self.assertRaises(EagleIntegrationError):
+                service.claim_task('4452', TRANSLATION)
+
+
+# ===================================================================== #
 # Login-failure cooldown
 # ===================================================================== #
 
