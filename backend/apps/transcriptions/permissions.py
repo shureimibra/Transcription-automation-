@@ -35,7 +35,7 @@ place that decides which tasks those are, so this defers to it rather than
 re-deriving the answer.
 """
 from django.db.models import Q
-from rest_framework.permissions import BasePermission
+from rest_framework.permissions import SAFE_METHODS, BasePermission
 
 from .models import AIRevision, TranscriptionJob
 
@@ -74,6 +74,29 @@ class IsAuthenticatedUser(BasePermission):
 
     def has_permission(self, request, view):
         return bool(request.user and request.user.is_authenticated)
+
+
+class IsAdminOrReadOnly(BasePermission):
+    """
+    Any signed-in caller may read; only an administrator may write.
+
+    WHAT THIS CLOSES. `ProjectViewSet` had `IsAuthenticatedUser` alone --
+    any authenticated tasker, not just an admin, could create, rename or
+    DELETE any Project row through the API, since the model has no owner
+    field at all to scope a queryset by (unlike TranscriptionJob, which
+    `visible_jobs_for` correctly scopes). Rather than invent an ownership
+    model this data never had, writes are restricted to the same
+    administrator boundary every other cross-cutting resource in this
+    project already uses -- reads stay open, since a Project label alone
+    carries no audio, transcript text, or per-worker sensitive data.
+    """
+
+    message = 'Administrator access is required to change this.'
+
+    def has_permission(self, request, view):
+        if request.method in SAFE_METHODS:
+            return bool(request.user and request.user.is_authenticated)
+        return is_admin(request.user)
 
 
 def _job_ids_from_visible_tasks(user):

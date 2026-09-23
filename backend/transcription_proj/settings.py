@@ -389,6 +389,24 @@ REST_FRAMEWORK = {
         'rest_framework.throttling.ScopedRateThrottle',
     ],
     'DEFAULT_THROTTLE_RATES': THROTTLE_RATES,
+
+    # NO BROWSABLE API OUTSIDE DEVELOPMENT. DRF's own default renderer list
+    # includes BrowsableAPIRenderer unconditionally -- not gated by DEBUG --
+    # so every endpoint in this project rendered an interactive HTML
+    # debugging UI, with live forms for POST/PATCH/DELETE, to anyone who
+    # asked for it with `Accept: text/html`, in production exactly as in
+    # development. Permission checks still apply underneath -- this never
+    # granted access to data a JSON request could not also reach -- but it
+    # handed out the whole API's shape and available actions to anyone
+    # probing with a browser, for no benefit once the app is deployed.
+    'DEFAULT_RENDERER_CLASSES': (
+        [
+            'rest_framework.renderers.JSONRenderer',
+            'rest_framework.renderers.BrowsableAPIRenderer',
+        ] if DEVELOPMENT else [
+            'rest_framework.renderers.JSONRenderer',
+        ]
+    ),
 }
 
 if _RUNNING_TESTS:

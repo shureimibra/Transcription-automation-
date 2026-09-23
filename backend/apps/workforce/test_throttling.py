@@ -164,3 +164,31 @@ class ThrottleConfigurationTestCase(TestCase):
 
         self.assertEqual(period, 'min')
         self.assertGreaterEqual(int(count), 20, 'too tight for a shared address')
+
+
+class BrowsableAPIRendererTestCase(TestCase):
+    """
+    DRF's own default renderer list includes BrowsableAPIRenderer
+    unconditionally -- not gated by DEBUG -- so leaving REST_FRAMEWORK's
+    DEFAULT_RENDERER_CLASSES unset meant every endpoint rendered an
+    interactive HTML debugging UI, with live forms for every unsafe
+    method, to anyone who asked for it with Accept: text/html, in
+    production exactly as in development. Permission checks still apply
+    underneath, so this never granted access to data a JSON request could
+    not also reach -- but it handed out the whole API's shape to anyone
+    probing with a browser, for no benefit once deployed.
+    """
+
+    def test_json_rendering_is_always_available(self):
+        from django.conf import settings
+        renderers = settings.REST_FRAMEWORK['DEFAULT_RENDERER_CLASSES']
+        self.assertIn('rest_framework.renderers.JSONRenderer', renderers)
+
+    def test_the_browsable_api_tracks_development_exactly(self):
+        # Environment-agnostic on purpose: this passes whether the suite
+        # happens to run with DEVELOPMENT True or False, because it checks
+        # that the two AGREE rather than asserting one hardcoded answer.
+        from django.conf import settings
+        renderers = settings.REST_FRAMEWORK['DEFAULT_RENDERER_CLASSES']
+        has_browsable = 'rest_framework.renderers.BrowsableAPIRenderer' in renderers
+        self.assertEqual(has_browsable, settings.DEVELOPMENT)

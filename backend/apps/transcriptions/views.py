@@ -2,8 +2,8 @@ from rest_framework.authentication import SessionAuthentication
 
 from apps.workforce.authentication import IdleTimeoutTokenAuthentication
 from .permissions import (
-    IsAuthenticatedUser, JobAccessPermission, is_admin, may_access_job,
-    may_access_revision, visible_jobs_for,
+    IsAdminOrReadOnly, IsAuthenticatedUser, JobAccessPermission, is_admin,
+    may_access_job, may_access_revision, visible_jobs_for,
 )
 
 # Every view below authenticates. Declared explicitly rather than relying on
@@ -250,8 +250,13 @@ class DiscoverySeriesStatusView(views.APIView):
 
 
 class ProjectViewSet(viewsets.ModelViewSet):
+    # READ IS OPEN TO ANY SIGNED-IN CALLER, WRITE IS ADMIN-ONLY. Project has
+    # no owner field to scope a per-caller queryset by, unlike
+    # TranscriptionJob (see IsAdminOrReadOnly's own docstring) -- so any
+    # authenticated tasker could otherwise create, rename or delete any
+    # Project belonging to any other account.
     authentication_classes = API_AUTH
-    permission_classes = [IsAuthenticatedUser]
+    permission_classes = [IsAdminOrReadOnly]
 
     queryset = Project.objects.all().order_by('-created_at')
     serializer_class = ProjectSerializer

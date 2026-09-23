@@ -118,6 +118,58 @@ class AuthenticatedAPITransactionTestCase(_ForceAuthenticatedMixin, APITransacti
     pass
 
 
+class ProjectWritePermissionTestCase(APITestCase):
+    """
+    ProjectViewSet used to run under IsAuthenticatedUser alone -- any
+    signed-in tasker, not just an admin, could create, rename or delete
+    any Project row through the API, since the model has no owner field
+    to scope a queryset by the way TranscriptionJob does. Confirmed with
+    a real request, not just read from the permission class.
+    """
+
+    @classmethod
+    def _pre_setup(cls):
+        super()._pre_setup()
+        from django.contrib.auth.models import User
+        cls.admin = User.objects.create_user(
+            username='project-admin', password='x', is_staff=True,
+        )
+        cls.worker = User.objects.create_user(
+            username='project-worker', password='x', is_staff=False,
+        )
+
+    def setUp(self):
+        self.project = Project.objects.create(name='Existing', description='')
+
+    def test_a_non_admin_can_read_projects(self):
+        self.client.force_authenticate(user=self.worker)
+        response = self.client.get('/api/v1/projects/')
+        self.assertEqual(response.status_code, 200)
+
+    def test_a_non_admin_cannot_create_a_project(self):
+        self.client.force_authenticate(user=self.worker)
+        response = self.client.post(
+            '/api/v1/projects/', {'name': 'Sneaky', 'description': ''},
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(Project.objects.filter(name='Sneaky').exists())
+
+    def test_a_non_admin_cannot_delete_someone_elses_project(self):
+        self.client.force_authenticate(user=self.worker)
+        response = self.client.delete(f'/api/v1/projects/{self.project.id}/')
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(Project.objects.filter(id=self.project.id).exists())
+
+    def test_an_admin_can_create_and_delete_a_project(self):
+        self.client.force_authenticate(user=self.admin)
+        create = self.client.post(
+            '/api/v1/projects/', {'name': 'Real project', 'description': ''},
+        )
+        self.assertEqual(create.status_code, 201)
+        delete = self.client.delete(f'/api/v1/projects/{self.project.id}/')
+        self.assertEqual(delete.status_code, 204)
+
+
 class TranscriptionModelsTestCase(TestCase):
     def setUp(self):
         self.project = Project.objects.create(
