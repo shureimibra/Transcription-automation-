@@ -10290,6 +10290,25 @@ class QualityDeterministicCheckTestCase(TestCase):
                                 'aucun patient n\'a ete inclus')
         self.assertTrue(any(i.rule == 'numeric.missing-from-target' for i in issues))
 
+    def test_a_century_written_with_the_typeset_superscript_ordinal_is_recognised(self):
+        """
+        FROM A REAL, REPEATEDLY BLOCKED SUBMISSION: "the 21st century" and
+        "the 20th century" translated correctly as "le XXIe siecle" and
+        "le XXe siecle" -- but typeset with the proper French superscript
+        ordinal indicator U+1D49 (XXIᵉ, XXᵉ), not the plain ASCII "e" the
+        old pattern demanded. 21 and 20 were reported dropped on an
+        otherwise perfect translation every time a document used a
+        century, because the ASCII-only suffix never matched the
+        superscript character.
+        """
+        from core.services.ai_assist.quality import check_numbers
+        self.assertEqual(check_numbers(
+            'resolutely anchored in the 21st century, it plays down the '
+            'wars of the 20th century',
+            'resolument ancre dans le XXIᵉ siecle, elle relativise les '
+            'guerres du XXᵉ siecle',
+        ), [])
+
     def test_a_dropped_url_is_reported(self):
         from core.services.ai_assist.quality import check_verbatim_tokens
         issues = check_verbatim_tokens(

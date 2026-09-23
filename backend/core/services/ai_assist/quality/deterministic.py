@@ -208,7 +208,17 @@ _WORD_RE = re.compile(r"[A-Za-zÀ-ÿ]+", re.UNICODE)
 #: Only the ORDINAL form is matched (Roman numeral immediately followed by
 #: e/er/eme). A bare "I" or "X" in running text is a letter, and treating it
 #: as a number would forgive real defects by accident.
-_ROMAN_ORDINAL_RE = re.compile(r'\b([IVXLCDM]{1,7})(?:e|er|ere|eme|ème)\b')
+#:
+#: BOTH THE PLAIN AND THE SUPERSCRIPT SUFFIX, because a real blocked
+#: submission wrote "XXIe siecle" and "XXe siecle" with the proper
+#: typeset French ordinal indicator -- U+1D49 (ᵉ), not the ASCII letter
+#: "e" -- for both the 21st and 20th century. That is correct French
+#: typography, not a typo, and the ASCII-only suffix let neither value
+#: through: 21 and 20 were reported as dropped on an otherwise perfect
+#: translation, repeatedly, every time a document mentioned a century.
+_ROMAN_ORDINAL_RE = re.compile(
+    r'\b([IVXLCDM]{1,7})(?:e|er|ere|eme|ème|ᵉ|ᵉʳ|ᵉʳᵉ|ᵉᵐᵉ)\b'
+)
 _ROMAN_VALUES = {'I': 1, 'V': 5, 'X': 10, 'L': 50, 'C': 100, 'D': 500, 'M': 1000}
 
 #: "two and a half million" = 2,500,000 exactly; "one and a quarter
