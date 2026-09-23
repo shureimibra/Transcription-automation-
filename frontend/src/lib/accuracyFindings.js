@@ -63,7 +63,12 @@ const BULLETED_PLAIN_RE = /^\*\s+(.+)$/;
 // pulls out just the backtick-delimited span itself rather than only
 // trimming from the ends of the whole string, which is enough for a plain
 // quoted phrase but would leave that trailing timestamp attached here.
-function stripQuotes(text) {
+// Exported: the translation side's own VERIFY AGAINST AUDIO parser
+// (lib/verifyAudio.js) needs this exact same backtick/quote handling for
+// its own quoted phrases, and re-implementing it there would be a second
+// copy of a fix that took a real, live "every finding says not found"
+// incident to get right the first time.
+export function stripQuotes(text) {
   const trimmed = (text || '').trim();
   const backticked = trimmed.match(/^`([^`]+)`/);
   if (backticked) return backticked[1].trim();
@@ -90,7 +95,7 @@ function firstAlternative(text) {
 // identically and compare unequal. Both sides of every match go through
 // this before comparing, so which one either text happened to use stops
 // mattering.
-function normalizeQuotes(text) {
+export function normalizeQuotes(text) {
   return (text || '').replace(/[‘’]/g, "'").replace(/[“”]/g, '"');
 }
 

@@ -283,6 +283,11 @@ describe('the polish round trip', () => {
     // worker_prompts.strip_reply_scaffolding) -- a worker pasting the
     // whole reply never sees this line in their own textarea, so it has
     // to appear here or the note is lost, not just relocated.
+    //
+    // NO QUOTED PHRASE IN THIS ONE, DELIBERATELY -- an older or malformed
+    // reply might still not follow the exact quoted shape the prompt now
+    // asks for. The note must still be shown, just without a Find button,
+    // rather than the whole item being silently dropped.
     vi.spyOn(translation, 'save').mockResolvedValue({
       saved: true, words: 6, blocking: false, findings: [],
       verify_against_audio: 'the judge\'s exact title in paragraph 4.',
@@ -295,7 +300,35 @@ describe('the polish round trip', () => {
 
     const note = await screen.findByText(/judge's exact title/);
     expect(note).not.toHaveClass('sr-only');
-    expect(note.className).toMatch(/status-review/);
+    expect(note.closest('li').className).toMatch(/status-review/);
+    expect(screen.queryByRole('button', { name: 'Find' })).not.toBeInTheDocument();
+  });
+
+  it('gives a quoted VERIFY AGAINST AUDIO item a Find button that jumps to the matching English row', async () => {
+    // THE ACTUAL FEATURE: the French output has no timestamps at all (it
+    // is prose, not segments), so "find and jump" has to work against the
+    // English source instead -- reusing the same search-and-seek the
+    // manual "⌕ Search" button already drives.
+    vi.spyOn(translation, 'save').mockResolvedValue({
+      saved: true, words: 6, blocking: false, findings: [],
+      verify_against_audio: '"nicknamed LGM1" -- unsure if this is the official designation',
+    });
+    render(<TranslationWorkspace task={TASK} />);
+    await screen.findByText('Plusieurs fois par seconde');
+
+    await userEvent.type(screen.getByLabelText('Polished French'), 'Texte poli');
+    await userEvent.click(screen.getByRole('button', { name: 'Save polished version' }));
+
+    await screen.findByText(/unsure if this is the official designation/);
+    expect(screen.getByText('“nicknamed LGM1”')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Find' }));
+
+    // Opening the search and setting the query is the whole job -- the
+    // search bar's own effect does the seek and the scroll once it is
+    // mounted with a query that has a current match.
+    expect(screen.getByPlaceholderText('Search the English…')).toHaveValue('nicknamed LGM1');
+    expect(screen.getByText('1 of 1')).toBeInTheDocument();
   });
 
   it('copies the prompt together with the French, not the French alone', async () => {

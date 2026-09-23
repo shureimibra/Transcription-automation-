@@ -301,6 +301,25 @@ class WorkerPromptTestCase(TestCase):
         self.assertIn('exactly one real, well-known match', polish)
         self.assertIn('use the correct form', polish)
 
+    def test_the_polish_prompt_requires_an_exact_quotable_anchor_per_verify_item(self):
+        """
+        WRITTEN FOR A NEW FEATURE: a worker's own "Find" button jumps
+        straight to the matching English source segment and audio for
+        each VERIFY AGAINST AUDIO item, the same way the transcription
+        accuracy-check's "Find it" already does. That only works if the
+        quoted phrase is copied character-for-character from the source
+        -- a paraphrase or a translated phrase would never match anything
+        in the source text to search for. Also bans backticks/markdown
+        specifically: a real accuracy-check report started wrapping
+        phrases in backticks and broke every "Find it" on that document
+        until the parser was fixed to strip them (2026-09-22) -- this
+        heads the same failure off before it can happen here at all.
+        """
+        polish = self.prompts['polish']
+        self.assertIn('quoted exactly', polish)
+        self.assertIn('character-for-character', polish)
+        self.assertIn('no backticks, no', polish)
+
     def test_the_polish_prompt_extends_audio_verification_to_quantity_scope(self):
         """
         Same mechanism as the garbled-name case, same VERIFY AGAINST AUDIO

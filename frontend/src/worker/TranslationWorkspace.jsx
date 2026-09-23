@@ -4,6 +4,8 @@ import {
 } from '../api/eagle.js';
 import { useAsync } from '../hooks/useAsync.js';
 import { useSegmentSearch, splitOnMatch } from '../hooks/useSegmentSearch.js';
+import { normalizeQuotes } from '../lib/accuracyFindings.js';
+import { parseVerifyItems } from '../lib/verifyAudio.js';
 import SegmentSearchBar from '../components/SegmentSearchBar.jsx';
 import AudioPlayer from './AudioPlayer.jsx';
 import Verdict from '../components/Verdict.jsx';
@@ -42,6 +44,12 @@ export default function TranslationWorkspace({ task, onTaskChange }) {
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState(null);
   const [notice, setNotice] = useState('');
+  // ONLY EVER SET FROM A FRESH SAVE, LIKE THE NOTICE ABOVE IT.
+  // verify_against_audio is not persisted on the task -- it is written to
+  // the audit-trail event and handed back once in the save response, so
+  // this (like `notice`) is gone on reload the same way it already was
+  // before this list existed. Not a new limitation, just an inherited one.
+  const [verifyItems, setVerifyItems] = useState([]);
   // THE BUG THIS PAIR EXISTS FOR: a failed save read identically to a
   // successful one on screen, because the only place either landed was a
   // screen-reader-only live region. `notify` tags every message with
@@ -138,7 +146,12 @@ export default function TranslationWorkspace({ task, onTaskChange }) {
   // what a mishearing would be found in. See useSegmentSearch's own
   // docstring for the scenario (a name the ASR spelled three different
   // wrong ways across a long lecture) this exists for.
-  const search = useSegmentSearch(rows, (row) => row.english);
+  // Both sides of a match go through normalizeQuotes, the same fix a real
+  // report's "Professor Blondell's office" needed on the transcription
+  // side: a curly apostrophe pasted from a chat UI and a straight one in
+  // the real source text render identically and compare unequal
+  // otherwise.
+  const search = useSegmentSearch(rows, (row) => normalizeQuotes(row.english));
   const matchingKeys = useMemo(
     () => new Set(search.matches.map((m) => m.row.key)),
     [search.matches],
@@ -353,10 +366,17 @@ export default function TranslationWorkspace({ task, onTaskChange }) {
       // is no longer sitting in the pasted text where a worker would see
       // it; it has to surface here instead, or the one signal this
       // mechanism exists for goes missing silently.
-      if (outcome.verify_against_audio) {
+      //
+      // ALWAYS RE-SET, EVEN TO EMPTY. A clean save after a previous one
+      // that had items must not leave the old Find list sitting there --
+      // it belongs to the reply that produced it, not to whatever was on
+      // screen before.
+      const items = parseVerifyItems(outcome.verify_against_audio);
+      setVerifyItems(items);
+      if (items.length) {
         notify(
           `Saved ${outcome.words} words. ${outcome.findings.length} findings. `
-          + `VERIFY AGAINST AUDIO: ${outcome.verify_against_audio}`,
+          + `${items.length} spot${items.length === 1 ? '' : 's'} to verify against audio -- see below.`,
           'warn',
         );
       } else {
@@ -523,6 +543,15 @@ export default function TranslationWorkspace({ task, onTaskChange }) {
         </div>
 
         {result && <Findings result={result} />}
+        {verifyItems.length > 0 && (
+          <VerifyAudioItems
+            items={verifyItems}
+            onFind={(phrase) => {
+              search.openSearch();
+              search.setQuery(phrase);
+            }}
+          />
+        )}
       </Card>
 
       <Card
@@ -819,6 +848,43 @@ const TONE = {
   medium: 'border-edge bg-raised text-ink-dim',
   low: 'border-edge bg-raised text-ink-mute',
 };
+
+/**
+ * Each VERIFY AGAINST AUDIO item, with a Find button that jumps straight
+ * to the matching English source segment -- the translation side's
+ * counterpart to the transcription accuracy check's "Find it". NO APPLY
+ * HERE, ON PURPOSE: unlike an accuracy-check finding, there is nothing to
+ * correct -- only somewhere to listen and judge for yourself. Reuses the
+ * exact search-and-jump machinery a worker's own manual "⌕ Search"
+ * button already drives (see SegmentSearchBar's own onJump effect):
+ * opening the bar and setting the query is the whole job here, the seek
+ * and the scroll already happen on their own once the bar is mounted and
+ * the current match changes.
+ */
+function VerifyAudioItems({ items, onFind }) {
+  return (
+    <ul className="mt-4 space-y-2">
+      {items.map((item, i) => (
+        <li key={i} className={`rounded-lg border px-3 py-2 text-2xs ${TONE.high}`}>
+          <div className="flex items-start justify-between gap-3">
+            <p className="min-w-0 flex-1">
+              {item.phrase && (
+                <span className="font-medium">“{item.phrase}”</span>
+              )}
+              {item.phrase && item.note ? ' — ' : ''}
+              {item.note}
+            </p>
+            {item.phrase && (
+              <Button size="sm" variant="ghost" className="shrink-0" onClick={() => onFind(item.phrase)}>
+                Find
+              </Button>
+            )}
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 function Findings({ result }) {
   const sorted = [...(result.findings || [])].sort(

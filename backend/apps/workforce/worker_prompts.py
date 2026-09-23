@@ -334,8 +334,17 @@ can answer, and you were never given the audio. In that case:
   translation itself -- the correct core identification, not the
   specific detail you cannot confirm.
 - After the full translation, add one line reading exactly
-  VERIFY AGAINST AUDIO: followed by each such spot and why you were
-  unsure, one per line. Write NONE if there is nothing to flag.
+  VERIFY AGAINST AUDIO: followed by each such spot, one per line, in
+  this exact shape:
+  "<the {source} phrase, quoted exactly>" -- <why you were unsure>
+  The quoted part must be copied character-for-character from the
+  {source} text above -- not paraphrased, not translated, not
+  reworded, and not wrapped in any other formatting (no backticks, no
+  bold, no markdown of any kind, plain straight quotes only). The
+  platform searches the {source} for exactly that string to take a
+  worker straight to the right spot in the audio; a phrase that does
+  not appear verbatim in the {source} you were given cannot be found
+  there. Write NONE if there is nothing to flag.
 This is not permission to stop researching or correcting -- keep doing
 both, as instructed above. It is a limit on confidence: a plausible
 research match is not the same as a confirmed one, and only a human who
