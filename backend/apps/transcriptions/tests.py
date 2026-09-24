@@ -10112,6 +10112,38 @@ class QualityDeterministicCheckTestCase(TestCase):
             'etanches. Et vendredi a 14 h se tiendra un colloque.',
         ), [])
 
+    def test_a_spoken_hour_range_with_no_digit_at_all_is_a_correct_conversion(self):
+        """
+        A REAL BLOCKED SUBMISSION: "nine to six" (a casual spoken workday
+        range, no digits, no am/pm marker at all) correctly translated as
+        "9 h a 18 h" -- but "six" is spelled out, never a literal digit, so
+        extract_numbers never sees it and the ordinary hour-pairing (which
+        only ever looks at digit mismatches already in `missing`) had no
+        6 to pair against the target's "added" 18 with. Reported CRITICAL
+        on an otherwise perfect, idiomatically-correct conversion.
+        """
+        from core.services.ai_assist.quality import check_numbers
+        self.assertEqual(check_numbers(
+            'So you have got your classes, but in between and around, so '
+            'nine to six or whatever works for you, you are going to be '
+            'working.',
+            'Vous avez vos heures de cours, mais entre les seances et en '
+            'dehors, de 9 h a 18 h, ou selon l\'horaire qui vous convient, '
+            'vous travaillerez.',
+        ), [])
+
+    def test_a_spoken_hour_range_does_not_forgive_an_unrelated_invented_number(self):
+        """The fix above must stay anchored to the actual "<number> to
+        <number>" range phrase, not to "six" appearing anywhere at all in
+        the source -- an unrelated plain count must not paper over a
+        genuinely invented number somewhere else in the same document."""
+        from core.services.ai_assist.quality import check_numbers
+        issues = check_numbers(
+            'There were six students in the room.',
+            'Il y avait six etudiants dans la salle, a 18 h.',
+        )
+        self.assertTrue(any(i.rule == 'numeric.absent-from-source' for i in issues))
+
     def test_two_and_a_half_million_is_not_an_invented_figure(self):
         """
         A REAL SUBMISSION HAD THIS BLOCKED, TWICE, on two separate ASR

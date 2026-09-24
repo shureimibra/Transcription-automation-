@@ -375,8 +375,44 @@ def spelled_number_values(text: str) -> set:
     return values
 
 
+#: "nine to six", "nine to five" -- a casual SPOKEN hour range with no am/pm
+#: marker at all, which French idiomatically renders as an unambiguous
+#: 24-hour range ("9 h a 18 h", "9 h a 17 h"). Neither number is ever a
+#: literal digit here -- extract_numbers never sees either one, so the
+#: ordinary hour-pairing below (which only ever looks at digit mismatches)
+#: has no "missing" 6 to pair against the target's "added" 18 at all.
+#: Confirmed on a real submission: a law-school orientation talk's "nine to
+#: six" workday reference reported the correct "18 h" as an invented number.
+#:
+#: ANCHORED TO THE SPECIFIC "<number> to <number>" RANGE SHAPE, not "any
+#: spelled-out number anywhere in the source" -- spelled_number_values is
+#: deliberately never used for this pairing on its own, for the same reason
+#: its own docstring gives for "deux": it is value-only and document-wide,
+#: so an unrelated "six" elsewhere in the document (a plain count, nothing
+#: to do with time) would forgive an unrelated, genuinely invented "18"
+#: somewhere else in the same document. Requiring the actual range phrase
+#: keeps this to what it is evidence for.
+_SPOKEN_HOUR_RANGE_RE = re.compile(
+    r'\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)'
+    r'\s+to\s+'
+    r'(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b',
+    re.IGNORECASE,
+)
+
+
+def _spoken_hour_range_values(source: str) -> set:
+    """Values named only by a spoken "<number> to <number>" range in the
+    source -- see _SPOKEN_HOUR_RANGE_RE for why this exists as its own,
+    narrower thing than spelled_number_values."""
+    values = set()
+    for match in _SPOKEN_HOUR_RANGE_RE.finditer(source or ''):
+        for word in match.groups():
+            values.add(Decimal(_NUMBER_WORDS[word.lower()]))
+    return values
+
+
 def _forgive_hour_conversions(
-    missing: List[Decimal], added: List[Decimal],
+    source: str, missing: List[Decimal], added: List[Decimal],
 ) -> Tuple[List[Decimal], List[Decimal]]:
     """
     5pm -> 17 heures, 2pm -> 14 heures: a correct 12h-to-24h conversion, not
@@ -394,15 +430,27 @@ def _forgive_hour_conversions(
     take -- 1-11 for the 12-hour form, 13-23 for the 24-hour one -- are
     eligible, and each pairing is consumed once, so a genuine surplus
     number past the pairing is still reported.
+
+    ALSO CONSIDERS A SPOKEN RANGE LIKE "nine to six", which never produces
+    a "missing" 6 in the first place (see _spoken_hour_range_values) -- so
+    the candidate pool for the lower half of the pair is `missing` PLUS
+    whatever _SPOKEN_HOUR_RANGE_RE actually matched in the source, not
+    `missing` alone. A value that came only from the spoken-range match is
+    not removed from `missing` (it was never in it), only its target pair
+    is forgiven.
     """
     remaining_missing = list(missing)
     remaining_added = list(added)
-    for value in list(remaining_missing):
+    candidates = list(dict.fromkeys(
+        remaining_missing + list(_spoken_hour_range_values(source))
+    ))
+    for value in candidates:
         if not (1 <= value <= 11):
             continue
         pair = value + 12
         if pair in remaining_added:
-            remaining_missing.remove(value)
+            if value in remaining_missing:
+                remaining_missing.remove(value)
             remaining_added.remove(pair)
     return remaining_missing, remaining_added
 
@@ -551,7 +599,7 @@ def check_numbers(
     # against, reported as an invented number on an otherwise perfect
     # translation. Running the pairing first means it claims "2" and "14"
     # before either can be independently consumed by something else.
-    missing, added = _forgive_hour_conversions(missing, added)
+    missing, added = _forgive_hour_conversions(source, missing, added)
 
     # A figure the source spelled out is not an invented figure. See
     # spelled_number_values: this forgives, it never accuses.
