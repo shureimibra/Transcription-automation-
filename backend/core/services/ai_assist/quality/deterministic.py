@@ -455,6 +455,33 @@ def _forgive_hour_conversions(
     return remaining_missing, remaining_added
 
 
+#: "9-11", "9/11" -- the one common way English refers to the September 11
+#: attacks by number. French renders it "11 Septembre" / "11-Septembre":
+#: the day, then the month written AS A NAME, exactly how French always
+#: writes a date. The "9" -- a month NUMBER in the English shorthand -- has
+#: nothing to become in that rendering; French never carries a bare month
+#: number once the month is named, so a correct translation necessarily
+#: drops it. Confirmed on a real submission: "9-11" used twice, correctly
+#: translated as "11 septembre" both times, reported the "9" as missing
+#: both times, CRITICAL, on an otherwise perfect translation.
+_NINE_ELEVEN_RE = re.compile(r'\b9[-/]11\b')
+
+
+def _forgive_nine_eleven(source: str, missing: List[Decimal]) -> List[Decimal]:
+    """
+    Consumes one missing 9 per literal "9-11"/"9/11" match in the source --
+    OCCURRENCE-COUNTED, not a blanket "drop every missing 9", for the same
+    reason _forgive_hour_conversions consumes each pairing once: a document
+    that also happens to have a genuinely dropped, unrelated "9" elsewhere
+    (9 percent, 9 patients) must still report that one.
+    """
+    remaining = list(missing)
+    for _ in _NINE_ELEVEN_RE.finditer(source or ''):
+        if Decimal(9) in remaining:
+            remaining.remove(Decimal(9))
+    return remaining
+
+
 def _forgive_digit_scale_expansions(
     source: str, missing: List[Decimal], target_values: set,
 ) -> List[Decimal]:
@@ -600,6 +627,11 @@ def check_numbers(
     # translation. Running the pairing first means it claims "2" and "14"
     # before either can be independently consumed by something else.
     missing, added = _forgive_hour_conversions(source, missing, added)
+
+    # SAME REASONING, SAME POSITION: "9-11" is a date, not a quantity, and
+    # its correct French rendering ("11 septembre") never carries the "9"
+    # at all. See _forgive_nine_eleven's own docstring.
+    missing = _forgive_nine_eleven(source, missing)
 
     # A figure the source spelled out is not an invented figure. See
     # spelled_number_values: this forgives, it never accuses.

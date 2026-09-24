@@ -10257,6 +10257,48 @@ class QualityDeterministicCheckTestCase(TestCase):
         )
         self.assertTrue(any(i.rule == 'numeric.absent-from-source' for i in issues))
 
+    def test_9_11_correctly_becomes_11_septembre_with_no_9_left_to_find(self):
+        """
+        A REAL BLOCKED SUBMISSION: "9-11" (the standard English shorthand
+        for the September 11 attacks) correctly translated as "11
+        septembre" -- French always writes a date as the day followed by
+        the month AS A NAME, so once the month is named there is no bare
+        "9" left for a correct translation to carry across at all. Reported
+        CRITICAL, twice (the phrase recurs in this real document), on an
+        otherwise perfect translation.
+        """
+        from core.services.ai_assist.quality import check_numbers
+        self.assertEqual(check_numbers(
+            'the largest law enforcement operation in the history of '
+            'mankind was launched in response to the 9-11 attacks, and it '
+            'did not work. You killed more civilians than were killed on '
+            '9-11, et cetera.',
+            'la plus grande operation de maintien de l\'ordre de l\'histoire '
+            'de l\'humanite a ete lancee en reponse aux attentats du 11 '
+            'septembre, et cela n\'a pas fonctionne. Vous avez tue plus de '
+            'civils que ceux tues le 11 septembre, et cetera.',
+        ), [])
+
+    def test_9_11_forgiveness_is_counted_not_blanket(self):
+        """An unrelated, genuinely dropped 9 elsewhere in the same
+        document must still be caught -- this only ever forgives one
+        missing 9 per actual "9-11"/"9/11" occurrence in the source, not
+        every missing 9 in the document."""
+        from core.services.ai_assist.quality import check_numbers
+        issues = check_numbers(
+            'It happened on 9-11. Separately, 9 patients were enrolled.',
+            'C\'est arrive le 11 septembre. Separement, des patients ont '
+            'ete inscrits.',
+        )
+        self.assertTrue(any(i.rule == 'numeric.missing-from-target' for i in issues))
+
+    def test_9_11_written_with_a_slash_is_recognised_too(self):
+        from core.services.ai_assist.quality import check_numbers
+        self.assertEqual(check_numbers(
+            'This is about the 9/11 attacks.',
+            'Il s\'agit des attentats du 11 septembre.',
+        ), [])
+
     def test_two_and_a_half_million_is_not_an_invented_figure(self):
         """
         A REAL SUBMISSION HAD THIS BLOCKED, TWICE, on two separate ASR
