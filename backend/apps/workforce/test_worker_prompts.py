@@ -508,6 +508,22 @@ class WorkerPromptTestCase(TestCase):
                 # unbroken block instead.
                 self.assertIn('collapsed into one unbroken block', text)
 
+    def test_no_unsubstituted_placeholder_leaks_into_any_prompt(self):
+        """
+        FROM A REAL PASTE: a worker's actual "Copy prompt + English" output
+        showed the literal text "professionally published {target} actually
+        reads" -- the {target} placeholder itself, not the word "French".
+        Root cause: build() formats must_not/what_to_fix/typography with
+        **parts before handing them to the outer .format() call, but
+        structure was handed over raw -- str.format() never re-formats an
+        already-substituted value, so _STRUCTURE's own {target} survived
+        untouched into all three prompts, since all three share it.
+        """
+        for name, text in self.prompts.items():
+            with self.subTest(prompt=name):
+                self.assertNotIn('{target}', text)
+                self.assertNotIn('{source}', text)
+
     def test_the_prompts_end_where_the_worker_pastes(self):
         # The text is appended by the caller, so each prompt has to finish
         # on its handover line rather than trailing off mid-sentence.

@@ -628,7 +628,7 @@ def build(source_language: str, target_language: str, source_text: str = '') -> 
         'what_to_fix': _WHAT_TO_FIX.format(**parts),
         'typography': _TYPOGRAPHY.get(
             target, _TYPOGRAPHY_DEFAULT.format(**parts)),
-        'structure': _STRUCTURE,
+        'structure': _STRUCTURE.format(**parts),
     }
     cleaned_source_text = (source_text or '').strip()
     return {
