@@ -434,6 +434,48 @@ class WorkerPromptTestCase(TestCase):
         review = self.prompts['review']
         self.assertIn('do not need to select just part', review)
 
+    def test_the_translate_prompt_carries_the_same_audio_verification_as_polish(self):
+        """
+        FROM A REAL AUDIT: a worker asked whether "Copy prompt + English"
+        (source_text=None, no machine draft to polish -- the from-scratch
+        path, increasingly common during a Gemini outage that blocks the
+        normal draft-then-polish flow) would catch the same problems as
+        "Copy prompt + translation". It would not have: _TRANSLATE never
+        had the VERIFY AGAINST AUDIO mechanism at all, so a garbled name or
+        an unsettleable quantity split went straight through unflagged on
+        that path, even though the underlying source text handed to both
+        prompts is identical. This locks in the fix.
+        """
+        translate = self.prompts['translate']
+        self.assertIn('VERIFY AGAINST AUDIO', translate)
+        self.assertIn('ONLY GO AS FAR AS RESEARCH CAN ACTUALLY SETTLE', translate)
+        self.assertIn('"Jr."', translate)
+        self.assertIn('quoted exactly', translate)
+        self.assertIn('character-for-character', translate)
+        self.assertIn('no backticks, no', translate)
+        self.assertIn('THE SAME LIMIT APPLIES TO WHAT A QUANTITY COVERS', translate)
+        self.assertIn('name the spot on the VERIFY AGAINST AUDIO line', translate)
+        self.assertIn(
+            'ANY SPOT WHERE THE SOURCE ITSELF IS GARBLED OR\nINCOMPLETE',
+            translate)
+
+    def test_the_translate_prompt_reply_shape_matches_polish(self):
+        """
+        Same reasoning as test_the_reply_shape_marks_off_what_is_and_is_not_
+        the_document, extended to translate: strip_reply_scaffolding looks
+        for these markers regardless of which prompt produced the reply, so
+        translate gains full save-path support for free once its reply
+        shape matches polish's -- but only if the prompt text actually asks
+        for that shape, which it did not before this fix (it only asked for
+        "the {target} text only", with no markers and no VERIFY AGAINST
+        AUDIO footer at all).
+        """
+        translate = self.prompts['translate']
+        self.assertIn('=== TRANSLATION START ===', translate)
+        self.assertIn('=== TRANSLATION END ===', translate)
+        self.assertIn('do not need to select just part', translate)
+        self.assertIn('paste your whole\nanswer, markers and all', translate)
+
     def test_nothing_may_be_reordered_however_much_is_rewritten(self):
         """
         The prompts ask for fluency rewriting, which is the whole point of

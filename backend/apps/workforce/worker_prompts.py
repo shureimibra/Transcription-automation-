@@ -426,11 +426,78 @@ written prose. Preserve every idea; remove only the disfluency.
 
 {what_to_fix}
 
+RESEARCH EVERY PROPER NAME, CASE CITATION, STATUTE AND INSTITUTION -- BUT
+ONLY GO AS FAR AS RESEARCH CAN ACTUALLY SETTLE. Where a garbled name
+points to exactly one real, well-known match, use the correct form --
+that is a correction, not a guess. But where research only gets you to
+a PLAUSIBLE match rather than a certain one, or where using the correct
+form means adding specific detail the garbled source gives no trace of
+at all (a middle initial, "Jr.", an exact ordinal circuit number,
+"published" versus "forthcoming"), that is a question only the audio
+can answer, and you were never given the audio. In that case:
+- Use the name or term WITHOUT the uncertain extra detail in the
+  translation itself -- the correct core identification, not the
+  specific detail you cannot confirm.
+- After the full translation, add one line reading exactly
+  VERIFY AGAINST AUDIO: followed by each such spot, one per line, in
+  this exact shape:
+  "<the {source} phrase, quoted exactly>" -- <why you were unsure>
+  The quoted part must be copied character-for-character from the
+  {source} text below -- not paraphrased, not translated, not
+  reworded, and not wrapped in any other formatting (no backticks, no
+  bold, no markdown of any kind, plain straight quotes only). The
+  platform searches the {source} for exactly that string to take a
+  worker straight to the right spot in the audio; a phrase that does
+  not appear verbatim in the {source} you were given cannot be found
+  there. Write NONE if there is nothing to flag.
+This is not permission to stop researching or correcting -- keep doing
+both, as instructed above. It is a limit on confidence: a plausible
+research match is not the same as a confirmed one, and only a human who
+can actually listen closes that gap.
+
+THE SAME LIMIT APPLIES TO WHAT A QUANTITY COVERS. If a single figure
+precedes a list of categories and the source itself does not settle
+whether it is one amount split across them or that amount applying to
+each one separately, that is also a question only the audio can answer.
+Translate the number and the categories without resolving the split, and
+name the spot on the VERIFY AGAINST AUDIO line the same way.
+
+THE SAME LIMIT APPLIES TO ANY SPOT WHERE THE SOURCE ITSELF IS GARBLED OR
+INCOMPLETE, NOT ONLY A NAME OR A QUANTITY. A speech-recognition transcript
+sometimes hands you a clause that does not parse, or parses two different
+ways, through no fault of the translation -- "our tankers' fades", "it's
+easier, more so pity". Translate the most plausible reading you can
+construct, the same way you would resolve any other genuine ambiguity --
+but do not let a confident-sounding {target} sentence hide that the
+underlying {source} was broken. Name the spot on the VERIFY AGAINST AUDIO
+line the same way, with a short note on what made it unclear.
+
+THIS IS ABOUT TRANSCRIPTION NOISE, NOT ABOUT WHAT THE SPEAKER ACTUALLY
+MEANT. A clause that does not parse is a different problem from a clause
+that parses fine but sounds inconsistent, uncomfortable, or self-
+contradictory -- a speaker genuinely saying two things that sit in
+tension is real content, not an artifact, and smoothing it into
+something that reads more logically is an invention the audio can't
+excuse. Translate what the source actually says, contradiction and all;
+only route a spot to VERIFY AGAINST AUDIO when the WORDS THEMSELVES do
+not parse, never merely because the MEANING is surprising.
+
 {typography}
 
 {structure}
 
-Reply with the {target} text only.
+Reply in exactly this shape and nothing else -- no source text repeated,
+no other commentary:
+
+=== TRANSLATION START ===
+(the {target} translation goes here -- nothing else on these lines)
+=== TRANSLATION END ===
+VERIFY AGAINST AUDIO: (the line described above, or NONE)
+
+You do not need to select just part of this reply -- paste your whole
+answer, markers and all, into the Polished {target} field. The platform
+pulls the document out on its own and will show you the VERIFY AGAINST
+AUDIO line separately after you save, if there is one.
 
 Here is the text:
 """
