@@ -3400,6 +3400,119 @@ class RevertSegmentTestCase(AuthenticatedAPITransactionTestCase):
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
 
+class SplitSegmentTestCase(AuthenticatedAPITransactionTestCase):
+    """
+    THE REAL INCIDENT THIS EXISTS FOR: diarization heard only one speaker
+    for a whole medical lecture -- one person briefly introduced a second,
+    who then gave 90% of the talk -- and there was no way inside the
+    product to say so. The worker had to edit the database directly and
+    submit around the platform entirely to get the second speaker labelled
+    at all.
+    """
+    def setUp(self):
+        self.project = Project.objects.create(name="Split Segment Test Project")
+        self.job = TranscriptionJob.objects.create(
+            project=self.project, input_source='url', source_url='https://example.com/a.mp3', status='completed',
+        )
+        # len('one two three four five') == 23, split at 13 -> 'one two
+        # three' | ' four five' (after strip). Kept as a real sentence
+        # rather than a hand-picked round-number string, with the timing
+        # assertion below computed from the same formula the view uses --
+        # hand-computing "the nice round split" from a literal string is
+        # exactly the kind of off-by-one that caught this test itself
+        # during review.
+        self.segment = TranscriptSegment.objects.create(
+            job=self.job, speaker_label='Male_1', start_time=0.0, end_time=10.0,
+            text='one two three four five',
+        )
+
+    def _split(self, split_at, second_speaker='Male_2'):
+        url = reverse('split-segment', kwargs={'job_id': self.job.id, 'segment_id': self.segment.id})
+        return self.client.post(url, {'split_at': split_at, 'second_speaker': second_speaker}, format='json')
+
+    def test_splits_into_two_segments_with_the_right_text(self):
+        response = self._split(13)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['first']['text'], 'one two three')
+        self.assertEqual(response.data['second']['text'], 'four five')
+
+    def test_the_original_segment_id_is_kept_by_the_first_half(self):
+        """The first half is the SAME row, shrunk -- not a new one -- so
+        anything already referencing this segment's id (an applied
+        accuracy-check finding, an event log entry) still points at real
+        text."""
+        response = self._split(13)
+        self.assertEqual(response.data['first']['id'], str(self.segment.id))
+        self.assertNotEqual(response.data['second']['id'], str(self.segment.id))
+
+    def test_the_boundary_is_proportional_by_character_count(self):
+        """split_at / len(text) of the way through the text -> the same
+        fraction of the way through the original 0-10s range."""
+        expected = 0.0 + (13 / len('one two three four five')) * 10.0
+        response = self._split(13)
+        self.assertAlmostEqual(response.data['first']['end_time'], expected, places=6)
+        self.assertAlmostEqual(response.data['second']['start_time'], expected, places=6)
+        # Neither end of the original range moved.
+        self.assertEqual(response.data['first']['start_time'], 0.0)
+        self.assertEqual(response.data['second']['end_time'], 10.0)
+
+    def test_the_second_speaker_is_recorded_on_the_new_segment_only(self):
+        response = self._split(13, second_speaker='Female_1')
+        self.assertEqual(response.data['first']['speaker_label'], 'Male_1')
+        self.assertEqual(response.data['second']['speaker_label'], 'Female_1')
+
+    def test_a_split_point_at_either_end_is_refused(self):
+        """split_at has to be STRICTLY inside the text -- 0 or the full
+        length would leave one half empty, which is not a split."""
+        self.assertEqual(self._split(0).status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            self._split(len(self.segment.text)).status_code, status.HTTP_400_BAD_REQUEST)
+        self.segment.refresh_from_db()
+        self.assertEqual(TranscriptSegment.objects.filter(job=self.job).count(), 1)
+
+    def test_a_split_landing_entirely_in_whitespace_is_refused(self):
+        """Splitting a single word in two by accident (or a point that
+        trims down to an empty half either side) must not silently create
+        a blank segment."""
+        self.segment.text = 'hello     world'
+        self.segment.save(update_fields=['text'])
+        # Right in the middle of the run of spaces -- both sides strip to
+        # real words here, so this one is fine...
+        ok = self._split(8)
+        self.assertEqual(ok.status_code, status.HTTP_201_CREATED)
+
+    def test_a_missing_second_speaker_is_refused(self):
+        response = self._split(12, second_speaker='')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(TranscriptSegment.objects.filter(job=self.job).count(), 1)
+
+    def test_neither_half_gets_an_original_text_snapshot(self):
+        """A structurally split segment has no single-segment ASR original
+        to revert to any more -- reverting one half back to the whole
+        merged text would duplicate words the other half now also has."""
+        response = self._split(13)
+        self.assertFalse(response.data['first']['is_edited'])
+        self.assertFalse(response.data['second']['is_edited'])
+        revert_url = reverse('revert-segment', kwargs={'job_id': self.job.id, 'segment_id': self.segment.id})
+        revert_response = self.client.post(revert_url)
+        self.assertEqual(revert_response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_both_segments_sort_correctly_when_the_job_is_reloaded(self):
+        self._split(13)
+        rows = list(TranscriptSegment.objects.filter(job=self.job).order_by('start_time'))
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0].text, 'one two three')
+        self.assertEqual(rows[1].text, 'four five')
+
+    def test_404_for_a_segment_belonging_to_a_different_job(self):
+        other_job = TranscriptionJob.objects.create(
+            project=self.project, input_source='url', source_url='https://example.com/b.mp3',
+        )
+        url = reverse('split-segment', kwargs={'job_id': other_job.id, 'segment_id': self.segment.id})
+        response = self.client.post(url, {'split_at': 13, 'second_speaker': 'Male_2'}, format='json')
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+
 class AcademicSubjectDetectorTestCase(TestCase):
     """
     core.services.academic.detector.SubjectDetector -- a local, deterministic

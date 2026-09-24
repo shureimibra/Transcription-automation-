@@ -77,6 +77,19 @@ export const segments = {
   /** Undo every edit made to one line's text, back to the ASR original. */
   revert: (jobId, segmentId) =>
     api.post(`/transcriptions/${jobId}/segments/${segmentId}/revert/`),
+
+  /**
+   * Divide one segment into two, at `splitAt` (a character offset into its
+   * text) -- for a turn diarization merged into one speaker that was
+   * actually two. Returns {first, second}: `first` is THIS segment,
+   * shrunk to the text before the split; `second` is a newly created one
+   * carrying `secondSpeaker` and the text after it. The time boundary
+   * between them is estimated proportionally by character count, not
+   * measured -- see the endpoint's own docstring.
+   */
+  split: (jobId, segmentId, splitAt, secondSpeaker) =>
+    api.post(`/transcriptions/${jobId}/segments/${segmentId}/split/`,
+             { split_at: splitAt, second_speaker: secondSpeaker }),
 };
 
 /**

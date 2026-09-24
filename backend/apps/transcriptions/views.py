@@ -1161,6 +1161,91 @@ class RevertSegmentView(views.APIView):
         return Response(TranscriptSegmentSerializer(segment).data, status=status.HTTP_200_OK)
 
 
+class SplitSegmentView(views.APIView):
+    """
+    Divide one segment into two, at a point in its text -- for the shape
+    diarization gets wrong in the OTHER direction from a misidentified
+    speaker: not "the wrong person", but "two different people collapsed
+    into one turn". A REAL INCIDENT: a medical lecture where the machine
+    heard only one speaker for the whole recording -- one person briefly
+    introduced a second, who then gave 90% of the talk -- and there was no
+    way to say so without editing the database directly and submitting
+    around this platform entirely.
+
+    TIMESTAMPS ARE NOT IMMUTABLE HERE, unlike EditSegmentView -- that is
+    the one deliberate exception. A split segment needs a real boundary
+    between the two halves, and nothing on this platform knows where the
+    turn actually changed except the worker who just listened to it. The
+    boundary is ESTIMATED, proportionally by character count across the
+    two texts, against the original segment's own start/end -- imprecise,
+    but a documented, honest approximation rather than a guess dressed up
+    as pipeline-measured timing. Ordinary editing afterward (through
+    EditSegmentView) can still correct the text on either half; only this
+    endpoint may move a boundary, and only by splitting one.
+
+    NEITHER HALF GETS A original_text SNAPSHOT. That field answers "is
+    there ASR wording to revert to", and once a segment has been
+    structurally split, the true original was one merged block that
+    belongs to neither resulting segment on its own -- reverting one
+    half's text back to the whole original would silently duplicate
+    words already sitting in the other, now-separate half.
+    """
+    authentication_classes = API_AUTH
+    permission_classes = [IsAuthenticatedUser]
+
+    def post(self, request, job_id, segment_id):
+        segment = get_object_or_404(TranscriptSegment, id=segment_id, job_id=job_id)
+        if not may_access_job(request.user, segment.job):
+            raise Http404
+
+        text = segment.text or ''
+        split_at = request.data.get('split_at')
+        second_speaker = str(request.data.get('second_speaker') or '').strip()[:100]
+
+        if not isinstance(split_at, int) or not (0 < split_at < len(text)):
+            return Response(
+                {'error': 'split_at must be a position strictly inside the segment\'s text.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not second_speaker:
+            return Response(
+                {'error': 'second_speaker is required.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        first_text = text[:split_at].rstrip()
+        second_text = text[split_at:].lstrip()
+        if not first_text or not second_text:
+            return Response(
+                {'error': 'Both halves of the split must contain text.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # PROPORTIONAL BY CHARACTER COUNT, against the ORIGINAL (untrimmed)
+        # text length -- see the class docstring on why this is an honest
+        # estimate rather than pipeline-measured timing.
+        ratio = split_at / len(text)
+        original_end = segment.end_time
+        split_time = segment.start_time + ratio * (original_end - segment.start_time)
+
+        segment.text = first_text
+        segment.end_time = split_time
+        segment.save(update_fields=['text', 'end_time'])
+
+        second = TranscriptSegment.objects.create(
+            job=segment.job,
+            speaker_label=second_speaker,
+            start_time=split_time,
+            end_time=original_end,
+            text=second_text,
+        )
+
+        return Response({
+            'first': TranscriptSegmentSerializer(segment).data,
+            'second': TranscriptSegmentSerializer(second).data,
+        }, status=status.HTTP_201_CREATED)
+
+
 class AICapabilitiesView(views.APIView):
     """
     The server telling the client what AI Assist is permitted to do:

@@ -144,6 +144,29 @@ export default function ReviewWorkspace({ task, onTaskChange }) {
   const [showGuide, setShowGuide] = useState(false);
   const [checkNotesInput, setCheckNotesInput] = useState('');
   const [savingCheckNotes, setSavingCheckNotes] = useState(false);
+  // A NEW SPEAKER, DECLARED BEFORE ANY ROW USES IT.
+  //
+  // THE GAP THIS CLOSES: every dropdown here only ever offered labels
+  // already present on some row, because `speakers` (below) is derived
+  // from the rows themselves. A REAL INCIDENT: diarization heard only one
+  // speaker for a whole medical lecture -- a brief introduction, then a
+  // second person who gave 90% of the talk -- and there was no way to add
+  // "Male_2" as an option at all, because no row had ever used it. The
+  // worker had to edit the database directly and submit around this
+  // platform.
+  //
+  // PURELY LOCAL, NOT PERSISTED. The moment any row is actually
+  // reassigned to a pending label it becomes a real one, indistinguishable
+  // from a diarization-assigned label from then on -- so there is nothing
+  // this needs to remember past that point, and a lost tab before then
+  // costs one re-click, not lost work.
+  const [pendingSpeakers, setPendingSpeakers] = useState([]);
+  const [addingGender, setAddingGender] = useState('Male');
+  // Which row is mid-split, and who the second half belongs to. Separate
+  // from `editing` (which row's TEXT is open) because a worker splits from
+  // inside that same edit box -- see the Split control below.
+  const [splitting, setSplitting] = useState(false);
+  const [splitSpeaker, setSplitSpeaker] = useState('');
 
   const jobId = task?.job;
   const load = useCallback(
@@ -317,6 +340,73 @@ export default function ReviewWorkspace({ task, onTaskChange }) {
     });
     return [...tally.values()].sort((a, b) => b.seconds - a.seconds);
   }, [rows, displayName]);
+
+  /**
+   * Every label a dropdown may offer: the real ones (already on some row)
+   * plus any just-added, not-yet-used ones. Filtered against `speakers` so
+   * a pending label that HAS since been used does not show up twice —
+   * once for real, once as a stale pending entry.
+   */
+  const speakerOptions = useMemo(() => {
+    const known = new Set(speakers.map((s) => s.label));
+    const extra = pendingSpeakers
+      .filter((label) => !known.has(label))
+      .map((label) => ({ label, display: label }));
+    return [...speakers, ...extra];
+  }, [speakers, pendingSpeakers]);
+
+  /**
+   * The next free number for a gender, so "Add speaker" never offers a
+   * label that collides with one already in use — real or pending.
+   */
+  const nextSpeakerNumber = (gender) => {
+    const prefix = `${gender}_`;
+    const used = new Set(
+      [...speakers.map((s) => s.label), ...pendingSpeakers]
+        .filter((label) => label.startsWith(prefix))
+        .map((label) => parseInt(label.slice(prefix.length), 10))
+        .filter((n) => Number.isFinite(n))
+    );
+    let n = 1;
+    while (used.has(n)) n += 1;
+    return n;
+  };
+
+  const addSpeaker = () => {
+    const label = `${addingGender}_${nextSpeakerNumber(addingGender)}`;
+    setPendingSpeakers((prev) => (prev.includes(label) ? prev : [...prev, label]));
+    setNotice(`${label} added — select it from any segment's speaker dropdown.`);
+  };
+
+  /**
+   * One segment, spoken by two people, split at `splitAt` (a character
+   * offset into the CURRENT DRAFT — a worker may have already fixed a
+   * typo before noticing the turn change, and the split has to act on
+   * what they are actually looking at, not the stale saved text).
+   *
+   * Replaces the one row with the two the server returns rather than
+   * refetching the whole job: `first` keeps this segment's id and shrinks
+   * to end at the new boundary, `second` is newly created. `rows`
+   * re-sorts by start_time on its own, so nothing else has to place it.
+   */
+  const splitSegment = async (segment, splitAt, secondSpeaker) => {
+    setSaving(segment.id);
+    setError('');
+    try {
+      const { first, second } = await segmentsApi.split(jobId, segment.id, splitAt, secondSpeaker);
+      setData((current) => (current ? {
+        ...current,
+        segments: current.segments.flatMap((s) => (s.id === segment.id ? [first, second] : [s])),
+      } : current));
+      setNotice(`Split into two turns — the second is ${displayName(secondSpeaker) || secondSpeaker}.`);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(null);
+      setEditing(null);
+      setSplitting(false);
+    }
+  };
 
   const patchSegment = async (segment, changes) => {
     setSaving(segment.id);
@@ -676,7 +766,7 @@ export default function ReviewWorkspace({ task, onTaskChange }) {
       {labelsSpeakers && (
         <Card
           title="Speakers"
-          subtitle="Rename one everywhere, or fix a single turn below"
+          subtitle="Rename one everywhere, fix a single turn below, or add one diarization missed"
         >
           <div className="flex flex-wrap gap-2">
             {speakers.map((speaker) => (
@@ -690,10 +780,50 @@ export default function ReviewWorkspace({ task, onTaskChange }) {
                 onRename={readOnly ? null : (next) => renameSpeakerEverywhere(speaker.label, next)}
               />
             ))}
-            {speakers.length === 0 && (
+            {/* NOT YET ON ANY ROW -- see pendingSpeakers' own comment. Shown
+                distinctly from a real chip (no turn count, because there
+                is none yet) so it reads as "ready to use", not as a
+                speaker already found in the audio. */}
+            {pendingSpeakers
+              .filter((label) => !speakers.some((s) => s.label === label))
+              .map((label) => (
+                <div key={label}
+                     className="flex items-center gap-1.5 rounded-lg border border-dashed
+                                border-accent/50 bg-canvas px-2 py-1">
+                  <span className="text-xs font-medium text-ink">{label}</span>
+                  <span className="text-2xs text-ink-mute">not used yet</span>
+                </div>
+              ))}
+            {speakers.length === 0 && pendingSpeakers.length === 0 && (
               <p className="text-xs text-ink-mute">No speaker labels on this transcript.</p>
             )}
           </div>
+          {/* THE GAP THIS CLOSES: a diarization pass that merged two real
+              speakers into one label had no way to introduce the second
+              one at all -- every dropdown only ever offered labels already
+              on some row. See pendingSpeakers' own comment for the real
+              incident this is built from. */}
+          {!readOnly && (
+            <div className="mt-3 flex items-center gap-2 border-t border-edge pt-3">
+              <select
+                aria-label="Gender for the new speaker"
+                value={addingGender}
+                onChange={(e) => setAddingGender(e.target.value)}
+                className="rounded border border-edge bg-canvas px-1.5 py-1 text-2xs text-ink"
+              >
+                <option value="Male">Male</option>
+                <option value="Female">Female</option>
+                <option value="Unknown">Unknown</option>
+              </select>
+              <Button size="sm" variant="secondary" onClick={addSpeaker}>
+                + Add {addingGender}_{nextSpeakerNumber(addingGender)}
+              </Button>
+              <span className="text-2xs text-ink-mute">
+                For a speaker the machine missed entirely — pick it from any
+                segment's dropdown below once added.
+              </span>
+            </div>
+          )}
         </Card>
       )}
 
@@ -865,10 +995,10 @@ export default function ReviewWorkspace({ task, onTaskChange }) {
                       onChange={(e) => patchSegment(row, { speaker_label: e.target.value })}
                       className="rounded border border-edge bg-canvas px-1.5 py-0.5 text-2xs text-ink"
                     >
-                      {row.speaker_label && !speakers.some((s) => s.label === row.speaker_label) && (
+                      {row.speaker_label && !speakerOptions.some((s) => s.label === row.speaker_label) && (
                         <option value={row.speaker_label}>{displayName(row.speaker_label)}</option>
                       )}
-                      {speakers.map((s) => (
+                      {speakerOptions.map((s) => (
                         <option key={s.label} value={s.label}>{s.display || s.label}</option>
                       ))}
                     </select>
@@ -892,6 +1022,15 @@ export default function ReviewWorkspace({ task, onTaskChange }) {
                         e.stopPropagation();
                         setEditing(row.id);
                         setDraft(row.text || '');
+                        setSplitting(false);
+                        // A STALE POSITION FROM A DIFFERENT ROW IS WORSE
+                        // THAN NO POSITION: the backend refuses an out-of-
+                        // range split_at, but a coincidentally in-range one
+                        // left over from a longer row would split THIS
+                        // text at a meaningless point instead of visibly
+                        // doing nothing. Cleared so "Split here" starts
+                        // disabled until this row's own text is clicked.
+                        draftCursorRef.current = null;
                       }}
                     >
                       Edit
@@ -910,8 +1049,8 @@ export default function ReviewWorkspace({ task, onTaskChange }) {
                         draftCursorRef.current = { start: e.target.selectionStart, end: e.target.selectionEnd };
                       }}
                       onKeyDown={(e) => {
-                        if (e.key === 'Escape') setEditing(null);
-                        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                        if (e.key === 'Escape') { setEditing(null); setSplitting(false); }
+                        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !splitting) {
                           patchSegment(row, { text: draft });
                         }
                       }}
@@ -928,17 +1067,65 @@ export default function ReviewWorkspace({ task, onTaskChange }) {
                         {ANNOTATION_TAGS.map((tag) => <option key={tag} value={tag}>{tag}</option>)}
                         <option value="Custom tag...">Custom tag...</option>
                       </select>
+                      {/* ONE SEGMENT, TWO SPEAKERS -- the OTHER shape
+                          diarization gets wrong. Not the same problem the
+                          annotate dropdown solves (marking something IN a
+                          turn), and not solvable by inserting a bracket tag
+                          either -- Eagle recognises a fixed, closed set of
+                          those ([inaudible], [crosstalk]...), and even a
+                          recognised one would not actually split this into
+                          two properly attributed, separately timed lines.
+                          This does that for real. */}
+                      {!splitting && (
+                        <Button size="sm" variant="ghost"
+                                onClick={() => { setSplitSpeaker(''); setSplitting(true); }}>
+                          Split turn…
+                        </Button>
+                      )}
                     </div>
-                    <div className="flex gap-2">
-                      <Button size="sm" variant="primary" loading={saving === row.id}
-                              onClick={() => patchSegment(row, { text: draft })}>
-                        Save
-                      </Button>
-                      <Button size="sm" variant="ghost" onClick={() => setEditing(null)}>
-                        Cancel
-                      </Button>
-                      <span className="self-center text-2xs text-ink-mute">Ctrl+Enter saves</span>
-                    </div>
+                    {splitting ? (
+                      <div className="flex flex-wrap items-center gap-2 rounded-lg border
+                                       border-edge bg-raised px-3 py-2">
+                        <span className="text-2xs text-ink-dim">
+                          Click in the text above where the second speaker
+                          starts, then choose who they are:
+                        </span>
+                        <select
+                          aria-label="Second speaker"
+                          value={splitSpeaker}
+                          onChange={(e) => setSplitSpeaker(e.target.value)}
+                          className="rounded border border-edge bg-canvas px-1.5 py-0.5 text-2xs text-ink"
+                        >
+                          <option value="">Choose speaker…</option>
+                          {speakerOptions
+                            .filter((s) => s.label !== row.speaker_label)
+                            .map((s) => (
+                              <option key={s.label} value={s.label}>{s.display || s.label}</option>
+                            ))}
+                        </select>
+                        <Button
+                          size="sm" variant="primary" loading={saving === row.id}
+                          disabled={!splitSpeaker || !draftCursorRef.current?.start}
+                          onClick={() => splitSegment(row, draftCursorRef.current.start, splitSpeaker)}
+                        >
+                          Split here
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => setSplitting(false)}>
+                          Cancel
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="flex gap-2">
+                        <Button size="sm" variant="primary" loading={saving === row.id}
+                                onClick={() => patchSegment(row, { text: draft })}>
+                          Save
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => setEditing(null)}>
+                          Cancel
+                        </Button>
+                        <span className="self-center text-2xs text-ink-mute">Ctrl+Enter saves</span>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <p className="mt-1 text-sm leading-relaxed text-ink">

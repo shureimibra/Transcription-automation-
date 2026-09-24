@@ -431,6 +431,133 @@ describe('the transcript', () => {
   });
 });
 
+describe('adding a speaker diarization missed', () => {
+  // THE REAL INCIDENT THIS EXISTS FOR: diarization heard only one speaker
+  // for a whole medical lecture -- a brief introduction, then a second
+  // person who gave 90% of the talk -- and every dropdown only ever
+  // offered labels already present on some segment, so there was no way
+  // to introduce the missing one at all short of editing the database
+  // directly. JOB already has Male_1 and Male_2, so the next free number
+  // for Male is 3.
+
+  it('offers the next free number for the chosen gender', async () => {
+    render(<ReviewWorkspace task={TASK} />);
+    await screen.findByText('first turn');
+
+    expect(screen.getByRole('button', { name: '+ Add Male_3' })).toBeInTheDocument();
+  });
+
+  it('tracks each gender\'s next number independently', async () => {
+    render(<ReviewWorkspace task={TASK} />);
+    await screen.findByText('first turn');
+
+    await userEvent.selectOptions(
+      screen.getByLabelText('Gender for the new speaker'), 'Female');
+
+    expect(screen.getByRole('button', { name: '+ Add Female_1' })).toBeInTheDocument();
+  });
+
+  it('adds a not-yet-used chip and makes it selectable on any segment', async () => {
+    render(<ReviewWorkspace task={TASK} />);
+    await screen.findByText('first turn');
+
+    await userEvent.click(screen.getByRole('button', { name: '+ Add Male_3' }));
+
+    // "Male_3" now legitimately appears twice -- the pending chip AND a
+    // new option in the segment dropdown below -- so this checks the chip
+    // specifically via its distinguishing "not used yet" text rather than
+    // a bare getByText, which would fail on the duplicate.
+    const notice = screen.getByText('not used yet');
+    expect(within(notice.closest('div')).getByText('Male_3')).toBeInTheDocument();
+    const select = screen.getByLabelText('Speaker for the turn at 0:00');
+    expect(within(select).getByRole('option', { name: 'Male_3' })).toBeInTheDocument();
+  });
+
+  it('reassigning a segment to the new speaker reaches the server', async () => {
+    const update = vi.spyOn(segmentsApi, 'update').mockResolvedValue({
+      ...JOB.segments[0], speaker_label: 'Male_3',
+    });
+    render(<ReviewWorkspace task={TASK} />);
+    await screen.findByText('first turn');
+
+    await userEvent.click(screen.getByRole('button', { name: '+ Add Male_3' }));
+    await userEvent.selectOptions(
+      screen.getByLabelText('Speaker for the turn at 0:00'), 'Male_3');
+
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledWith('job-1', 's1', { speaker_label: 'Male_3' })
+    );
+  });
+});
+
+describe('splitting a turn between two speakers', () => {
+  // THE OTHER SHAPE diarization gets wrong -- not a misidentified speaker,
+  // but two real speakers collapsed into one turn. "first turn" (s1,
+  // Male_1, 0-9s) is split at index 6, right after "first ".
+
+  it('is disabled until a speaker is chosen and a split point is set', async () => {
+    render(<ReviewWorkspace task={TASK} />);
+    await screen.findByText('first turn');
+
+    await userEvent.click(screen.getAllByRole('button', { name: 'Edit' })[0]);
+    await userEvent.click(screen.getByRole('button', { name: 'Split turn…' }));
+
+    expect(screen.getByRole('button', { name: 'Split here' })).toBeDisabled();
+  });
+
+  it('offers every other speaker but not the one already on this segment', async () => {
+    render(<ReviewWorkspace task={TASK} />);
+    await screen.findByText('first turn');
+
+    // s1 is Male_1.
+    await userEvent.click(screen.getAllByRole('button', { name: 'Edit' })[0]);
+    await userEvent.click(screen.getByRole('button', { name: 'Split turn…' }));
+
+    const select = screen.getByLabelText('Second speaker');
+    expect(within(select).queryByRole('option', { name: 'Male_1' })).not.toBeInTheDocument();
+    expect(within(select).getByRole('option', { name: 'Male_2' })).toBeInTheDocument();
+  });
+
+  it('splits the segment on the server and shows both halves', async () => {
+    const split = vi.spyOn(segmentsApi, 'split').mockResolvedValue({
+      first: { id: 's1', speaker_label: 'Male_1', start_time: 0, end_time: 4, text: 'first', is_edited: false },
+      second: { id: 's1b', speaker_label: 'Male_2', start_time: 4, end_time: 9, text: 'turn', is_edited: false },
+    });
+    render(<ReviewWorkspace task={TASK} />);
+    await screen.findByText('first turn');
+
+    await userEvent.click(screen.getAllByRole('button', { name: 'Edit' })[0]);
+    const box = screen.getByRole('textbox', { name: '' });
+    box.setSelectionRange(6, 6);
+    fireEvent.select(box);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Split turn…' }));
+    await userEvent.selectOptions(screen.getByLabelText('Second speaker'), 'Male_2');
+    await userEvent.click(screen.getByRole('button', { name: 'Split here' }));
+
+    await waitFor(() =>
+      expect(split).toHaveBeenCalledWith('job-1', 's1', 6, 'Male_2')
+    );
+    expect(await screen.findByText('first')).toBeInTheDocument();
+    expect(screen.getByText('turn')).toBeInTheDocument();
+    // The stale merged text is gone -- this is a real split, not an
+    // addition alongside the original.
+    expect(screen.queryByText('first turn')).not.toBeInTheDocument();
+  });
+
+  it('the split panel\'s own Cancel returns to normal editing', async () => {
+    render(<ReviewWorkspace task={TASK} />);
+    await screen.findByText('first turn');
+
+    await userEvent.click(screen.getAllByRole('button', { name: 'Edit' })[0]);
+    await userEvent.click(screen.getByRole('button', { name: 'Split turn…' }));
+    expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
+  });
+});
+
 describe('the submission preview', () => {
   const goodPreview = {
     content: 'Transcription Job: x\n\nMale_1:\n[00:00:00.000 --> 00:00:09.000]\nfirst turn\n\n[END OF RECORDING --> 00:00:30.000]',
