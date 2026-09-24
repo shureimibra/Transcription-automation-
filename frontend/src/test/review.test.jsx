@@ -80,6 +80,22 @@ describe('the audio boundary', () => {
       expect(screen.getByRole('button', { name: rate })).toBeInTheDocument();
     }
   });
+
+  it('also offers speeds below 1x, for making out a word that is spoken quickly', async () => {
+    // A REAL REQUEST: checking a VERIFY AGAINST AUDIO flag or a suspected
+    // mishearing sometimes needs SLOWER than real time, not just faster --
+    // a name run together with the next word can stay unclear even at 1x.
+    const { container } = render(<ReviewWorkspace task={TASK} />);
+    await screen.findByText('first turn');
+
+    for (const rate of ['0.5×', '0.75×']) {
+      expect(screen.getByRole('button', { name: rate })).toBeInTheDocument();
+    }
+
+    await userEvent.click(screen.getByRole('button', { name: '0.5×' }));
+    const audio = container.querySelector('audio');
+    expect(audio.playbackRate).toBe(0.5);
+  });
 });
 
 describe('a task that has already been submitted', () => {

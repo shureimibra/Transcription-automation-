@@ -39,7 +39,12 @@ import { FOCUS } from '../components/ui/index.jsx';
  * check. These keys work from anywhere on the page that is not a text field.
  */
 
-const SPEEDS = [1, 1.25, 1.5, 1.75, 2];
+// 0.5 and 0.75 ADDED FOR VERIFY-AGAINST-AUDIO WORK, specifically: a name or
+// term flagged as unclear was often unclear BECAUSE it's spoken quickly or
+// run together with the next word, and 1x sometimes still isn't slow enough
+// to make it out -- a tasker was manually fighting the player to get
+// anything slower.
+const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
 
 function formatTime(seconds) {
   if (!Number.isFinite(seconds)) return '0:00';
