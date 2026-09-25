@@ -637,6 +637,24 @@ describe('the submission preview', () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  it('will not offer Submit for a task nobody has claimed, and says to claim it', async () => {
+    // A worker may open and preview a pool task before taking it. The
+    // server refuses to send it, but the button must not invite the click.
+    vi.spyOn(submission, 'preview').mockResolvedValue(goodPreview);
+    const send = vi.spyOn(submission, 'submit');
+    render(<ReviewWorkspace task={{ ...TASK, status: 'new' }} />);
+    await screen.findByText('first turn');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Preview submission' }));
+    const dialog = await screen.findByRole('dialog');
+
+    expect(within(dialog).getByText(/Claim this task first/)).toBeInTheDocument();
+    const submit = within(dialog).getByRole('button', { name: 'Submit to platform' });
+    expect(submit).toBeDisabled();
+    expect(submit).toHaveAttribute('title', 'Claim this task first');
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it('submits when the document is clean', async () => {
     vi.spyOn(submission, 'preview').mockResolvedValue(goodPreview);
     const send = vi.spyOn(submission, 'submit').mockResolvedValue({ ...TASK, status: 'submitted' });

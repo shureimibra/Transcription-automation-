@@ -1382,7 +1382,13 @@ function PreviewDialog({ task, onClose, onSubmitted }) {
   // with a red error for doing the reasonable thing. Read-only is the honest
   // shape for work that is out of your hands.
   const delivered = isDelivered(task);
-  const blocking = delivered || Boolean(error) || Boolean(data?.blocking);
+  // A TASK NOBODY HAS CLAIMED CANNOT BE SUBMITTED. A worker may open and
+  // even preview a task in the open pool to decide whether to take it;
+  // sending it is a different act, and the server refuses it. Say so
+  // here, before the click, rather than answering the click with a
+  // vague refusal.
+  const notClaimed = task?.status === 'new' || task?.status === 'assigned';
+  const blocking = delivered || notClaimed || Boolean(error) || Boolean(data?.blocking);
 
   // DELIVERED. The dialog stays, and says so.
   if (sent) {
@@ -1416,6 +1422,11 @@ function PreviewDialog({ task, onClose, onSubmitted }) {
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
           {loading && <Skeleton className="h-64" />}
+          {notClaimed && (
+            <p role="alert" className="mb-3 rounded-lg border border-status-review/50 bg-status-review/10 px-3 py-2 text-xs text-status-review">
+              Claim this task first. You can preview it, but only a task you have claimed can be submitted.
+            </p>
+          )}
           {error && <ErrorState message={error.message} />}
           {failure && <ErrorState message={failure} />}
 
@@ -1442,7 +1453,9 @@ function PreviewDialog({ task, onClose, onSubmitted }) {
               title={
                 delivered
                   ? 'This work has already been submitted'
-                  : error
+                  : notClaimed
+                    ? 'Claim this task first'
+                    : error
                     ? 'There is nothing to submit until this is resolved'
                     : blocking
                       ? 'Fix the critical findings first'

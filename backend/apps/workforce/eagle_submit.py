@@ -912,6 +912,15 @@ def submit_task(task_id, actor, service=None, force: bool = False,
     service = service or get_eagle_service()
     task = Task.objects.select_related('job', 'claimed_by').get(pk=task_id)
 
+    if task.status in (states.NEW, states.ASSIGNED):
+        # A worker may open and preview a pool task before deciding to take
+        # it. Sending it is a different act, and the generic "not ready"
+        # below would not tell them what to do about it.
+        raise SubmissionRefused(
+            f'Task {task.id} is {task.status}: nobody has claimed it.',
+            'Claim this task first. Only a task you have claimed can be submitted.',
+        )
+
     if task.status not in (states.READY_TO_SUBMIT, states.REVIEW, states.IN_PROGRESS):
         raise SubmissionRefused(
             f'Task {task.id} is {task.status}.',

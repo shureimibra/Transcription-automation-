@@ -467,6 +467,28 @@ class SubmitFromEarlierStatesTestCase(TestCase):
 
         self.assertEqual(len(fake.submissions), 0)
 
+    def test_an_unclaimed_task_is_refused_with_a_message_that_says_to_claim_it(self):
+        """A worker can open and preview a pool task before taking it. Sending
+        it must be refused, and the refusal has to say what to do."""
+        task = self._at(states.NEW)
+        fake = FakeEagle()
+
+        with self.assertRaises(SubmissionRefused) as caught:
+            submit_task(task.id, self.user, service=fake)
+
+        self.assertIn('Claim this task first', caught.exception.safe_message)
+        self.assertEqual(len(fake.submissions), 0)
+
+    def test_an_assigned_but_unclaimed_task_gets_the_same_refusal(self):
+        task = self._at(states.ASSIGNED)
+        fake = FakeEagle()
+
+        with self.assertRaises(SubmissionRefused) as caught:
+            submit_task(task.id, self.user, service=fake)
+
+        self.assertIn('Claim this task first', caught.exception.safe_message)
+        self.assertEqual(len(fake.submissions), 0)
+
 
 class GateBlockingTestCase(TestCase):
 
