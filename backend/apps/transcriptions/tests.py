@@ -10203,6 +10203,60 @@ class QualityDeterministicCheckTestCase(TestCase):
         self.assertTrue(any(i.rule == 'numeric.missing-from-target' for i in issues))
         self.assertTrue(any(i.rule == 'numeric.absent-from-source' for i in issues))
 
+    def test_the_same_hour_stated_twice_converts_twice(self):
+        """
+        A real lecture-introduction: "tomorrow at 5 PM" and "Thursday at
+        5 PM", correctly "17 heures" both times. Pairing candidates were
+        deduplicated by value, so only the first pair was consumed and the
+        second reported as a missing 5 and an invented 17.
+        """
+        from core.services.ai_assist.quality import check_numbers
+        self.assertEqual(check_numbers(
+            'the second is tomorrow at 5 PM and the third on Thursday at 5 PM',
+            'la deuxième aura lieu demain à 17 heures et la troisième jeudi '
+            'à 17 heures',
+        ), [])
+
+    def test_a_repeated_hour_still_reports_a_genuinely_dropped_one(self):
+        """Occurrence-counted: two 5 PMs but only one 17 in the target means
+        one time really was dropped, and that must still be reported."""
+        from core.services.ai_assist.quality import check_numbers
+        issues = check_numbers(
+            'at 5 PM tomorrow and again at 5 PM Thursday',
+            'à 17 heures demain et de nouveau jeudi',
+        )
+        self.assertTrue(any(i.rule == 'numeric.missing-from-target' for i in issues))
+
+    def test_an_elided_year_range_written_out_in_full_is_correct(self):
+        """
+        A real plague-history lecture: "1356 to 58", "1656 and 57",
+        "1720 and 21" -- spoken shorthand for 1358, 1657, 1721 -- correctly
+        expanded by the translation, reported as six critical findings.
+        """
+        from core.services.ai_assist.quality import check_numbers
+        self.assertEqual(check_numbers(
+            'the Jacquerie in France from 1356 to 58, and plague at Genoa '
+            'in 1656 and 57, and Marseille in 1720 and 21',
+            'la Jacquerie en France de 1356 à 1358, la peste à Gênes en '
+            '1656 et 1657, et à Marseille en 1720 et 1721',
+        ), [])
+
+    def test_an_elided_year_expanded_to_the_wrong_year_is_still_reported(self):
+        """The forgiveness needs the RIGHT expansion: 1356 to 58 is 1358, so
+        a target saying 1359 is a genuine error, not a shorthand."""
+        from core.services.ai_assist.quality import check_numbers
+        issues = check_numbers(
+            'the Jacquerie from 1356 to 58', 'la Jacquerie de 1356 à 1359')
+        self.assertTrue(any(i.rule == 'numeric.missing-from-target' for i in issues))
+        self.assertTrue(any(i.rule == 'numeric.absent-from-source' for i in issues))
+
+    def test_an_elided_year_forgiveness_does_not_hide_a_dropped_bare_number(self):
+        """A dropped "58" that is not part of a year range still counts."""
+        from core.services.ai_assist.quality import check_numbers
+        issues = check_numbers(
+            'in 1356 to 58 and also 58 patients', 'en 1356 à 1358 et des patients')
+        self.assertTrue(any(i.rule == 'numeric.missing-from-target' for i in issues))
+
     def test_the_hour_conversion_still_works_when_the_document_says_deux_elsewhere(self):
         """
         A REAL BLOCKED SUBMISSION, a 4,475-word lecture: "on Friday at

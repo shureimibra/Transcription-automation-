@@ -291,6 +291,34 @@ _ELIDED_DECADE_RE = re.compile(
     r'\b(\d{3})0s\b\s*(?:,\s*)?(?:and|et)\s+(\d{2})s\b', re.IGNORECASE,
 )
 
+#: "the plague of 1656 and 57", "the Jacquerie, 1356 to 58": a year range
+#: whose second year is spoken (and transcribed) as just its last one or two
+#: digits. A correct French rendering writes the full year -- "1656 et
+#: 1657", "1356 à 1358" -- so the source's bare 57/58 reads as dropped and
+#: the target's full year as invented. Confirmed on a real plague-history
+#: lecture: three such ranges, six critical findings, on a correct
+#: translation. Anchored to "<4-digit year> and/to/or/-/en dash <1-2 digits>";
+#: the expansion must land AFTER the first year, and the missing side is
+#: only forgiven when the target actually contains that expanded year.
+_ELIDED_YEAR_RE = re.compile(
+    r'\b(1\d{3}|20\d{2})\s*(?:and|to|or|et|à|-|–)\s*(\d{1,2})\b(?!\s*[,.]?\d)',
+    re.IGNORECASE,
+)
+
+
+def _elided_year_pairs(text: str) -> List[Tuple[Decimal, Decimal]]:
+    """(short, expanded) for every elided-year range in `text`."""
+    pairs = []
+    for match in _ELIDED_YEAR_RE.finditer(text or ''):
+        year = int(match.group(1))
+        digits = match.group(2)
+        modulus = 10 ** len(digits)
+        expanded = year - (year % modulus) + int(digits)
+        if expanded > year:
+            pairs.append((Decimal(int(digits)), Decimal(expanded)))
+    return pairs
+
+
 #: "Edward VI", "Louis XIV": a monarch's ordinal, bare, with none of the
 #: French "e/er/eme" suffix _ROMAN_ORDINAL_RE demands -- that suffix is how
 #: French spells a CENTURY ("le XIXe siecle"), not how either language
@@ -372,6 +400,10 @@ def spelled_number_values(text: str) -> set:
         second_digits = int(match.group(2))
         values.add(Decimal(century + second_digits))
         values.add(Decimal(second_digits))
+    # "1356 to 58" -> also forgive 1358. See _ELIDED_YEAR_RE.
+    for short, expanded in _elided_year_pairs(text):
+        values.add(expanded)
+        values.add(short)
     return values
 
 
@@ -441,9 +473,15 @@ def _forgive_hour_conversions(
     """
     remaining_missing = list(missing)
     remaining_added = list(added)
-    candidates = list(dict.fromkeys(
-        remaining_missing + list(_spoken_hour_range_values(source))
-    ))
+    # ONE CANDIDATE PER OCCURRENCE, not per distinct value: a source saying
+    # "5 pm" twice and a translation saying "17 heures" twice has two pairs
+    # to consume. Deduplicating here paired only one of them and reported the
+    # other as a missing 5 / invented 17 on a correct translation. A spoken
+    # range value is added once, and only if it is not already a candidate.
+    spoken_only = [
+        v for v in _spoken_hour_range_values(source) if v not in remaining_missing
+    ]
+    candidates = remaining_missing + spoken_only
     for value in candidates:
         if not (1 <= value <= 11):
             continue
@@ -541,6 +579,19 @@ def _forgive_elided_decade_expansions(
     return remaining
 
 
+def _forgive_elided_year_expansions(
+    source: str, missing: List[Decimal], target_values: set,
+) -> List[Decimal]:
+    """The source's bare 58 in "1356 to 58" is not a dropped quantity once
+    the target writes the full 1358. Occurrence-counted, and only when the
+    target really contains the expanded year -- see _ELIDED_YEAR_RE."""
+    remaining = list(missing)
+    for short, expanded in _elided_year_pairs(source):
+        if short in remaining and expanded in target_values:
+            remaining.remove(short)
+    return remaining
+
+
 def _true_scale_values(text: str) -> set:
     """Every "<digits> <scale word>" phrase in `text`, resolved to the
     real value it names -- on EITHER language's text, unlike
@@ -632,6 +683,12 @@ def check_numbers(
     # its correct French rendering ("11 septembre") never carries the "9"
     # at all. See _forgive_nine_eleven's own docstring.
     missing = _forgive_nine_eleven(source, missing)
+
+    # "1356 to 58" -> the source's bare 58 is not dropped once the target
+    # writes 1358. Runs on the multiset, BEFORE the by-value dedupe below,
+    # so it consumes one 58 per range and a separate dropped 58 elsewhere
+    # still survives to be reported. See _forgive_elided_year_expansions.
+    missing = _forgive_elided_year_expansions(source, missing, set(target_values))
 
     # A figure the source spelled out is not an invented figure. See
     # spelled_number_values: this forgives, it never accuses.
