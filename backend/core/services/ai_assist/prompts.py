@@ -214,7 +214,24 @@ Fidelity rules, which apply to every subject equally:
    first, a space as the thousands separator, and the currency symbol
    last -- "1 000 $", never "$1,000". A real run correctly produced
    "5 143 $" in one paragraph and then left "$60,000", "$5,500" and
-   "$27,500" in raw English format later in the same document.""",
+   "$27,500" in raw English format later in the same document.
+16. WRITE IT THE WAY A NATIVE PROFESSIONAL WOULD, NOT THE WAY A TRANSLATION
+   ENGINE WOULD. Human reviewers penalise a draft that reads as literal or
+   machine-translated even when every word is correct. Fix word order,
+   agreement, tense and register; vary connectors rather than reaching for
+   the same one every time; and do not carry over a false cognate (a
+   word that looks like its English cousin but is not its usual
+   translation -- French "opportunité" for a plain "opportunity" reads as
+   an anglicism where "occasion" or "possibilité" is the ordinary word).
+   Where two correct words exist, prefer the plainer, more common one.
+17. USE THE DOCUMENT'S OWN COUNTRY'S VERSION OF {target_language}.
+   {target_language} is not one interchangeable language: where the source
+   makes its country or jurisdiction evident (Canadian institutions,
+   provincial courts and statutes; French, Belgian or Swiss ones), use
+   that place's own established terminology and conventions, because a
+   generic or wrong-country rendering reads as an error even when every
+   word is otherwise correct. Where the source gives no clear signal,
+   use standard international {target_language}.""",
 
     CUSTOM: """\
 Task: apply the user's instruction below to each segment's text.

@@ -4455,6 +4455,19 @@ class AIAssistPromptTestCase(TestCase):
         self.assertIn('1 000 $', task)
         self.assertIn('$1,000', task)
 
+    def test_translate_asks_for_native_fluency_and_the_documents_own_country(self):
+        """Human reviewers penalise translationese, and Canadian versus
+        European French is a real reviewer concern. Both were only asked of
+        the worker's polish prompt; the draft itself had neither, so it
+        started generic. The cache version must move with the wording."""
+        from core.services.ai_assist import prompts
+        from core.services.ai_assist.hashing import PROMPT_VERSIONS
+        task = prompts.task_description('translate', 'French')
+        self.assertIn('NATIVE PROFESSIONAL', task)
+        self.assertIn("COUNTRY'S VERSION OF French", task)
+        self.assertNotIn('{target_language}', task)
+        self.assertEqual(PROMPT_VERSIONS['translate'], 'v6')
+
     def test_academic_uses_the_same_simple_versus_complex_judgment_as_translate(self):
         """
         Consistency, on request: the ACADEMIC operation used to convert any

@@ -44,6 +44,13 @@ __all__ = [
 # quality layer instead. Every v1 translate cache entry was produced under
 # the old wording and must not be reused.
 #
+# 'translate' is at v6 because the draft prompt had no instruction to write
+# natively (translationese, false cognates) or to follow the document's own
+# country's French (Canadian vs European) -- both were only asked of the
+# worker's polish prompt, after the draft was already generic. Rules 13-15
+# (titles, short words, currency) had also been added without a bump, so
+# this clears entries produced without those too.
+#
 # 'translate' is at v5 because a FAILED review named two more causes: a
 # sudden switch between familiar and polite address, and English idioms
 # rendered word-for-word ("no contest" -> "indiscutable"). Every v4 entry
@@ -64,7 +71,7 @@ __all__ = [
 PROMPT_VERSIONS = {
     'correct': 'v1',
     'academic': 'v1',
-    'translate': 'v5',
+    'translate': 'v6',
     'improve': 'v1',
     'custom': 'v1',
 }
