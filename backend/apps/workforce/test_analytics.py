@@ -115,6 +115,43 @@ class PerformanceReportTestCase(APITestCase):
 
         self.assertEqual(row['approved'], 1)
 
+    # -- awaiting review ----------------------------------------------- #
+
+    def test_awaiting_review_counts_submitted_tasks_per_worker_and_in_total(self):
+        """The admin used to see only what the tasker's own screen hid: a
+        tasker sees "Awaiting review" (status submitted); the report had no
+        such number at all."""
+        self._submitted(days=1)
+        self._submitted(days=2)
+        self._submitted(days=2, approved_at=days_ago(1), status='approved')
+
+        response = self.client.get(self.url)
+
+        row = next(r for r in response.data['workers'] if r['worker_code'] == 'W-01')
+        self.assertEqual(row['awaiting_review'], 2)
+        self.assertEqual(response.data['totals']['awaiting_review'], 2)
+
+    def test_awaiting_review_ignores_the_date_range(self):
+        """It is a live state: a task submitted 200 days ago and still
+        undecided is awaiting review today, however narrow the range."""
+        self._submitted(days=200)
+
+        row = self._row_for('W-01')
+
+        self.assertEqual(row['submitted'], 0)
+        self.assertEqual(row['awaiting_review'], 1)
+
+    def test_the_overview_reports_awaiting_review_per_worker(self):
+        self._submitted(days=1)
+        self._submitted(days=1, approved_at=days_ago(1), status='approved')
+
+        response = self.client.get('/api/v1/workforce/stats/')
+
+        self.assertEqual(response.status_code, 200)
+        row = next(w for w in response.data['workers'] if w['worker_code'] == 'W-01')
+        self.assertEqual(row['awaiting_review'], 1)
+        self.assertEqual(response.data['totals']['by_status']['submitted'], 1)
+
     # -- input handling ------------------------------------------------ #
 
     def test_a_malformed_date_is_a_400_with_a_readable_message(self):

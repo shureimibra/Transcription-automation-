@@ -171,6 +171,7 @@ class WorkforcePerformanceView(views.APIView):
                 'approved': approved,
                 'rejected': rejected,
                 'decided': decided,
+                'awaiting_review': Task.objects.filter(status=states.SUBMITTED).count(),
                 'approval_rate': round(approved / decided, 4) if decided else None,
                 'rejection_rate': round(rejected / decided, 4) if decided else None,
                 'created': Task.objects.filter(
@@ -209,6 +210,10 @@ class WorkforcePerformanceView(views.APIView):
             'approval_rate': round(approved / decided, 4) if decided else None,
             'rejection_rate': round(rejected / decided, 4) if decided else None,
             'held_now': owned.filter(status__in=states.WORKER_HELD_STATES).count(),
+            # A LIVE STATE, NOT A RANGE FIGURE: a task submitted before the
+            # selected range is still awaiting a verdict now. This is the
+            # same status the worker sees as "Awaiting review".
+            'awaiting_review': owned.filter(status=states.SUBMITTED).count(),
             # Claim to submission: the figure the 15-minutes-per-20-minute
             # target is measured against.
             'median_handling_seconds': _median(handling),

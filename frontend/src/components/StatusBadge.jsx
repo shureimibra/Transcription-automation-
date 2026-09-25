@@ -14,7 +14,7 @@ const STATUS = {
   in_progress:     { label: 'In progress',     dot: 'bg-status-progress',  text: 'text-status-progress',  ring: 'ring-status-progress/30' },
   review:          { label: 'In review',       dot: 'bg-status-review',    text: 'text-status-review',    ring: 'ring-status-review/30' },
   ready_to_submit: { label: 'Ready to submit', dot: 'bg-status-ready',     text: 'text-status-ready',     ring: 'ring-status-ready/30' },
-  submitted:       { label: 'Submitted',       dot: 'bg-status-submitted', text: 'text-status-submitted', ring: 'ring-status-submitted/30' },
+  submitted:       { label: 'Awaiting review',      dot: 'bg-status-submitted', text: 'text-status-submitted', ring: 'ring-status-submitted/30' },
   approved:        { label: 'Approved',        dot: 'bg-status-approved',  text: 'text-status-approved',  ring: 'ring-status-approved/30' },
   rejected:        { label: 'Rejected',        dot: 'bg-status-rejected',  text: 'text-status-rejected',  ring: 'ring-status-rejected/30' },
   failed:          { label: 'Failed',          dot: 'bg-status-failed',    text: 'text-status-failed',    ring: 'ring-status-failed/30' },

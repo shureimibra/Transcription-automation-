@@ -619,6 +619,7 @@ class WorkforceStatsView(views.APIView):
                 'status': profile.status,
                 'held': owned.filter(status__in=states.WORKER_HELD_STATES).count(),
                 'submitted': owned.filter(submitted_at__isnull=False).count(),
+                'awaiting_review': owned.filter(status=states.SUBMITTED).count(),
                 'approved': owned.filter(status=states.APPROVED).count(),
                 'rejected': owned.filter(status=states.REJECTED).count(),
                 'last_activity_at': profile.last_activity_at,

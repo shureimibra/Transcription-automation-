@@ -66,4 +66,25 @@ describe('admin performance report', () => {
 
     expect(screen.getByText('No rejections in this range')).toBeInTheDocument();
   });
+
+  it('shows how many tasks each worker has awaiting review, as the worker sees it', async () => {
+    await renderPage({
+      totals: {
+        submitted: 10, approved: 3, rejected: 3, decided: 6, awaiting_review: 4,
+        approval_rate: 0.5, rejection_rate: 0.5, created: 12,
+        avg_submitted_per_day: 0.3, daily_target: 90, pass_rate_target: 0.92,
+      },
+      workers: [{
+        worker_code: 'W-01', display_name: 'nasra', status: 'active',
+        submitted: 10, approved: 3, rejected: 3, awaiting_review: 4, decided: 6,
+        approval_rate: 0.5, rejection_rate: 0.5, held_now: 0,
+        median_handling_seconds: 1380, median_realtime_factor: 1.23,
+      }],
+    });
+
+    // The column header, the overall stat, and this worker's own figure.
+    expect(screen.getAllByText('Awaiting review').length).toBeGreaterThanOrEqual(2);
+    const row = screen.getByText('nasra').closest('tr');
+    expect(row).toHaveTextContent('4');
+  });
 });

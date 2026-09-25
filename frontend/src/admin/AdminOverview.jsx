@@ -124,7 +124,7 @@ export default function AdminOverview() {
 
       {error && <ErrorState message={error.message} onRetry={() => refresh()} />}
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         <Stat label="Tasks" value={totals?.tasks ?? null} />
         <Stat
           label="Waiting to be claimed"
@@ -139,6 +139,11 @@ export default function AdminOverview() {
               ? (byStatus.review || 0) + (byStatus.ready_to_submit || 0)
               : null
           }
+        />
+        <Stat
+          label="Awaiting review"
+          value={totals ? (byStatus.submitted || 0) : null}
+          hint="sent, no verdict yet"
         />
       </div>
 
@@ -183,6 +188,7 @@ export default function AdminOverview() {
                     <th scope="col" className="px-4 py-2 font-medium">Worker</th>
                     <th scope="col" className="px-2 py-2 text-right font-medium">Holding</th>
                     <th scope="col" className="px-2 py-2 text-right font-medium">Submitted</th>
+                    <th scope="col" className="px-2 py-2 text-right font-medium">Awaiting review</th>
                     <th scope="col" className="px-4 py-2 text-right font-medium">Last seen</th>
                   </tr>
                 </thead>
@@ -195,6 +201,7 @@ export default function AdminOverview() {
                       </td>
                       <td className="px-2 py-2 text-right text-xs tabular-nums text-ink">{w.held}</td>
                       <td className="px-2 py-2 text-right text-xs tabular-nums text-ink-dim">{w.submitted}</td>
+                      <td className="px-2 py-2 text-right text-xs tabular-nums text-ink">{w.awaiting_review ?? 0}</td>
                       <td className="px-4 py-2 text-right text-2xs text-ink-mute">
                         {w.last_activity_at ? relative(w.last_activity_at) : 'never'}
                       </td>

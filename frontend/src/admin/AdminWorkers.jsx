@@ -136,7 +136,7 @@ export default function AdminWorkers() {
       {actionError && <ErrorState message={actionError} onRetry={() => setActionError('')} />}
       <LiveRegion message={notice} />
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         <Stat
           label="Submitted / day"
           value={totals ? totals.avg_submitted_per_day : null}
@@ -145,6 +145,11 @@ export default function AdminWorkers() {
         />
         <Stat label="Approved" value={totals?.approved ?? null} tone="good" />
         <Stat label="Rejected" value={totals?.rejected ?? null} tone={totals?.rejected ? 'bad' : 'default'} />
+        <Stat
+          label="Awaiting review"
+          value={totals?.awaiting_review ?? null}
+          hint="now, whatever the range"
+        />
         <Stat
           label="Approval rate"
           value={totals ? percent(totals.approval_rate) : null}
@@ -174,6 +179,9 @@ export default function AdminWorkers() {
                   <th scope="col" className="px-2 py-2 text-right font-medium">Submitted</th>
                   <th scope="col" className="px-2 py-2 text-right font-medium">Approved</th>
                   <th scope="col" className="px-2 py-2 text-right font-medium">Rejected</th>
+                  <th scope="col" className="px-2 py-2 text-right font-medium" title="Submitted and still waiting for a verdict, right now">
+                    Awaiting review
+                  </th>
                   <th scope="col" className="px-2 py-2 text-right font-medium">Approval</th>
                   <th scope="col" className="px-2 py-2 text-right font-medium" title="Median time from claiming a task to submitting it">
                     Median turnaround
@@ -199,6 +207,7 @@ export default function AdminWorkers() {
                     <td className="px-2 py-2 text-right text-xs tabular-nums text-ink">{row.submitted}</td>
                     <td className="px-2 py-2 text-right text-xs tabular-nums text-status-approved">{row.approved}</td>
                     <td className="px-2 py-2 text-right text-xs tabular-nums text-status-rejected">{row.rejected}</td>
+                    <td className="px-2 py-2 text-right text-xs tabular-nums text-ink">{row.awaiting_review ?? 0}</td>
                     <td className="px-2 py-2 text-right text-xs tabular-nums text-ink">
                       {percent(row.approval_rate) ?? <span className="text-ink-mute">—</span>}
                     </td>
