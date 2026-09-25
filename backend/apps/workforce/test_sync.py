@@ -507,3 +507,46 @@ class UndeliveredSubmissionTestCase(TestCase):
 
         task.refresh_from_db()
         self.assertEqual(task.status, states.CLAIMED)
+
+
+class DeadlineParsingTestCase(TestCase):
+    """
+    FROM A REAL LIVE TASK: Eagle's transcription site sent
+    "2026-09-25 17:32:56" for a task claimed at 13:32:57 UTC. Read as UTC
+    that is 240 minutes on the worker's clock; it is Eagle's local time,
+    UTC+3, which is the 60 minutes the platform actually allows. Translation
+    sends an explicit "Z" and was always right.
+    """
+
+    def test_a_zoneless_transcription_deadline_is_eagles_local_time(self):
+        from .sync import _parse_deadline
+        claimed = dt.datetime(2026, 9, 25, 13, 32, 57, tzinfo=dt.timezone.utc)
+
+        deadline = _parse_deadline('2026-09-25 17:32:56', TRANSCRIPTION)
+
+        minutes = (deadline - claimed).total_seconds() / 60
+        self.assertAlmostEqual(minutes, 60, delta=1)
+
+    def test_a_translation_deadline_with_a_zone_is_unchanged(self):
+        from .sync import _parse_deadline
+        deadline = _parse_deadline('2026-09-24T00:00:00Z', TRANSLATION)
+
+        self.assertEqual(deadline.isoformat(), '2026-09-24T00:00:00+00:00')
+
+    def test_a_transcription_deadline_that_carries_a_zone_is_left_alone(self):
+        from .sync import _parse_deadline
+        deadline = _parse_deadline('2026-09-25T14:32:56+00:00', TRANSCRIPTION)
+
+        self.assertEqual(deadline.isoformat(), '2026-09-25T14:32:56+00:00')
+
+    def test_unset_deadlines_are_still_none(self):
+        from .sync import _parse_deadline
+        for value in ('None', '', None, 'null', '-'):
+            self.assertIsNone(_parse_deadline(value, TRANSCRIPTION))
+
+    def test_the_offset_is_a_setting(self):
+        from django.test import override_settings
+        from .sync import _parse_deadline
+        with override_settings(EAGLE_TRANSCRIPTION_UTC_OFFSET_HOURS=0):
+            deadline = _parse_deadline('2026-09-25 17:32:56', TRANSCRIPTION)
+        self.assertEqual(deadline.isoformat(), '2026-09-25T17:32:56+00:00')

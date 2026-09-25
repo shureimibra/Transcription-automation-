@@ -383,15 +383,37 @@ def _flag_undelivered(product: str, seen_ids: set, report) -> int:
     return count
 
 
-def _parse_deadline(value):
-    """Eagle's deadline as a datetime, or None for anything unusable."""
+def _transcription_local_zone():
+    """The zone Eagle's transcription site writes its bare timestamps in.
+    A fixed offset, not a named zone: it needs no tz database, and the
+    platform has been observed to keep one offset year-round."""
+    from django.conf import settings
+    hours = getattr(settings, 'EAGLE_TRANSCRIPTION_UTC_OFFSET_HOURS', 3)
+    return dt.timezone(dt.timedelta(hours=float(hours)))
+
+
+def _parse_deadline(value, product=''):
+    """
+    Eagle's deadline as a datetime, or None for anything unusable.
+
+    A TIMESTAMP WITH NO ZONE IS NOT UTC. Translation sends
+    "2026-09-24T00:00:00Z", which parses unambiguously. Transcription sends
+    "2026-09-25 17:32:56" -- Eagle's own local time, three hours ahead of
+    UTC. Reading that as UTC put every transcription deadline exactly three
+    hours late (240 minutes on the worker's clock instead of 60), while
+    translation, which carries its zone, was correct.
+    """
     text = str(value or '').strip()
     if not text or text.lower() in ('none', 'null', '-'):
         return None
     parsed = parse_datetime(text)
     if parsed is None:
         return None
-    return parsed if timezone.is_aware(parsed) else timezone.make_aware(parsed)
+    if timezone.is_aware(parsed):
+        return parsed
+    if product == TRANSCRIPTION:
+        return timezone.make_aware(parsed, _transcription_local_zone())
+    return timezone.make_aware(parsed)
 
 def _upsert(external, product: str) -> bool:
     """
@@ -417,7 +439,7 @@ def _upsert(external, product: str) -> bool:
         # PARSED HERE, NOT TRUSTED RAW. Eagle sends 'None' as a literal
         # string when it has not set a deadline yet, and a DateTimeField
         # handed that raises rather than storing null.
-        'deadline_at': _parse_deadline(external.deadline_at),
+        'deadline_at': _parse_deadline(external.deadline_at, product),
     }
 
     with transaction.atomic():

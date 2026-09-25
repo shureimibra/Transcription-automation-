@@ -426,6 +426,13 @@ if _RUNNING_TESTS:
 EAGLE_TRANSCRIPTION_STANDARD = os.environ.get(
     'EAGLE_TRANSCRIPTION_STANDARD', 'edited_verbatim')
 
+# Eagle's transcription site writes task deadlines as a bare local time
+# ("2026-09-25 17:32:56", no zone). Observed: exactly claim + 60 minutes +
+# 3 hours, so its clock is UTC+3. Only used to read that zone-less string;
+# translation sends an explicit "Z" and never needs it.
+EAGLE_TRANSCRIPTION_UTC_OFFSET_HOURS = float(os.environ.get(
+    'EAGLE_TRANSCRIPTION_UTC_OFFSET_HOURS', '3'))
+
 # Which quality gate runs over the warmed transcript. 'eagle_web' is the
 # zero-tolerance profile: it refuses on MEDIUM findings and will not sign
 # off on a local-model fallback, which is what "ready to submit" has to mean

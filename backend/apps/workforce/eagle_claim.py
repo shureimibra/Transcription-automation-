@@ -286,7 +286,8 @@ def claim_for_worker(task_id, worker: WorkerProfile, actor, service=None) -> Tas
         # sync parses. Parsed the same way here for the same reason: Eagle
         # sends the literal string 'None' rather than a JSON null when it
         # has not set one.
-        deadline_at = _parse_deadline((result or {}).get('deadline_at'))
+        deadline_at = _parse_deadline(
+            (result or {}).get('deadline_at'), task.external_source)
 
         with transaction.atomic():
             claimed = services.claim_task(
