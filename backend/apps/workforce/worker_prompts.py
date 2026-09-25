@@ -348,7 +348,7 @@ can answer, and you were never given the audio. In that case:
 - After the full translation, add one line reading exactly
   VERIFY AGAINST AUDIO: followed by each such spot, one per line, in
   this exact shape:
-  "<the {source} phrase, quoted exactly>" -- <why you were unsure>
+  "<the {source} phrase, quoted exactly>" -- <why you were unsure>. Used: <what you put in the translation for it>
   The quoted part must be copied character-for-character from the
   {source} text above -- not paraphrased, not translated, not
   reworded, and not wrapped in any other formatting (no backticks, no
@@ -357,6 +357,12 @@ can answer, and you were never given the audio. In that case:
   worker straight to the right spot in the audio; a phrase that does
   not appear verbatim in the {source} you were given cannot be found
   there. Write NONE if there is nothing to flag.
+  EVERY line carries both parts after the "--" (why you were unsure, and
+  what you used); a bare quoted phrase is not acceptable. And WHEN IN
+  DOUBT, LIST IT: any spot where you replaced what the source literally
+  says with words you inferred it was meant to say belongs here, even if
+  you feel fairly sure. A line costs the worker seconds to check; a
+  confident guess nobody knows about can cost the task.
 This is not permission to stop researching or correcting -- keep doing
 both, as instructed above. It is a limit on confidence: a plausible
 research match is not the same as a confirmed one, and only a human who
@@ -441,7 +447,7 @@ can answer, and you were never given the audio. In that case:
 - After the full translation, add one line reading exactly
   VERIFY AGAINST AUDIO: followed by each such spot, one per line, in
   this exact shape:
-  "<the {source} phrase, quoted exactly>" -- <why you were unsure>
+  "<the {source} phrase, quoted exactly>" -- <why you were unsure>. Used: <what you put in the translation for it>
   The quoted part must be copied character-for-character from the
   {source} text below -- not paraphrased, not translated, not
   reworded, and not wrapped in any other formatting (no backticks, no
@@ -450,6 +456,12 @@ can answer, and you were never given the audio. In that case:
   worker straight to the right spot in the audio; a phrase that does
   not appear verbatim in the {source} you were given cannot be found
   there. Write NONE if there is nothing to flag.
+  EVERY line carries both parts after the "--" (why you were unsure, and
+  what you used); a bare quoted phrase is not acceptable. And WHEN IN
+  DOUBT, LIST IT: any spot where you replaced what the source literally
+  says with words you inferred it was meant to say belongs here, even if
+  you feel fairly sure. A line costs the worker seconds to check; a
+  confident guess nobody knows about can cost the task.
 This is not permission to stop researching or correcting -- keep doing
 both, as instructed above. It is a limit on confidence: a plausible
 research match is not the same as a confirmed one, and only a human who

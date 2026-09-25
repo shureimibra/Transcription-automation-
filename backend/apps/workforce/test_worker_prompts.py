@@ -459,6 +459,24 @@ class WorkerPromptTestCase(TestCase):
             'ANY SPOT WHERE THE SOURCE ITSELF IS GARBLED OR\nINCOMPLETE',
             translate)
 
+    def test_verify_lines_must_carry_a_reason_and_what_was_used(self):
+        """
+        FROM TWO RUNS OF THE SAME PROMPT ON THE SAME TASK: one flagged 4
+        spots, the other 7, overlapping on only 2 -- each silently fixed
+        spots the other flagged ("In pressure" -> Prussia, "guerrero
+        trance" -> guerre a outrance). The judgment is the model's, so it
+        cannot be made identical, but a bare quoted phrase or a silent
+        confident fix can be discouraged: every line states why and what
+        was used, and an inferred replacement is listed even when the model
+        feels fairly sure.
+        """
+        for name in ('polish', 'translate'):
+            with self.subTest(prompt=name):
+                text = self.prompts[name]
+                self.assertIn('Used: <what you put in the translation for it>', text)
+                self.assertIn('a bare quoted phrase is not acceptable', text)
+                self.assertIn('WHEN IN\n  DOUBT, LIST IT', text)
+
     def test_the_translate_prompt_reply_shape_matches_polish(self):
         """
         Same reasoning as test_the_reply_shape_marks_off_what_is_and_is_not_
