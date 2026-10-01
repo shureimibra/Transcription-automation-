@@ -495,6 +495,17 @@ const SECTIONS = [
             missed. This five-point scan is the actual safety net for
             everything it does not cover.
           </li>
+          <li>
+            <strong className="text-ink">Give the opening paragraphs a
+            second, careful mechanical pass</strong> — basic spelling,
+            agreement, and punctuation, not meaning. One experienced
+            trainer coaching new taskers teaches running a French grammar
+            checker (Grammarly or similar) over the document specifically
+            for this, with the most attention on the first five
+            paragraphs. Nothing here confirms that is how Eagle's own
+            review works, but it costs little and the opening of a
+            document is where a small mechanical slip is most visible.
+          </li>
         </Ol>
       </>
     ),

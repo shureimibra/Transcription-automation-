@@ -566,6 +566,22 @@ class WorkerPromptTestCase(TestCase):
             with self.subTest(prompt=name):
                 self.assertIn('EDIT RESTRAINT IS NOT A REASON', text)
 
+    def test_every_prompt_asks_for_a_dedicated_grammar_checker_pass(self):
+        """
+        FROM A TRAINER'S OWN TAUGHT TECHNIQUE: coaching a group of taskers,
+        he said he relies on a grammar checker (Grammarly) most of all to
+        correct the French, with particular attention to the opening
+        paragraphs. The assistant doing the polish/translate/review pass
+        should do the same check itself, as its own explicit step, not
+        leave gender/number agreement and conjugation to be caught only
+        incidentally by the fluency rule.
+        """
+        for name, text in self.prompts.items():
+            with self.subTest(prompt=name):
+                self.assertIn('DEDICATED GRAMMAR\n   CHECKER WOULD', text)
+                self.assertIn('Gender and number agreement', text)
+                self.assertIn('OPENING of the document', text)
+
     def test_every_prompt_locks_one_word_for_a_list_of_legal_elements(self):
         """FROM THE EMPIRICAL AUDIT (v3): rotating between "critères",
         "facteurs", "exigences" and "éléments" for the same list of legal

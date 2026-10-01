@@ -255,6 +255,15 @@ WHAT TO FIX:
    every other rule in this prompt but still says something subtly
    different from the source because it was translated word-for-word
    instead of by collocation, fix it.
+1g. CHECK BASIC {target} GRAMMATICAL CORRECTNESS THE WAY A DEDICATED GRAMMAR
+   CHECKER WOULD, SEPARATELY FROM WHETHER THE SENTENCE READS NATURALLY.
+   Gender and number agreement (adjective, past participle, article), verb
+   conjugation and tense, and spelling are easy to get subtly wrong even in
+   a translation that is otherwise faithful and fluent -- proofread for
+   these specifically as their own pass, not only for fluency and meaning.
+   Give the OPENING of the document particular attention: a mechanical
+   slip near the start is the first thing any reader, human or automated,
+   actually sees.
 2. Terminology consistency. Once you choose a {target} term for a recurring
    concept, use that same term everywhere. Never render one source term
    three different ways. THIS APPLIES WITH EXTRA FORCE TO A LIST OF LEGAL
