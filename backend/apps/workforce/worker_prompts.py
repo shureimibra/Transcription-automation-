@@ -158,6 +158,24 @@ WHAT YOU MUST NOT DO — these cause automatic rejection:
   each has an established phrase in {target} usage; a close paraphrase of
   your own construction reads as an error even when the meaning survives.
   A reviewer rejected a real submission partly for exactly this.
+  THIS INCLUDES A NATIONAL HONOUR OR ORDER, which must read as a complete
+  grammatical sentence observing that country's own protocol, not a bare
+  participial fragment copied from the source's own syntax: "she was
+  invested in 2006 as an Officer of the Order of Canada" becomes "Elle a
+  été reçue officière de l'Ordre du Canada en 2006" (or "...nommée
+  officière..."), never the fragment "Investie en 2006 comme officier...",
+  which is not a sentence in French at all.
+- NON-FICTION DOES NOT BORROW FICTION'S VOCABULARY. In a historical,
+  biographical, legal or academic document, a real person -- a historical
+  figure, a letter writer, a witness -- is never "un protagoniste" or "une
+  protagoniste" in French: that word names a character in a novel or a
+  play. Use "les personnes", "les figures", or a description of what the
+  document actually does ("les femmes dont l'auteur retrace le parcours").
+  The same caution applies to a scholar's own abilities: "political and
+  historiographical gifts" describing a historian's mind is "de
+  remarquables qualités d'analyse politique et historiographique", not
+  "des dons politiques" -- which in French reads as an elected
+  politician's talents, not a historian's intellectual range.
 - NEVER COIN A {target} WORD THAT DOES NOT ALREADY EXIST, even when it
   looks like a plausible derivation from a real one. If you are not
   certain a word is standard, established {target} vocabulary, use a real
@@ -209,9 +227,43 @@ WHAT TO FIX:
    reach for the elevated option, prefer the plainer, more common word --
    save literary vocabulary for places where the source's own register
    clearly calls for it.
+1e. A LITERAL RENDERING CAN BE CORRECT WORD-FOR-WORD AND STILL NOT BE HOW
+   {target} ACTUALLY SAYS IT. Some patterns to watch for specifically:
+   - English often pairs two words of overlapping praise for rhetorical
+     effect ("a celebrated historian with a global reputation"); {target}
+     usually says this once, with one strong word, not twice -- "une
+     historienne de renommée mondiale", not the doubled "une historienne
+     de renom, jouissant d'une réputation internationale".
+   - "The price women paid for empire" is "le prix que les femmes ont payé
+     au service de l'Empire", not the literal "pour l'Empire" -- the
+     source means in service of, not as a cost charged to, the Empire.
+   - A casual rhetorical question ("Why should I care? What difference
+     does it make?") gets the ordinary {target} idiom for it ("Quelle
+     importance cela a-t-il ?" / "Pourquoi devrais-je m'en soucier ?"),
+     not a word-for-word match ("Qu'est-ce que ça peut faire ?") that no
+     French speaker would actually reach for there.
+   - Watch compound professional titles for the natural word order: "movie
+     star agent" is "agent d'une vedette de cinéma", not the source's own
+     noun-stacking order carried straight across ("agent de star de
+     cinéma").
+1f. EDIT RESTRAINT IS NOT A REASON TO LEAVE A DECEPTIVE CALQUE STANDING.
+   Existing {target} text that already reads naturally should not be
+   rewritten just to sound different -- but a calque that LOOKS like
+   correct {target} while quietly saying the wrong thing is not "already
+   acceptable {target}", it is the exact error rule 1 and 1b exist to
+   catch, and restraint is never a reason to leave it. If a phrase passes
+   every other rule in this prompt but still says something subtly
+   different from the source because it was translated word-for-word
+   instead of by collocation, fix it.
 2. Terminology consistency. Once you choose a {target} term for a recurring
    concept, use that same term everywhere. Never render one source term
-   three different ways.
+   three different ways. THIS APPLIES WITH EXTRA FORCE TO A LIST OF LEGAL
+   CONDITIONS, TESTS OR ELEMENTS ("three requirements", "the elements of
+   the claim"): pick one {target} word for the set -- "conditions" or
+   "éléments" -- and use only that word for it everywhere in the document.
+   Rotating between "critères", "facteurs", "exigences" and "éléments" for
+   the same list reads as several different legal tests, not stylistic
+   variety.
 3. Register, and ONE FORM OF ADDRESS THROUGHOUT. Match the source: formal
    stays formal, conversational stays natural rather than stiff. Where
    {target} distinguishes familiar from polite address (French tu/vous,
@@ -255,6 +307,37 @@ WHAT TO FIX:
    terminology got both of these right, and a generic guess in the same
    spots got them wrong. Where the source gives no clear signal of
    jurisdiction, standard international {target} is the safe default.
+4c. A LEGAL OR PROFESSIONAL COLLOCATION THAT SOUNDS RIGHT CAN STILL BE A
+   DECEPTIVE CALQUE -- a correct {target} word used in a construction no
+   {target} professional would actually write. In French legal and
+   academic writing, for example:
+   - "practiced law" is "a exercé la profession d'avocat" or "a exercé
+     comme avocat", NEVER "a exercé le droit" or "a pratiqué le droit".
+   - "deliver / give a lecture or speech" is "prononcer une conférence /
+     un discours" or "est prononcée par", NEVER "donner une conférence"
+     or "est donnée par" in a formal academic register.
+   - Acting "on behalf of" a principal in an agency relationship is "pour
+     le compte du mandant" or "au nom et pour le compte de", NEVER "en
+     faveur de" -- reserve "en faveur de" for advocacy or support for a
+     cause, not for acting as someone's legal agent.
+   - A body of law or a legal doctrine does not "stipuler" -- only a
+     contract or a contractual clause stipulates. A statute or a line of
+     cases "prévoit", "dispose", or "indique".
+   - An ongoing agency relationship is not "être engagé dans une relation
+     de mandat"; say "être partie à un mandat" or "lorsqu'une relation de
+     mandat existe".
+   - A right to direct how work gets done is "un pouvoir général de
+     direction" or "un lien de subordination", NEVER a literal construction
+     like "la capacité générale d'orienter ce qu'il essaie d'accomplir".
+4d. A U.S. OR CANADIAN JUDICIAL CLERKSHIP IS NOT FRENCH DOMESTIC
+   "ASSISTANT DE JUSTICE". "Clerked for [a judge]" / "law clerk", in the
+   U.S. federal system, is "a été auxiliaire juridique auprès de..." (or
+   "juriste adjoint") -- never "assistant de justice", which in French
+   domestic practice names a part-time student intern, not the role a
+   federal clerkship actually is. Preserve the full official name of a
+   court rather than diluting it to a generic equivalent: "on the Ninth
+   Circuit" is "auprès de la Cour d'appel des États-Unis pour le neuvième
+   circuit", not a generic "cour d'appel fédérale".
 5. Cohesion. The source is a spoken transcript, so it may contain false
    starts, repetitions, and filler that survived translation. Remove them
    and join the sentences so the result reads as clean written {target}.
@@ -366,7 +449,12 @@ can answer, and you were never given the audio. In that case:
 This is not permission to stop researching or correcting -- keep doing
 both, as instructed above. It is a limit on confidence: a plausible
 research match is not the same as a confirmed one, and only a human who
-can actually listen closes that gap.
+can actually listen closes that gap. THIS INCLUDES AN INSTITUTION NAME
+MANGLED PAST RECOGNITION, not only a person's name: a real audit found a
+law school's actual name reduced by ASR to "Wampons for the Law" --
+inventing a clean-sounding institution name to fill that gap, however
+plausible, is exactly the invention this rule exists to stop. Flag it
+under VERIFY AGAINST AUDIO instead of silently supplying a guess.
 
 THE SAME LIMIT APPLIES TO WHAT A QUANTITY COVERS. If a single figure
 precedes a list of categories and the source itself does not settle
@@ -465,7 +553,12 @@ can answer, and you were never given the audio. In that case:
 This is not permission to stop researching or correcting -- keep doing
 both, as instructed above. It is a limit on confidence: a plausible
 research match is not the same as a confirmed one, and only a human who
-can actually listen closes that gap.
+can actually listen closes that gap. THIS INCLUDES AN INSTITUTION NAME
+MANGLED PAST RECOGNITION, not only a person's name: a real audit found a
+law school's actual name reduced by ASR to "Wampons for the Law" --
+inventing a clean-sounding institution name to fill that gap, however
+plausible, is exactly the invention this rule exists to stop. Flag it
+under VERIFY AGAINST AUDIO instead of silently supplying a guess.
 
 THE SAME LIMIT APPLIES TO WHAT A QUANTITY COVERS. If a single figure
 precedes a list of categories and the source itself does not settle
@@ -783,12 +876,40 @@ WHAT TO LOOK FOR, IN ORDER OF VALUE:
    term you recognize, especially where a name plainly belongs (introducing
    a person, citing a result, naming a place or an institution). If context
    nearby points to what the real name or term almost certainly is, say so.
+1b. AN ORDINARY, LOWERCASE, EVERYDAY-SOUNDING PHRASE CAN ALSO BE A
+   MISHEARD TECHNICAL TERM, not only a garbled capitalized name. Speech
+   recognition routinely replaces a specialized or uncommon word with a
+   sequence of common conversational words that merely sound similar --
+   the result reads as plausible English but makes no sense in a
+   technical, medical, legal or scientific lecture. Read for sentences
+   where ordinary words sit in a spot that plainly wants a domain term:
+   real confirmed examples include "yeast and fills" for "eosinophils",
+   "grid cells" for "dendritic cells", "mass cells" for "mast cells", and
+   "granular sites" for "granulocytes".
 2. The SAME name or term spelled two different wrong ways within this one
    document. That is a strong, self-contained sign of a mishearing even
    when you are not sure what the correct spelling is.
+2b. CORRUPTED CAPITALIZATION IS ITS OWN KIND OF DEFECT, separate from a
+   wrong name. Look for: stray capitals landing in the middle or at the
+   end of an ordinary word ("antIgEns" for "antigens"); a drug or generic
+   term that loses its correct lowercase form ("DuPillemab" for
+   "dupilumab"); an established abbreviation or receptor name left in the
+   wrong case (standard "LAG-3" or "TIM-3" written as "lag-3" / "Tim-3";
+   standard "IgE" written as "IGE"; standard "Th2" written as "TH2"); a
+   recognized journal or publication name left uncapitalized; and a
+   sentence that begins with a lowercase letter right after a period, a
+   question mark, or a new speaker turn.
 3. A sentence that does not quite parse, or a single word that does not
    fit its sentence, where a different, similar-sounding real word would
    read naturally in its place.
+3b. A GRAMMATICAL COLLISION IS OFTEN THE VISIBLE SCAR OF AN ASR SPLIT
+   ERROR, not a speaker's own mistake. Three patterns worth checking for
+   specifically: a plural noun misheard as singular so two verbs in the
+   same clause disagree ("the x is in the blue bars are means" wants
+   "the x's in the blue bars are means"); a possessive apostrophe dropped
+   so one noun reads as modifying the wrong thing ("the surrogates belief"
+   wants "the surrogate's belief"); and a structural preposition dropped
+   entirely ("communicating the ICU" wants "communicating in the ICU").
 4. Numbers: zero through nine should be spelled out as words, ten and
    above as figures -- except money, a time, a date, a percentage, a
    measurement, or an age, which are always figures regardless of size.
@@ -885,6 +1006,13 @@ WHAT NOT TO DO:
   garbled, or if it contradicts itself elsewhere in this same document.
 - Do not comment on writing style, word choice, or anything outside the
   seven things above.
+- Do not flag the platform's own export scaffolding as a transcript
+  defect. The document you are given opens with header lines ("Transcription
+  Job:", "Client:", "Transcribed By:", "Date:", "Audio Length:") and ends
+  with a line like "[END OF RECORDING --> ...]" -- the platform adds these
+  itself before rendering the document, they are not part of what the
+  speaker said, and your audit is about the spoken dialogue and speaker
+  turns only.
 
 For each thing you flag, give me exactly this and nothing else:
 
@@ -914,18 +1042,18 @@ If you find nothing at all, reply with the single word: CLEAN.
 #: General Guidelines.
 _STANDARD_NOTES = {
     'edited_verbatim': (
-        'flag every informal word you see. This document follows the '
+        'Flag every informal word you see. This document follows the '
         'edited verbatim (professional / academic) standard.'
     ),
     'strict_verbatim': (
-        'do NOT flag any of these here. This document follows the strict '
+        'Do NOT flag any of these here. This document follows the strict '
         'verbatim standard, which requires every filler, informal word and '
         'repetition to be preserved exactly as spoken -- removing one '
         'would itself be the defect.'
     ),
 }
 _STANDARD_NOTE_DEFAULT = (
-    'flag every informal word you see, unless you are told this document '
+    'Flag every informal word you see, unless you are told this document '
     'follows the strict verbatim standard, in which case leave all of '
     'them alone.'
 )

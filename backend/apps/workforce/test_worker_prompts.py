@@ -477,6 +477,110 @@ class WorkerPromptTestCase(TestCase):
                 self.assertIn('a bare quoted phrase is not acceptable', text)
                 self.assertIn('WHEN IN\n  DOUBT, LIST IT', text)
 
+    def test_every_prompt_requires_a_full_sentence_for_a_national_honour(self):
+        """
+        FROM THE EMPIRICAL AUDIT (v3): a real rejected translation left the
+        fragment "Investie en 2006 comme officier..." -- not a sentence in
+        French -- instead of the full, protocol-correct "Elle a été reçue
+        officière de l'Ordre du Canada en 2006." National honours get the
+        same fixed-wording treatment as a statute or a court, not a bare
+        participle copied from the source's own syntax.
+        """
+        for name, text in self.prompts.items():
+            with self.subTest(prompt=name):
+                self.assertIn('A NATIONAL HONOUR OR ORDER', text)
+                self.assertIn('Elle a', text)
+                self.assertIn('Investie en 2006 comme officier', text)
+
+    def test_every_prompt_bans_protagoniste_for_a_real_person(self):
+        """
+        FROM THE EMPIRICAL AUDIT (v3): "protagoniste" names a character in
+        a novel or play, not a real historical figure -- using it for one
+        in a non-fiction, biographical or academic document is a category
+        error, however fluent the sentence otherwise reads.
+        """
+        for name, text in self.prompts.items():
+            with self.subTest(prompt=name):
+                self.assertIn('protagoniste', text)
+                self.assertIn('NON-FICTION DOES NOT BORROW', text)
+                self.assertIn('des dons politiques', text)
+
+    def test_every_prompt_prefers_one_strong_word_over_doubled_praise(self):
+        """FROM THE EMPIRICAL AUDIT (v3): English pairs two words of
+        overlapping praise for rhetorical effect; French usually says it
+        once. A real draft doubled "une historienne de renom, jouissant
+        d'une réputation internationale" where "une historienne de
+        renommée mondiale" says the same thing once."""
+        for name, text in self.prompts.items():
+            with self.subTest(prompt=name):
+                self.assertIn('renommée mondiale', text)
+                self.assertIn('au service de l\'Empire', text)
+
+    def test_every_prompt_gives_the_natural_idiom_for_a_rhetorical_question(self):
+        """FROM THE EMPIRICAL AUDIT (v3): a word-for-word match for a
+        casual rhetorical question reads as translated even when every
+        word is correct."""
+        for name, text in self.prompts.items():
+            with self.subTest(prompt=name):
+                self.assertIn('Quelle\n     importance cela a-t-il', text)
+                self.assertIn('movie\n     star agent', text)
+
+    def test_every_prompt_clarifies_restraint_does_not_protect_a_calque(self):
+        """FROM THE EMPIRICAL AUDIT (v3): edit restraint protects faithful,
+        idiomatic French from arbitrary meddling -- it must not become a
+        reason to leave a deceptive calque standing because it superficially
+        reads as acceptable French."""
+        for name, text in self.prompts.items():
+            with self.subTest(prompt=name):
+                self.assertIn('EDIT RESTRAINT IS NOT A REASON', text)
+
+    def test_every_prompt_locks_one_word_for_a_list_of_legal_elements(self):
+        """FROM THE EMPIRICAL AUDIT (v3): rotating between "critères",
+        "facteurs", "exigences" and "éléments" for the same list of legal
+        conditions reads as several different legal tests, not stylistic
+        variety -- extends the existing terminology-consistency rule with
+        this specific, high-cost case."""
+        for name, text in self.prompts.items():
+            with self.subTest(prompt=name):
+                self.assertIn('LEGAL\n   CONDITIONS, TESTS OR ELEMENTS', text)
+                self.assertIn('critères', text)
+
+    def test_every_prompt_bans_the_specific_legal_calques_from_the_audit(self):
+        """FROM THE EMPIRICAL AUDIT (v3): six deceptive legal/professional
+        calques, each a correct French word used in a construction no
+        French professional would actually write."""
+        for name, text in self.prompts.items():
+            with self.subTest(prompt=name):
+                self.assertIn('a exercé la profession d\'avocat', text)
+                self.assertIn('a exercé le droit', text)
+                self.assertIn('est prononcée par', text)
+                self.assertIn('pour\n     le compte du mandant', text)
+                self.assertIn('stipuler', text)
+                self.assertIn('lien de subordination', text)
+
+    def test_every_prompt_gives_the_real_term_for_a_us_judicial_clerkship(self):
+        """FROM THE EMPIRICAL AUDIT (v3): "assistant de justice" names a
+        part-time student intern in French domestic practice, not a U.S.
+        federal judicial clerk -- a correct-looking word for the wrong
+        role."""
+        for name, text in self.prompts.items():
+            with self.subTest(prompt=name):
+                self.assertIn('auxiliaire juridique auprès de', text)
+                self.assertIn('assistant de justice', text)
+                self.assertIn('neuvième\n   circuit', text)
+
+    def test_every_prompt_flags_a_mangled_institution_name_not_just_a_person(self):
+        """FROM THE EMPIRICAL AUDIT (v3): a real audit found a law school's
+        actual name reduced by ASR to "Wampons for the Law" -- the existing
+        anti-invention mechanism already covered a garbled PERSON's name;
+        this is the same mechanism applied to an institution, made
+        explicit with its own real example. SCOPED TO translate/polish
+        ONLY: review has no VERIFY AGAINST AUDIO mechanism to extend --
+        it is a report-only prompt in a different four-bullet shape."""
+        for name in ('translate', 'polish'):
+            with self.subTest(prompt=name):
+                self.assertIn('Wampons for the Law', self.prompts[name])
+
     def test_the_translate_prompt_reply_shape_matches_polish(self):
         """
         Same reasoning as test_the_reply_shape_marks_off_what_is_and_is_not_
@@ -720,9 +824,99 @@ class TranscriptCheckPromptTestCase(TestCase):
         self.assertIn('ordinary verb', prompt)
         self.assertIn("'cause", prompt)
 
+    def test_it_looks_for_an_ordinary_phrase_masking_a_domain_term(self):
+        """
+        FROM THE EMPIRICAL AUDIT (v3), AND CONFIRMED LIVE ON A REAL
+        IMMUNOTHERAPY TRANSCRIPT IN THIS SAME SESSION: ASR routinely
+        replaces a specialized word with ordinary conversational words
+        that merely sound similar -- "yeast and fills" for "eosinophils",
+        "grid cells" for "dendritic cells", "mass cells" for "mast cells",
+        "granular sites" for "granulocytes". Item 1 alone (a garbled
+        CAPITALIZED word) never catches these, because none of them are
+        capitalized.
+        """
+        prompt = worker_prompts.build_transcript_check('edited_verbatim')
+        self.assertIn('yeast and fills', prompt)
+        self.assertIn('eosinophils', prompt)
+        self.assertIn('dendritic cells', prompt)
+        self.assertIn('granulocytes', prompt)
+
+    def test_it_looks_for_corrupted_capitalization_as_its_own_defect(self):
+        """
+        FROM A REAL TRANSCRIPTION REJECTED FOR "Capitalization errors":
+        stray internal capitals ("antIgEns"), a drug name losing its
+        correct lowercase form ("DuPillemab" for "dupilumab"), and
+        standard abbreviations left in the wrong case (LAG-3/TIM-3, IgE,
+        Th2) -- none of these are a WRONG NAME, so the existing
+        garbled-name rule never asked an assistant to look for them.
+        """
+        prompt = worker_prompts.build_transcript_check('edited_verbatim')
+        self.assertIn('antIgEns', prompt)
+        self.assertIn('DuPillemab', prompt)
+        self.assertIn('LAG-3', prompt)
+        self.assertIn('IgE', prompt)
+        self.assertIn('Th2', prompt)
+        self.assertIn('lowercase letter right after a period', prompt)
+
+    def test_it_looks_for_a_grammatical_collision_left_by_an_asr_split(self):
+        """FROM THE EMPIRICAL AUDIT (v3): a plural noun misheard as
+        singular, a dropped possessive apostrophe, and a dropped
+        preposition are all visible scars of an ASR mis-split, not a
+        speaker's own grammar mistake -- worked examples a worker's
+        assistant can pattern-match against."""
+        prompt = worker_prompts.build_transcript_check('edited_verbatim')
+        self.assertIn("the x's in the blue bars are means", prompt)
+        self.assertIn("the surrogate's belief", prompt)
+        self.assertIn('communicating in the ICU', prompt)
+
+    def test_it_does_not_flag_the_platforms_own_export_scaffolding(self):
+        """
+        FROM THE EMPIRICAL AUDIT (v3), AND CONFIRMED AGAINST THE REAL
+        RENDERED DOCUMENT: render_for_eagle (eagle_submit.py) prepends
+        "Transcription Job:" / "Client:" / "Transcribed By:" / "Date:" /
+        "Audio Length:" headers and appends "[END OF RECORDING --> ...]"
+        before a worker ever sees the document -- the same text a worker
+        pastes under this very prompt. None of that is spoken content, and
+        nothing before this explicitly told the assistant to leave it
+        alone.
+        """
+        prompt = worker_prompts.build_transcript_check('edited_verbatim')
+        self.assertIn('Transcription\n  Job:', prompt)
+        self.assertIn('END OF RECORDING', prompt)
+        self.assertIn('export scaffolding', prompt)
+
+    def test_the_two_proven_false_positive_shields_survive_the_merge(self):
+        """
+        ZERO-DROPOUT CHECK: the v3 audit's own item 7 only says
+        contractions are kept as spoken -- it does not carry the Archie
+        Cox's-is-a-possessive distinction or the "cause"-after-a-modal
+        exception, both written from real false positives. Merging v3's
+        new content must not silently lose either.
+        """
+        prompt = worker_prompts.build_transcript_check('edited_verbatim')
+        self.assertIn("Cox's office", prompt)
+        self.assertIn('possessive', prompt)
+        self.assertIn('ordinary verb', prompt)
+
+    def test_the_forgiveness_framing_for_special_characters_survives_the_merge(self):
+        """
+        ZERO-DROPOUT CHECK, AND A DELIBERATE REJECTION OF v3's OWN
+        REWORDING: v3's item 6 flips this into an AFFIRMATIVE instruction
+        to find and remove leading ellipses -- a different, narrower rule
+        in the opposite direction that risks a new false-positive class.
+        The original forgiveness framing (don't flag the correct ABSENCE
+        of an accent, diacritic or ellipsis as a defect) is kept as-is.
+        """
+        prompt = worker_prompts.build_transcript_check('edited_verbatim')
+        self.assertIn('an ellipsis', prompt)
+        self.assertIn(
+            'None of these is a\n   mishearing to flag when the transcript '
+            'already omits them', prompt)
+        self.assertNotIn('Eliminate leading ellipses', prompt)
+
     def test_edited_verbatim_is_told_to_flag_informal_words(self):
         prompt = worker_prompts.build_transcript_check('edited_verbatim')
-        self.assertIn('flag every informal word you see', prompt)
+        self.assertIn('Flag every informal word you see', prompt)
         self.assertIn('edited verbatim', prompt)
 
     def test_neither_standard_is_told_to_flag_contractions(self):
@@ -742,9 +936,9 @@ class TranscriptCheckPromptTestCase(TestCase):
         a strict-verbatim transcript would ask the worker to break the
         very standard the task is graded on."""
         prompt = worker_prompts.build_transcript_check('strict_verbatim')
-        self.assertIn('do NOT flag any of these', prompt)
+        self.assertIn('Do NOT flag any of these', prompt)
         self.assertIn('strict verbatim', prompt)
-        self.assertNotIn('flag every informal word you see', prompt)
+        self.assertNotIn('Flag every informal word you see', prompt)
 
     def test_yeah_is_named_as_the_correct_form_not_a_defect(self):
         """Eagle's Writing Rules table names "yeah" as the required
