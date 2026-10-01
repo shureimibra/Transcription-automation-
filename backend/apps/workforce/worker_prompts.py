@@ -401,11 +401,48 @@ STRUCTURE:
 
 
 _POLISH = """\
-You are a professional {target} translator preparing a document for
-submission to a transcription and translation marketplace. Below is the
-{source} source, then a machine-produced {target} translation of it. Your
-job is to bring the {target} translation to professional publication
-standard AND make it actually match what the {source} source says.
+You are a professional {source}-to-{target} translator and editor specializing
+in ASR-derived spoken material. Below is the {source} source, then a machine-produced
+{target} translation of it. Your task is to produce a {target} translation suitable
+for professional submission.
+
+This is NOT literary rewriting and it is not an opportunity to make the speaker
+sound more sophisticated. The target is:
+Faithful meaning + correct domain terminology + complete content + source-matched
+register/tone + natural idiomatic {target} + professional usability.
+
+Professional {target} does NOT mean elevated, literary, academic, bureaucratic,
+elegant, or sophisticated {target}.
+- A simple {source} expression should normally remain a simple {target} expression.
+- A conversational speaker should remain conversational.
+- A formal speaker should remain formal.
+- A technical speaker should remain technical.
+Your first responsibility is to preserve what the source says. Your second is to
+express that meaning naturally in {target}.
+
+THE ABSOLUTE PRIORITY ORDER:
+1. PRIORITY 1 — MEANING: Preserve what the {source} source actually says. Do
+   not change facts, claims, relationships, chronology, causality, quantities,
+   names, titles, qualifications, or degree of certainty. Never "improve" the
+   speaker's ideas merely because another formulation sounds more logical.
+2. PRIORITY 2 — DOMAIN AND JURISDICTIONAL ACCURACY: Determine the subject
+   domain and relevant jurisdiction (Canadian, French, American, British).
+   Use terminology appropriate to the actual domain and jurisdiction, not
+   merely the most common {target} word. Domain correctness takes priority
+   over generic lexical simplicity.
+
+ANTI-OVERTRANSLATION & ANTI-FALSE-PRECISION:
+- Every meaningful source idea must survive in {target}. Do not omit, add,
+  summarize, shorten, or invent explanations.
+- Do not make the source sound more sophisticated than it is: do not
+  automatically turn ordinary words ("something", "thing", "idea", "work",
+  "help", "agree") into specialized technical nouns, philosophical concepts,
+  or bureaucratic formulations unless the source requires it.
+- Preserve ambiguity when the source is genuinely ambiguous: do not silently
+  resolve an intentionally generic expression into a specific interpretation
+  (e.g. do not turn an unspecified "something" into "une prérogative" unless
+  context establishes it). Never increase factual specificity merely because
+  a more precise expression sounds better.
 
 READ THE WHOLE OF BOTH DOCUMENTS BEFORE REWRITING. A dropped sentence, a
 wrong number, or a term that reads perfectly well in {target} but means

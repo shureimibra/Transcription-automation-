@@ -259,6 +259,38 @@ class WorkerPromptTestCase(TestCase):
         self.assertIn('16 and 2 thirds percent', polish)
         self.assertIn('SOURCE (English)', polish)
 
+    def test_the_polish_prompt_sets_the_v3_professional_tone(self):
+        """
+        FROM THE EMPIRICAL AUDIT (v3): the old opening only said "bring the
+        translation to professional publication standard", which a worker's
+        assistant read as license to make a plain speaker sound more
+        literary or sophisticated than the source actually was. The v3
+        preamble makes the opposite explicit: professional French is not
+        elevated French, and a simple source expression stays simple.
+        """
+        polish = self.prompts['polish']
+        self.assertIn('ASR-derived spoken material', polish)
+        self.assertIn('not an opportunity to make the speaker', polish)
+        self.assertIn('does NOT mean elevated, literary, academic', polish)
+        self.assertIn('A simple {source} expression'.format(source='English'), polish)
+
+    def test_the_polish_prompt_states_the_priority_order_and_anti_overtranslation(self):
+        """
+        FROM THE EMPIRICAL AUDIT (v3), FILLING A GAP FOUND AFTER THE FIRST
+        MERGE: the original v3 draft had an explicit PRIORITY 1 (meaning)
+        over PRIORITY 2 (domain/jurisdiction) hierarchy, plus two rules the
+        first "zero-dropout checklist" never carried forward -- don't
+        inflate an ordinary word into something fancier than the source
+        said, and don't resolve a genuinely ambiguous "something" into a
+        specific guess just because the specific version reads better.
+        """
+        polish = self.prompts['polish']
+        self.assertIn('THE ABSOLUTE PRIORITY ORDER', polish)
+        self.assertIn('PRIORITY 1 — MEANING', polish)
+        self.assertIn('PRIORITY 2 — DOMAIN AND JURISDICTIONAL ACCURACY', polish)
+        self.assertIn('ANTI-OVERTRANSLATION & ANTI-FALSE-PRECISION', polish)
+        self.assertIn('une prérogative', polish)
+
     def test_the_polish_prompt_asks_for_name_research(self):
         """
         THE OTHER HALF OF THE SAME REAL COMPARISON: a corrupted case name
