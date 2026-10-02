@@ -717,5 +717,23 @@ class EagleService(EagleIntegrationService):
                 # (unlike the single-task response this was verified
                 # against) turns out not to carry it per row.
                 'reject_reason': str((raw.raw or {}).get('reject_reason') or ''),
+                # TRANSCRIPTION'S OWN, DIFFERENT SIGNAL. CONFIRMED against
+                # two real reviewed-and-failed transcription tasks
+                # (2026-10-02, tasks 39321 and 39096): the translation
+                # vocabulary above does not apply here at all.
+                # `external_status`/`status` stays "IN_PROGRESS" forever,
+                # even after a human reviewer has already failed the task
+                # -- it tracks transcription PROCESSING, not the review
+                # outcome. The real verdict is `cancel: 1` plus a
+                # human-written reason in `cancel_reason` ("Grammar
+                # errors", "Transcriber appears to have divided the
+                # recording into fixed blocks rather than actual speech
+                # turns"), confirmed by the matching `custom-status` label
+                # Eagle shows its own users ("REVIEW FAILED"). Translation
+                # rows have no `cancel` key at all, so this is harmless
+                # there -- `bool(None)` is False and `cancel_reason` is
+                # always ''.
+                'cancel': bool((raw.raw or {}).get('cancel')),
+                'cancel_reason': str((raw.raw or {}).get('cancel_reason') or ''),
             },
         )

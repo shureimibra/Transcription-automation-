@@ -407,6 +407,82 @@ class OutcomeReconciliationTestCase(TestCase):
         task.refresh_from_db()
         self.assertEqual(task.status, states.IN_PROGRESS)
 
+    # -- transcription's own, different outcome signal ------------------ #
+    #
+    # FROM A REAL, LIVE SYMPTOM (2026-10-02): a transcription task reviewed
+    # and FAILED on Eagle's own site still showed "Awaiting review" here,
+    # indefinitely. Confirmed against two real tasks (39321, 39096): Eagle's
+    # transcription `external_status` stays "IN_PROGRESS" forever, reviewed
+    # or not -- it tracks processing, not the review outcome. The real
+    # verdict is a `cancel: 1` flag, with the reason in `cancel_reason`
+    # rather than translation's `reject_reason`.
+
+    def _transcription_service(self, raw_by_id):
+        class Transcription(FakeEagle):
+            def list_available_tasks(inner, source=''):
+                return []
+            def list_my_tasks(inner, source=''):
+                return [EagleTask(external_id=eid, source=source, raw=raw)
+                        for eid, raw in raw_by_id.items()]
+        return Transcription()
+
+    def _submitted_transcription(self, external_id):
+        return make_task(external_source='transcription', external_task_id=external_id,
+                         kind='transcription', status=states.SUBMITTED, claimed_by=self.worker)
+
+    def test_a_cancelled_transcription_task_comes_back_rejected_with_its_reason(self):
+        """THE EXACT SHAPE OF REAL TASK 39096: external_status is still
+        "IN_PROGRESS", and the only signal that a human already failed it is
+        the cancel flag and its reason."""
+        task = self._submitted_transcription('39096')
+
+        sync_product('transcription', service=self._transcription_service({
+            '39096': {'external_status': 'IN_PROGRESS', 'cancel': 1,
+                      'cancel_reason': 'Grammar errors'},
+        }))
+
+        task.refresh_from_db()
+        self.assertEqual(task.status, states.REJECTED)
+        self.assertEqual(task.rejection_reason, 'Grammar errors')
+
+    def test_a_transcription_task_still_in_progress_with_no_cancel_flag_is_left_alone(self):
+        """The new cancel check must not fire on its own -- an ordinary
+        task still being processed, with cancel absent or 0, is still
+        pending, exactly as IN_PROGRESS already meant for translation."""
+        task = self._submitted_transcription('39200')
+
+        report = sync_product('transcription', service=self._transcription_service({
+            '39200': {'external_status': 'IN_PROGRESS', 'cancel': 0, 'cancel_reason': ''},
+        }))
+
+        task.refresh_from_db()
+        self.assertEqual(task.status, states.SUBMITTED)
+        self.assertEqual(report.reviewed, 0)
+
+    def test_a_completed_transcription_task_still_comes_back_approved(self):
+        """The existing completed -> approved path for transcription must
+        survive this change untouched."""
+        task = self._submitted_transcription('39355')
+
+        sync_product('transcription', service=self._transcription_service({
+            '39355': {'external_status': 'COMPLETED', 'cancel': 0, 'cancel_reason': ''},
+        }))
+
+        task.refresh_from_db()
+        self.assertEqual(task.status, states.APPROVED)
+
+    def test_the_cancel_check_does_not_touch_translation_rows_at_all(self):
+        """Translation rows carry no `cancel` key -- bool(None) is False,
+        so this falls straight through to the unchanged _OUTCOMES path."""
+        task = self._submitted('4130')
+
+        sync_product('translation', service=self._service(
+            [('4130', 'rejected', 'Speaker labels were wrong throughout.')]))
+
+        task.refresh_from_db()
+        self.assertEqual(task.status, states.REJECTED)
+        self.assertEqual(task.rejection_reason, 'Speaker labels were wrong throughout.')
+
 
 class UndeliveredSubmissionTestCase(TestCase):
     """

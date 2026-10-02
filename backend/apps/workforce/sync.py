@@ -125,18 +125,25 @@ def sync_product(product: str, service=None) -> SyncReport:
 
 
 #: Eagle's own words for "the review is done", and what each means for us.
+#: Translation ONLY -- see _reconcile_outcomes for transcription's entirely
+#: different, `cancel`-flag-based signal.
 #:
 #: DELIBERATELY ABSENT: `submitted` and `IN_PROGRESS`. Both mean the review
-#: has NOT happened -- the transcription product shows IN_PROGRESS in its
-#: awarded list beside the label "Pending", which is the same state a task is
-#: already in here. Note that IN_PROGRESS means something different in the
-#: AVAILABLE list, where it maps to `available`; the word is overloaded and
-#: only the feed it came from disambiguates it.
+#: has NOT happened for translation.
 #:
-#: WHAT A REVIEWED TRANSCRIPTION LOOKS LIKE IS STILL UNKNOWN. No transcription
-#: task has been reviewed yet, so its accepted/rejected vocabulary has never
-#: been observed. `_note_unknown_outcome` below logs anything unrecognised so
-#: the first review teaches us the word rather than passing silently.
+#: CORRECTED 2026-10-02, FROM A REAL, LIVE SYMPTOM: this comment used to
+#: claim IN_PROGRESS means "not reviewed" for transcription too, and that
+#: a reviewed transcription's vocabulary was simply unknown. Both were
+#: wrong. CONFIRMED against two real reviewed-and-FAILED transcription
+#: tasks (39321, 39096): `external_status` stayed "IN_PROGRESS" forever --
+#: it tracks transcription PROCESSING, not the review outcome, and never
+#: changes once processing finishes, reviewed or not. A rejected
+#: transcription task sat at "Awaiting review" on our own screens
+#: indefinitely because of this: the word this dict was waiting for was
+#: never coming. Transcription's real verdict is the `cancel` flag (see
+#: `EagleService._to_task`), checked separately, first, in
+#: _reconcile_outcomes below -- this dict is not consulted for a
+#: cancelled transcription task at all.
 _OUTCOMES = {
     'completed': states.APPROVED,
     'approved': states.APPROVED,
@@ -264,11 +271,25 @@ def _reconcile_outcomes(product: str, service, report) -> int:
     for external in mine or []:
         seen_ids.add(str(external.external_id))
         raw = external.raw or {}
-        external_status = str(raw.get('external_status') or '').strip()
-        verdict = _OUTCOMES.get(external_status.lower())
-        if verdict is None:
-            _note_unknown_outcome(product, external_status)
-            continue
+
+        # TRANSCRIPTION'S OWN SIGNAL, CHECKED FIRST, SEPARATELY FROM
+        # _OUTCOMES. See eagle_impl.py::_to_task's own comment for the
+        # evidence: `external_status` never reflects a transcription
+        # review outcome at all, so a cancelled task must never reach the
+        # word-lookup below -- it would either read as the generic
+        # "unrecognised status" (silently still-pending forever, the bug
+        # that shipped this fix) or as a false APPROVED if the processing
+        # state underneath happened to read as a success word. Translation
+        # rows carry no `cancel` key, so this is a no-op for them.
+        cancelled = bool(raw.get('cancel'))
+        if cancelled:
+            verdict = states.REJECTED
+        else:
+            external_status = str(raw.get('external_status') or '').strip()
+            verdict = _OUTCOMES.get(external_status.lower())
+            if verdict is None:
+                _note_unknown_outcome(product, external_status)
+                continue
 
         task = Task.objects.filter(
             external_source=product,
@@ -278,14 +299,22 @@ def _reconcile_outcomes(product: str, service, report) -> int:
         if task is None:
             continue
 
-        reason = str(raw.get('reject_reason') or '').strip()
+        # `cancel_reason` (transcription) or `reject_reason` (translation)
+        # -- exactly one of the two is ever populated, since the other
+        # field does not exist on that product's rows at all.
+        reason = str(raw.get('cancel_reason') or raw.get('reject_reason') or '').strip()
         # THE BULK AWARDED LIST MAY NOT CARRY THE REASON PER ROW -- only
         # confirmed, against a real task, for the single-task detail
         # response (see eagle_impl.py::_to_task). If the list gave us
         # nothing for a rejection, ask for that one task directly rather
         # than settle for the generic fallback while a real reason exists
-        # one call away.
-        if verdict != states.APPROVED and not reason:
+        # one call away. NOT ATTEMPTED FOR A CANCELLED TRANSCRIPTION TASK:
+        # both real examples carried the full reason in the list response
+        # itself, and TranscriptionClient has no single-task endpoint --
+        # EagleService.get_task falls back to searching the OPEN pool only,
+        # which a submitted, held, or cancelled task is never in, so the
+        # call would only ever fail.
+        if verdict != states.APPROVED and not reason and not cancelled:
             getter = getattr(service, 'get_task', None)
             if getter is not None:
                 try:
