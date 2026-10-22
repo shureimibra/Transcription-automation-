@@ -12,6 +12,10 @@ import { TASKER_BASE } from './tasker/brand.js'
 const path = window.location.pathname
 const isDesk = path === TASKER_BASE || path.startsWith(`${TASKER_BASE}/`)
 
+// Each app's own tab icon and browser colour, set before anything draws.
+document.getElementById('app-icon')?.setAttribute('href', isDesk ? '/desk-icon.svg' : '/icon.svg')
+if (isDesk) document.querySelector('meta[name="theme-color"]')?.setAttribute('content', '#17151A')
+
 const load = isDesk ? import('./tasker/DeskApp.jsx') : import('./App.jsx')
 
 load.then(({ default: Root }) => {

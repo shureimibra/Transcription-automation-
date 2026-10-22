@@ -81,11 +81,13 @@ export default function GoogleButton({ clientId, onError }) {
   if (failed) {
     return <p className="text-2xs text-ink-mute">Google sign-in could not load. Use your username instead.</p>;
   }
-  // Google's button sits in a frame of ours, so it carries the same soft
-  // edge and hover lift as the rest of the card instead of looking pasted on.
+  // COLOR-SCHEME: LIGHT IS THE FIX FOR A WHITE STRIP. Google's button is an
+  // iframe. On a dark page the browser paints an iframe whose colour scheme
+  // differs from its parent's with an opaque white background -- the white
+  // edge that showed under the pill. Declaring this box light makes the
+  // iframe's background transparent again, so only Google's own pill shows.
   return (
-    <div className="rounded-full p-[3px] ring-1 ring-edge transition-shadow hover:shadow-lift hover:ring-accent/40">
-      <div ref={box} className="flex min-h-[44px] w-full justify-center overflow-hidden rounded-full" />
-    </div>
+    <div ref={box} style={{ colorScheme: 'light' }}
+         className="flex min-h-[44px] w-full items-center justify-center" />
   );
 }
