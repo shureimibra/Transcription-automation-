@@ -3,6 +3,7 @@ import SearchableLanguageSelect from '../components/SearchableLanguageSelect';
 import AIAssistPanel from '../components/AIAssistPanel';
 import DiffReview from '../components/DiffReview';
 import { ANNOTATION_TAGS, insertTagAtPosition } from '../lib/annotations';
+import { api, ApiError, getToken, csrfToken } from '../api/client';
 
 // Session recovery (persist across refresh/navigation/sleep-wake): the
 // backend (TranscriptionJob + its segments/translations) is always the
@@ -423,29 +424,16 @@ export default function Dashboard({ embedded = false }) {
 
     async function initProject(attempt = 0) {
       try {
-        const response = await fetch(`${API_BASE}/projects/`);
-        if (response.ok) {
-          const projects = await response.json();
-          if (cancelled) return;
-          if (projects.length > 0) {
-            setProjectId(projects[0].id);
-          } else {
-            // Create default project
-            const createResp = await fetch(`${API_BASE}/projects/`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ name: 'Default Project', description: 'Default workspace' }),
-            });
-            if (cancelled) return;
-            if (createResp.ok) {
-              const newProj = await createResp.json();
-              if (!cancelled) setProjectId(newProj.id);
-              return;
-            }
-          }
-          return;
+        const projects = await api.get('/projects/');
+        if (cancelled) return;
+        if (projects.length > 0) {
+          setProjectId(projects[0].id);
+        } else {
+          // Create default project
+          const newProj = await api.post('/projects/', { name: 'Default Project', description: 'Default workspace' });
+          if (!cancelled) setProjectId(newProj.id);
         }
-        throw new Error(`Unexpected status ${response.status}`);
+        return;
       } catch (err) {
         if (cancelled) return;
         if (attempt < INIT_PROJECT_RETRY_DELAYS_MS.length) {
@@ -462,10 +450,7 @@ export default function Dashboard({ embedded = false }) {
 
     async function loadLanguages() {
       try {
-        const response = await fetch(`${API_BASE}/languages/`);
-        if (response.ok) {
-          setLanguages(await response.json());
-        }
+        setLanguages(await api.get('/languages/'));
       } catch (err) {
         console.error('Failed to load supported languages.', err);
       }
@@ -474,10 +459,7 @@ export default function Dashboard({ embedded = false }) {
 
     async function loadTranslationLanguages() {
       try {
-        const response = await fetch(`${API_BASE}/translation-languages/`);
-        if (response.ok) {
-          setTranslationLanguages(await response.json());
-        }
+        setTranslationLanguages(await api.get('/translation-languages/'));
       } catch (err) {
         console.error('Failed to load translation languages.', err);
       }
@@ -490,10 +472,7 @@ export default function Dashboard({ embedded = false }) {
     // every dispatch is re-checked server-side regardless.
     async function loadAiCapabilities() {
       try {
-        const response = await fetch(`${API_BASE}/ai-capabilities/`);
-        if (response.ok) {
-          setAiCapabilities(await response.json());
-        }
+        setAiCapabilities(await api.get('/ai-capabilities/'));
       } catch (err) {
         console.error('Failed to load AI capabilities.', err);
       }
@@ -534,14 +513,7 @@ export default function Dashboard({ embedded = false }) {
 
   const restoreSingleJob = async (session) => {
     try {
-      const resp = await fetch(`${API_BASE}/transcriptions/${session.jobId}/`);
-      if (!resp.ok) {
-        // Job no longer exists server-side (deleted, or a stale/foreign id) --
-        // drop the dead pointer rather than retrying it forever.
-        clearSession();
-        return;
-      }
-      const job = await resp.json();
+      const job = await api.get(`/transcriptions/${session.jobId}/`);
 
       setCurrentJobId(job.id);
       setSourceUrl(session.sourceUrl || '');
@@ -578,6 +550,12 @@ export default function Dashboard({ embedded = false }) {
         setStatusMessage('Transcription cancelled.');
       }
     } catch (err) {
+      if (err instanceof ApiError && err.status !== 0) {
+        // Job no longer exists server-side (deleted, or a stale/foreign id) --
+        // drop the dead pointer rather than retrying it forever.
+        clearSession();
+        return;
+      }
       console.warn('Failed to restore the previous session (job).', err);
     }
   };
@@ -585,7 +563,7 @@ export default function Dashboard({ embedded = false }) {
   const restoreSeries = async (session) => {
     try {
       const results = await Promise.all(
-        session.jobIds.map(id => fetch(`${API_BASE}/transcriptions/${id}/`).then(r => (r.ok ? r.json() : null)))
+        session.jobIds.map(id => api.get(`/transcriptions/${id}/`).catch(() => null))
       );
       const jobs = results.filter(Boolean);
       if (jobs.length === 0) {
@@ -651,31 +629,28 @@ export default function Dashboard({ embedded = false }) {
   const reconcileActiveJob = async () => {
     if (!currentJobId) return;
     try {
-      const jobResp = await fetch(`${API_BASE}/transcriptions/${currentJobId}/`);
-      if (jobResp.ok) {
-        const job = await jobResp.json();
-        setSegments((job.segments || []).map(s => ({
-          id: s.id, speaker: s.speaker_label, start: formatTime(s.start_time), text: s.text,
-          startTime: s.start_time, endTime: s.end_time,
-        })));
-        setSpeakerAliases(job.speaker_aliases || {});
-        setCurrentJobDiarizationEnabled(Boolean(job.enable_diarization));
-        if (job.detected_language) {
-          setDetectedLanguage({ code: job.detected_language, confidence: job.language_confidence });
-        }
-        if (job.status === 'completed') {
-          setJobStatus('completed');
-          setStatusMessage('Transcription successfully completed.');
-          return;
-        } else if (job.status === 'failed') {
-          setJobStatus('failed');
-          setStatusMessage(`Failed: ${job.error_message || 'Unknown error'}`);
-          return;
-        } else if (job.status === 'cancelled') {
-          setJobStatus('cancelled');
-          setStatusMessage('Transcription cancelled.');
-          return;
-        }
+      const job = await api.get(`/transcriptions/${currentJobId}/`);
+      setSegments((job.segments || []).map(s => ({
+        id: s.id, speaker: s.speaker_label, start: formatTime(s.start_time), text: s.text,
+        startTime: s.start_time, endTime: s.end_time,
+      })));
+      setSpeakerAliases(job.speaker_aliases || {});
+      setCurrentJobDiarizationEnabled(Boolean(job.enable_diarization));
+      if (job.detected_language) {
+        setDetectedLanguage({ code: job.detected_language, confidence: job.language_confidence });
+      }
+      if (job.status === 'completed') {
+        setJobStatus('completed');
+        setStatusMessage('Transcription successfully completed.');
+        return;
+      } else if (job.status === 'failed') {
+        setJobStatus('failed');
+        setStatusMessage(`Failed: ${job.error_message || 'Unknown error'}`);
+        return;
+      } else if (job.status === 'cancelled') {
+        setJobStatus('cancelled');
+        setStatusMessage('Transcription cancelled.');
+        return;
       }
     } catch (err) {
       console.warn('Reconcile-after-wake fetch failed; will retry on the next wake signal.', err);
@@ -802,19 +777,14 @@ export default function Dashboard({ embedded = false }) {
     // unchanged either way: same status message, same graceful fallback to
     // the normal single-page flow on any error or timeout.
     try {
-      const kickoff = await fetch(`${API_BASE}/discover-series/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ source_url: sourceUrl, try_sequential: trySequential, ...siteAuthFields() }),
+      const { task_id } = await api.post('/discover-series/', {
+        source_url: sourceUrl, try_sequential: trySequential, ...siteAuthFields(),
       });
-      if (kickoff.ok) {
-        const { task_id } = await kickoff.json();
-        const result = await pollDiscoveryTask(task_id);
-        if (result && result.is_series && result.items && result.items.length > 1) {
-          setSeriesInfo(result);
-          setStatusMessage('This page appears to be part of a series.');
-          return;
-        }
+      const result = await pollDiscoveryTask(task_id);
+      if (result && result.is_series && result.items && result.items.length > 1) {
+        setSeriesInfo(result);
+        setStatusMessage('This page appears to be part of a series.');
+        return;
       }
     } catch (err) {
       console.warn('Series discovery skipped (slow or unavailable), proceeding with a single page.', err);
@@ -840,13 +810,7 @@ export default function Dashboard({ embedded = false }) {
           return;
         }
         try {
-          const response = await fetch(`${API_BASE}/discover-series/${taskId}/`);
-          if (!response.ok) {
-            clearInterval(interval);
-            reject(new Error('Discovery status check failed'));
-            return;
-          }
-          const data = await response.json();
+          const data = await api.get(`/discover-series/${taskId}/`);
           if (data.status === 'completed') {
             clearInterval(interval);
             resolve(data.result);
@@ -930,13 +894,9 @@ export default function Dashboard({ embedded = false }) {
     }
 
     try {
-      const response = await fetch(`${API_BASE}/transcriptions/create_series/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project: projectId, items, language: selectedLanguage, ...siteAuthFields() }),
+      const data = await api.post('/transcriptions/create_series/', {
+        project: projectId, items, language: selectedLanguage, ...siteAuthFields(),
       });
-      if (!response.ok) throw new Error('Failed to create series on backend.');
-      const data = await response.json();
       setSeriesJobs(data.jobs.map(j => ({ ...j })));
       setSeriesId(data.series_id);
       setStatusMessage(`Series submitted: ${data.jobs.length} item(s) queued, processing in order...`);
@@ -981,7 +941,7 @@ export default function Dashboard({ embedded = false }) {
     seriesPollRef.current = setInterval(async () => {
       try {
         const results = await Promise.all(
-          jobIds.map(id => fetch(`${API_BASE}/transcriptions/${id}/`).then(r => r.ok ? r.json() : null))
+          jobIds.map(id => api.get(`/transcriptions/${id}/`).catch(() => null))
         );
         const updated = results.filter(Boolean);
         setSeriesJobs(updated);
@@ -1023,6 +983,16 @@ export default function Dashboard({ embedded = false }) {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.open('POST', `${API_BASE}/transcriptions/`);
+      // uploadJobWithProgress uses XMLHttpRequest instead of api.post (see
+      // the comment above) specifically for upload-progress events, which
+      // fetch cannot report -- so it has to attach auth itself rather than
+      // going through the shared client. Same headers api/client.js's
+      // request() would send for an unsafe method: the bearer token, plus
+      // the CSRF header for the session-cookie fallback path.
+      const token = getToken();
+      if (token) xhr.setRequestHeader('Authorization', `Token ${token}`);
+      const csrf = csrfToken();
+      if (csrf) xhr.setRequestHeader('X-CSRFToken', csrf);
       xhr.upload.onprogress = (e) => {
         if (e.lengthComputable) {
           setUploadProgress(Math.round((e.loaded / e.total) * 100));
@@ -1073,7 +1043,7 @@ export default function Dashboard({ embedded = false }) {
     }
 
     try {
-      let responseOk, responseStatus, responseJson, responseText;
+      let job;
 
       if (file) {
         const body = new FormData();
@@ -1090,12 +1060,13 @@ export default function Dashboard({ embedded = false }) {
         setStatusMessage(`Uploading ${file.name}...`);
         setUploadProgress(0);
         const result = await uploadJobWithProgress(body);
-        responseOk = result.ok;
-        responseStatus = result.status;
-        responseJson = result.json;
-        responseText = result.text;
+        if (!result.ok) {
+          console.error('Backend create job error:', result.status, result.text);
+          throw new Error('Failed to create job on backend.');
+        }
+        job = result.json;
       } else {
-        const body = JSON.stringify({
+        job = await api.post('/transcriptions/', {
           project: projectId,
           input_source: 'url',
           source_url: sourceUrl || '',
@@ -1105,26 +1076,8 @@ export default function Dashboard({ embedded = false }) {
           expected_speakers: (enableDiarization && expectedSpeakers) ? Number(expectedSpeakers) : null,
           ...siteAuthFields(),
         });
-        const response = await fetch(`${API_BASE}/transcriptions/`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body,
-        });
-        responseOk = response.ok;
-        responseStatus = response.status;
-        if (response.ok) {
-          responseJson = await response.json();
-        } else {
-          responseText = await response.text();
-        }
       }
 
-      if (!responseOk) {
-        console.error('Backend create job error:', responseStatus, responseText);
-        throw new Error('Failed to create job on backend.');
-      }
-
-      const job = responseJson;
       setCurrentJobId(job.id);
       setStatusMessage('Job created. Initializing connections...');
       saveSession({
@@ -1162,8 +1115,7 @@ export default function Dashboard({ embedded = false }) {
           if (msg.status === 'completed') {
             setJobStatus('completed');
             // Fetch final canonical segments with latest speaker labels
-            fetch(`${API_BASE}/transcriptions/${jobId}/segments/`)
-              .then(res => res.json())
+            api.get(`/transcriptions/${jobId}/segments/`)
               .then(data => {
                 if (Array.isArray(data) && data.length > 0) {
                   setSegments(data.map(s => ({
@@ -1239,52 +1191,46 @@ export default function Dashboard({ embedded = false }) {
     pollIntervalRef.current = setInterval(async () => {
       try {
         // Fetch Job Details
-        const jobResp = await fetch(`${API_BASE}/transcriptions/${jobId}/`);
-        if (jobResp.ok) {
-          const job = await jobResp.json();
-          
-          if (job.status === 'downloading') {
-            setStatusMessage('Downloading media and extracting audio (Polling)...');
-          } else if (job.status === 'diarizing') {
-            setStatusMessage('Identifying speakers (this can take a few minutes for longer audio) (Polling)...');
-          } else if (job.status === 'transcribing') {
-            setStatusMessage('Transcribing speech to text (Polling)...');
-          }
+        const job = await api.get(`/transcriptions/${jobId}/`);
 
-          if (job.detected_language) {
-            setDetectedLanguage({ code: job.detected_language, confidence: job.language_confidence });
-          }
-          setSpeakerAliases(job.speaker_aliases || {});
-          setCurrentJobDiarizationEnabled(Boolean(job.enable_diarization));
+        if (job.status === 'downloading') {
+          setStatusMessage('Downloading media and extracting audio (Polling)...');
+        } else if (job.status === 'diarizing') {
+          setStatusMessage('Identifying speakers (this can take a few minutes for longer audio) (Polling)...');
+        } else if (job.status === 'transcribing') {
+          setStatusMessage('Transcribing speech to text (Polling)...');
+        }
 
-          // Fetch segments
-          const segsResp = await fetch(`${API_BASE}/transcriptions/${jobId}/segments/`);
-          if (segsResp.ok) {
-            const segs = await segsResp.json();
-            const formatted = segs.map(s => ({
-              id: s.id,
-              speaker: s.speaker_label,
-              start: formatTime(s.start_time),
-              text: s.text,
-              startTime: s.start_time,
-              endTime: s.end_time,
-            }));
-            setSegments(formatted);
-          }
+        if (job.detected_language) {
+          setDetectedLanguage({ code: job.detected_language, confidence: job.language_confidence });
+        }
+        setSpeakerAliases(job.speaker_aliases || {});
+        setCurrentJobDiarizationEnabled(Boolean(job.enable_diarization));
 
-          if (job.status === 'completed') {
-            setJobStatus('completed');
-            setStatusMessage('Transcription successfully completed.');
-            clearInterval(pollIntervalRef.current);
-          } else if (job.status === 'failed') {
-            setJobStatus('failed');
-            setStatusMessage(`Failed: ${job.error_message || 'Unknown error'}`);
-            clearInterval(pollIntervalRef.current);
-          } else if (job.status === 'cancelled') {
-            setJobStatus('cancelled');
-            setStatusMessage('Transcription cancelled.');
-            clearInterval(pollIntervalRef.current);
-          }
+        // Fetch segments
+        const segs = await api.get(`/transcriptions/${jobId}/segments/`);
+        const formatted = segs.map(s => ({
+          id: s.id,
+          speaker: s.speaker_label,
+          start: formatTime(s.start_time),
+          text: s.text,
+          startTime: s.start_time,
+          endTime: s.end_time,
+        }));
+        setSegments(formatted);
+
+        if (job.status === 'completed') {
+          setJobStatus('completed');
+          setStatusMessage('Transcription successfully completed.');
+          clearInterval(pollIntervalRef.current);
+        } else if (job.status === 'failed') {
+          setJobStatus('failed');
+          setStatusMessage(`Failed: ${job.error_message || 'Unknown error'}`);
+          clearInterval(pollIntervalRef.current);
+        } else if (job.status === 'cancelled') {
+          setJobStatus('cancelled');
+          setStatusMessage('Transcription cancelled.');
+          clearInterval(pollIntervalRef.current);
         }
       } catch (err) {
         console.error('Polling error:', err);
@@ -1558,8 +1504,7 @@ export default function Dashboard({ embedded = false }) {
   const handleCancelJob = async (jobId, isSeriesItem = false) => {
     if (!isSeriesItem) setCancelRequested(true);
     try {
-      const response = await fetch(`${API_BASE}/transcriptions/${jobId}/cancel/`, { method: 'POST' });
-      if (!response.ok) throw new Error('Cancel request failed.');
+      await api.post(`/transcriptions/${jobId}/cancel/`);
     } catch (err) {
       console.error(err);
       if (!isSeriesItem) setCancelRequested(false);
@@ -1579,8 +1524,7 @@ export default function Dashboard({ embedded = false }) {
       return;
     }
     try {
-      const response = await fetch(`${API_BASE}/transcriptions/${jobId}/`, { method: 'DELETE' });
-      if (!response.ok) throw new Error('Delete request failed.');
+      await api.del(`/transcriptions/${jobId}/`);
 
       if (isSeriesItem) {
         const remaining = (seriesJobs || []).filter((j) => j.id !== jobId);
@@ -1646,12 +1590,7 @@ export default function Dashboard({ embedded = false }) {
     });
     setEditingSpeaker(null);
     try {
-      const response = await fetch(`${API_BASE}/transcriptions/${currentJobId}/speaker_aliases/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ aliases: { [rawLabel]: trimmed } }),
-      });
-      if (!response.ok) throw new Error('Failed to save speaker name.');
+      await api.post(`/transcriptions/${currentJobId}/speaker_aliases/`, { aliases: { [rawLabel]: trimmed } });
     } catch (err) {
       console.error(err);
       alert('Failed to save the speaker name. Please check the server logs for details.');
@@ -1662,12 +1601,7 @@ export default function Dashboard({ embedded = false }) {
     if (!currentJobId) return;
     setSpeakerAliases({});
     try {
-      const response = await fetch(`${API_BASE}/transcriptions/${currentJobId}/speaker_aliases/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reset: true }),
-      });
-      if (!response.ok) throw new Error('Failed to revert speaker names.');
+      await api.post(`/transcriptions/${currentJobId}/speaker_aliases/`, { reset: true });
     } catch (err) {
       console.error(err);
       alert('Failed to revert speaker names. Please check the server logs for details.');
@@ -1703,12 +1637,7 @@ export default function Dashboard({ embedded = false }) {
   const saveSegmentText = async (segmentId, text) => {
     if (!currentJobId || !segmentId) return;
     try {
-      const response = await fetch(`${API_BASE}/transcriptions/${currentJobId}/segments/${segmentId}/`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
-      });
-      if (!response.ok) throw new Error('Failed to save edit.');
+      await api.patch(`/transcriptions/${currentJobId}/segments/${segmentId}/`, { text });
     } catch (err) {
       console.error(err);
       alert('Failed to save your edit. Please check the server logs for details.');
@@ -1740,13 +1669,7 @@ export default function Dashboard({ embedded = false }) {
   const handleTranslate = async (jobId = currentJobId, language = translateTarget) => {
     if (!jobId || !language) return;
     try {
-      const response = await fetch(`${API_BASE}/transcriptions/${jobId}/translate/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ language }),
-      });
-      if (!response.ok) throw new Error('Failed to start translation.');
-      const translation = await response.json();
+      const translation = await api.post(`/transcriptions/${jobId}/translate/`, { language });
       if (jobId === currentJobId) {
         // Single-job flow: exact existing behavior (tabs + live polling).
         upsertTranslation(translation);
@@ -1778,15 +1701,12 @@ export default function Dashboard({ embedded = false }) {
     if (translationPollRef.current) clearInterval(translationPollRef.current);
     translationPollRef.current = setInterval(async () => {
       try {
-        const response = await fetch(`${API_BASE}/transcriptions/${jobId}/translations/`);
-        if (response.ok) {
-          const data = await response.json();
-          setTranslations(data);
-          const target = data.find(t => t.language === language);
-          if (target && (target.status === 'completed' || target.status === 'failed')) {
-            clearInterval(translationPollRef.current);
-            if (target.status === 'completed') setActiveView(target.language);
-          }
+        const data = await api.get(`/transcriptions/${jobId}/translations/`);
+        setTranslations(data);
+        const target = data.find(t => t.language === language);
+        if (target && (target.status === 'completed' || target.status === 'failed')) {
+          clearInterval(translationPollRef.current);
+          if (target.status === 'completed') setActiveView(target.language);
         }
       } catch (err) {
         console.error('Translation polling error:', err);
@@ -1814,11 +1734,7 @@ export default function Dashboard({ embedded = false }) {
   const handleAcademicFormat = async (jobId = currentJobId) => {
     if (!jobId) return;
     try {
-      const response = await fetch(`${API_BASE}/transcriptions/${jobId}/academic_format/`, {
-        method: 'POST',
-      });
-      if (!response.ok) throw new Error('Failed to start academic formatting.');
-      const result = await response.json();
+      const result = await api.post(`/transcriptions/${jobId}/academic_format/`);
       if (jobId === currentJobId) {
         setAcademicFormat(result);
         if (result.status === 'completed') {
@@ -1869,14 +1785,11 @@ export default function Dashboard({ embedded = false }) {
     if (academicFormatPollRef.current) clearInterval(academicFormatPollRef.current);
     academicFormatPollRef.current = setInterval(async () => {
       try {
-        const response = await fetch(`${API_BASE}/transcriptions/${jobId}/`);
-        if (response.ok) {
-          const job = await response.json();
-          if (job.academic_format) {
-            setAcademicFormat(job.academic_format);
-            if (['completed', 'failed', 'cancelled'].includes(job.academic_format.status)) {
-              clearInterval(academicFormatPollRef.current);
-            }
+        const job = await api.get(`/transcriptions/${jobId}/`);
+        if (job.academic_format) {
+          setAcademicFormat(job.academic_format);
+          if (['completed', 'failed', 'cancelled'].includes(job.academic_format.status)) {
+            clearInterval(academicFormatPollRef.current);
           }
         }
       } catch (err) {
@@ -1906,13 +1819,7 @@ export default function Dashboard({ embedded = false }) {
   const handleSaveDocumentMetadata = async (metadata, jobId = currentJobId) => {
     if (!jobId) return;
     try {
-      const response = await fetch(`${API_BASE}/transcriptions/${jobId}/metadata/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ metadata }),
-      });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || 'Failed to save document details.');
+      const result = await api.post(`/transcriptions/${jobId}/metadata/`, { metadata });
       setDocumentMetadata(result.document_metadata || {});
     } catch (err) {
       console.error(err);
@@ -1925,19 +1832,12 @@ export default function Dashboard({ embedded = false }) {
     setAiError('');
     setAiBusy(true);
     try {
-      const response = await fetch(`${API_BASE}/transcriptions/${jobId}/ai_revisions/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(options),
-      });
-      const result = await response.json();
-      if (!response.ok) {
-        // The server's message is already client-safe (see the
-        // .safe_message/.detail split in core.services.ai_assist.errors --
-        // internal limits and provider bodies never reach here), so it's
-        // shown verbatim rather than replaced with something vaguer.
-        throw new Error(result.error || 'Failed to start AI processing.');
-      }
+      // The server's message is already client-safe (see the
+      // .safe_message/.detail split in core.services.ai_assist.errors --
+      // internal limits and provider bodies never reach here), and
+      // api.post's ApiError already carries it verbatim as err.message on
+      // failure, same as this used to extract from result.error by hand.
+      const result = await api.post(`/transcriptions/${jobId}/ai_revisions/`, options);
 
       setAiRevision(result);
       setAiRevisions(prev => {
@@ -2070,9 +1970,7 @@ export default function Dashboard({ embedded = false }) {
 
   const refreshAIRevision = async (revisionId) => {
     try {
-      const response = await fetch(`${API_BASE}/ai-revisions/${revisionId}/`);
-      if (!response.ok) return null;
-      const revision = await response.json();
+      const revision = await api.get(`/ai-revisions/${revisionId}/`);
       setAiRevision(prev => (prev && prev.id !== revisionId ? prev : revision));
       setAiRevisions(prev => prev.map(r => (r.id === revisionId ? { ...r, ...revision, segments: undefined } : r)));
       return revision;
@@ -2088,9 +1986,7 @@ export default function Dashboard({ embedded = false }) {
   // read FROM must not switch what the user is looking at.
   const loadAIRevisionSegments = async (revisionId) => {
     try {
-      const response = await fetch(`${API_BASE}/ai-revisions/${revisionId}/`);
-      if (!response.ok) return [];
-      const revision = await response.json();
+      const revision = await api.get(`/ai-revisions/${revisionId}/`);
       return revision.segments || [];
     } catch (err) {
       console.error('Failed to load the selected source version.', err);
@@ -2112,15 +2008,7 @@ export default function Dashboard({ embedded = false }) {
   const handleCancelAIRevision = async (revisionId, jobId = currentJobId) => {
     if (!jobId || !revisionId) return;
     try {
-      const response = await fetch(`${API_BASE}/transcriptions/${jobId}/cancel_ai_revision/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ revision: revisionId }),
-      });
-      if (!response.ok) {
-        const result = await response.json().catch(() => ({}));
-        throw new Error(result.error || 'Failed to cancel.');
-      }
+      await api.post(`/transcriptions/${jobId}/cancel_ai_revision/`, { revision: revisionId });
       // The flag is set; the background thread stops before its next provider
       // call and broadcasts 'cancelled'. Nothing to update here.
     } catch (err) {
@@ -2142,16 +2030,7 @@ export default function Dashboard({ embedded = false }) {
       };
     });
     try {
-      const response = await fetch(
-        `${API_BASE}/ai-revisions/${revisionId}/segments/${segmentId}/`,
-        {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ accepted }),
-        }
-      );
-      if (!response.ok) throw new Error('Failed to save your decision.');
-      const saved = await response.json();
+      const saved = await api.patch(`/ai-revisions/${revisionId}/segments/${segmentId}/`, { accepted });
       setAiRevision(prev => {
         if (!prev || prev.id !== revisionId) return prev;
         return {
@@ -2167,13 +2046,7 @@ export default function Dashboard({ embedded = false }) {
 
   const handleAIBulkDecision = async (revisionId, action) => {
     try {
-      const response = await fetch(`${API_BASE}/ai-revisions/${revisionId}/review/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action }),
-      });
-      if (!response.ok) throw new Error('Failed to apply that to every segment.');
-      setAiRevision(await response.json());
+      setAiRevision(await api.post(`/ai-revisions/${revisionId}/review/`, { action }));
     } catch (err) {
       console.error(err);
       alert(err.message || 'Failed to apply that to every segment.');

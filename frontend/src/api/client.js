@@ -58,7 +58,7 @@ const UNSAFE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
  * CSRF-protected. Sending the header when the cookie exists costs nothing
  * and keeps that path working.
  */
-function csrfToken() {
+export function csrfToken() {
   try {
     const match = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]*)/);
     return match ? decodeURIComponent(match[1]) : null;
