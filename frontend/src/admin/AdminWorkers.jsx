@@ -19,9 +19,6 @@ import { daysAgo, elapsed, isoDay, percent, relative } from '../lib/format.js';
  * dominate a week of ordinary work and make the report useless.
  */
 
-/** The first day this system has work for; the date pickers start here. */
-const EARLIEST_DAY = '2026-01-01';
-
 const PRESETS = [
   { id: '7', label: 'Last 7 days', from: () => daysAgo(6) },
   { id: '30', label: 'Last 30 days', from: () => daysAgo(29) },
@@ -42,30 +39,13 @@ export default function AdminWorkers() {
   const loadWorkers = useCallback(() => workersApi.list(), []);
   const roster = useAsync(loadWorkers, []);
 
-  // A browser date field accepts a six-digit year ("275760") when typed.
-  // Anything outside the span this system has data for is refused here with
-  // a plain message, instead of being sent to the server as a range nobody
-  // meant.
-  const [rangeError, setRangeError] = useState('');
   const applyRange = (event) => {
     event.preventDefault();
-    const today = isoDay(new Date());
-    const valid = (d) => /^\d{4}-\d{2}-\d{2}$/.test(d) && d >= EARLIEST_DAY && d <= today;
-    if (!valid(draft.from) || !valid(draft.to)) {
-      setRangeError(`Pick dates between ${EARLIEST_DAY} and today.`);
-      return;
-    }
-    if (draft.from > draft.to) {
-      setRangeError('The "From" date must be on or before the "To" date.');
-      return;
-    }
-    setRangeError('');
     setRange(draft);
   };
 
   const applyPreset = (preset) => {
     const next = { from: preset.from(), to: isoDay(new Date()) };
-    setRangeError('');
     setDraft(next);
     setRange(next);
   };
@@ -132,8 +112,7 @@ export default function AdminWorkers() {
         <div className="w-40">
           <Field label="From" htmlFor="range-from">
             <input
-              id="range-from" type="date" value={draft.from}
-              min={EARLIEST_DAY} max={draft.to || isoDay(new Date())}
+              id="range-from" type="date" value={draft.from} max={draft.to}
               onChange={(e) => setDraft((d) => ({ ...d, from: e.target.value }))}
               className={inputClass}
             />
@@ -150,9 +129,6 @@ export default function AdminWorkers() {
         </div>
         <Button type="submit" size="md" variant="secondary" loading={performance.loading}>Apply</Button>
       </form>
-      {rangeError && (
-        <p role="alert" className="text-xs text-status-rejected">{rangeError}</p>
-      )}
 
       {performance.error && (
         <ErrorState message={performance.error.message} onRetry={() => performance.refresh()} />
