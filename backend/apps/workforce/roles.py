@@ -14,7 +14,7 @@ converts them into a tool user and hands them the studio, which is the
 opposite of what suspending someone is for. A stored role cannot drift like
 that: suspending changes the worker's STATUS, never their ROLE.
 
-THREE ROLES, NOT A PERMISSION MATRIX. Six to thirty people doing two jobs do
+A FEW ROLES, NOT A PERMISSION MATRIX. Six to thirty people doing two jobs do
 not need per-object ACLs, and a matrix nobody can hold in their head is how
 authorization bugs get written. What this must support is being EXTENDED --
 a reviewer or a team lead later -- which is why the roles are a choices
@@ -37,10 +37,16 @@ TASKER = 'tasker'
 #: Sees no queue, no assignments, no other worker's anything.
 TOOL = 'tool'
 
+#: An outside Eagle worker. Claims on Eagle themselves, then looks the task
+#: up here by its exact ID and edits a PRIVATE copy of the prepared draft.
+#: Not in the workforce: no queue, no claiming, no submitting, no studio.
+EAGLE_TASKER = 'eagle_tasker'
+
 ROLE_CHOICES = [
     (ADMIN, 'Administrator'),
     (TASKER, 'Tasker'),
     (TOOL, 'Tool user'),
+    (EAGLE_TASKER, 'Eagle tasker'),
 ]
 
 ALL_ROLES = frozenset(code for code, _ in ROLE_CHOICES)
@@ -75,10 +81,19 @@ STUDIO = 'studio'
 #: Is measured: appears in the performance report, has throughput tracked.
 MEASURED = 'measured'
 
+#: May look up a task by its exact Eagle ID and work a private copy of it.
+#: Outside taskers ONLY -- not administrators. The two areas share no
+#: account; to see what a tasker sees, sign in as a tasker.
+EAGLE = 'desk'
+
 _CAPABILITIES = {
-    ADMIN:  frozenset({WORKFORCE, ADMINISTRATION, STUDIO}),
-    TASKER: frozenset({WORKFORCE, STUDIO, MEASURED}),
-    TOOL:   frozenset({STUDIO}),
+    ADMIN:        frozenset({WORKFORCE, ADMINISTRATION, STUDIO}),
+    TASKER:       frozenset({WORKFORCE, STUDIO, MEASURED}),
+    TOOL:         frozenset({STUDIO}),
+    # NO STUDIO. The studio would give an outside account our whole
+    # transcription engine for any URL; this role exists to reuse work
+    # already done, not to start new work on our provider budget.
+    EAGLE_TASKER: frozenset({EAGLE}),
 }
 
 

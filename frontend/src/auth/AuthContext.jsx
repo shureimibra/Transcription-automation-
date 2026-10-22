@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { auth as authApi } from '../api/workforce.js';
+import { auth as authApi } from '../api/auth.js';
 import { setToken, setUnauthorizedHandler } from '../api/client.js';
+import { TASKER_BASE } from '../tasker/brand.js';
 
 // Session state for the whole app.
 //
@@ -21,6 +22,8 @@ export const CAPABILITY = {
   ADMINISTRATION: 'administration',
   STUDIO: 'studio',
   MEASURED: 'measured',
+  /** Outside Eagle taskers: exact-ID lookup and a private copy. */
+  DESK: 'desk',
 };
 
 export function AuthProvider({ children }) {
@@ -61,7 +64,11 @@ export function AuthProvider({ children }) {
       try {
         const me = await authApi.me();
         if (cancelled || sessionVersion.current !== startedAt) return;
-        setUser({ username: me.username, isAdmin: Boolean(me.is_admin), role: me.role || null });
+        setUser({
+          username: me.username, isAdmin: Boolean(me.is_admin), role: me.role || null,
+          // Only taskers are ever unconfirmed; everyone else reads true.
+          emailVerified: me.email_verified !== false,
+        });
         setProfile(me.profile || null);
         setCapabilities(me.capabilities || []);
         setState('authenticated');
@@ -73,20 +80,32 @@ export function AuthProvider({ children }) {
     return () => { cancelled = true; };
   }, [clear]);
 
-  const login = useCallback(async (username, password) => {
-    const result = await authApi.login(username, password);
+  // Any answer that signs someone in -- password, sign-up, Google -- has the
+  // same shape, so all three land here.
+  const adopt = useCallback((result) => {
     sessionVersion.current += 1;
     setToken(result.token);
     setUser({
       username: result.user.username,
       isAdmin: Boolean(result.user.is_admin),
       role: result.user.role || null,
+      emailVerified: result.email_verified !== false,
     });
     setProfile(result.profile || null);
     setCapabilities(result.capabilities || []);
     setState('authenticated');
     return result;
   }, []);
+
+  /** After the emailed code is accepted -- no reload needed. */
+  const markEmailVerified = useCallback(
+    () => setUser((u) => (u ? { ...u, emailVerified: true } : u)), [],
+  );
+
+  const login = useCallback(
+    async (username, password) => adopt(await authApi.login(username, password)),
+    [adopt],
+  );
 
   const logout = useCallback(async () => {
     // The local session is cleared even if the network call fails: leaving
@@ -104,7 +123,7 @@ export function AuthProvider({ children }) {
   );
 
   const value = useMemo(() => ({
-    user, profile, state, login, logout, can, capabilities,
+    user, profile, state, login, adopt, markEmailVerified, logout, can, capabilities,
     role: user?.role || null,
     isAuthenticated: state === 'authenticated',
     isChecking: state === 'checking',
@@ -112,8 +131,12 @@ export function AuthProvider({ children }) {
     // Where this account belongs when it lands on the app with no route in
     // mind. A tool user has no queue, so sending them to the worker
     // dashboard would show them an empty page they can do nothing with.
-    homePath: capabilities.includes(CAPABILITY.WORKFORCE) ? '/' : '/studio',
-  }), [user, profile, state, login, logout, can, capabilities]);
+    homePath: capabilities.includes(CAPABILITY.WORKFORCE) ? '/'
+      : capabilities.includes(CAPABILITY.STUDIO) ? '/studio'
+      // An Eagle tasker has neither; their whole app lives under its own path.
+      : capabilities.includes(CAPABILITY.DESK) ? TASKER_BASE
+      : '/studio',
+  }), [user, profile, state, login, adopt, markEmailVerified, logout, can, capabilities]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

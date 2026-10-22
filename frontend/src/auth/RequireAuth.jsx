@@ -20,7 +20,7 @@ import { Spinner } from '../components/ui/index.jsx';
  * token is bounced to /login for one frame while the bootstrap call is in
  * flight, losing wherever they were heading.
  */
-export default function RequireAuth({ children, capability = null }) {
+export default function RequireAuth({ children, capability = null, loginPath = '/login' }) {
   const { isAuthenticated, isChecking, can, homePath } = useAuth();
   const location = useLocation();
 
@@ -35,7 +35,9 @@ export default function RequireAuth({ children, capability = null }) {
 
   if (!isAuthenticated) {
     // `from` so login can return them to where they were going.
-    return <Navigate to="/login" replace state={{ from: location }} />;
+    // `loginPath` because Eagle taskers have their own sign-in page, and
+    // landing a signed-out one on the workers' screen would be confusing.
+    return <Navigate to={loginPath} replace state={{ from: location }} />;
   }
 
   if (capability && !can(capability)) {

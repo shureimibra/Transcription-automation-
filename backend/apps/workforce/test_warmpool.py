@@ -531,12 +531,28 @@ class RetentionTestCase(TempCacheMixin, TestCase):
         task = make_task(external_source='transcription', external_task_id='1',
                          status=states.CANCELLED)
         path = self._with_audio(task)
-        old = timezone.now() - __import__('datetime').timedelta(hours=3)
+        old = timezone.now() - __import__('datetime').timedelta(hours=4)
         Task.objects.filter(pk=task.pk).update(updated_at=old)
 
         warmpool.purge_expired_audio()
 
         self.assertFalse(os.path.exists(path))
+
+    def test_a_lost_race_keeps_its_audio_while_an_eagle_tasker_works_it(self):
+        from django.contrib.auth.models import User
+        from .models import EagleTaskerCopy
+
+        task = make_task(external_source='transcription', external_task_id='1',
+                         status=states.CANCELLED)
+        path = self._with_audio(task)
+        old = timezone.now() - __import__('datetime').timedelta(hours=4)
+        Task.objects.filter(pk=task.pk).update(updated_at=old)
+        EagleTaskerCopy.objects.create(
+            task=task, owner=User.objects.create_user('outside', password='x'))
+
+        warmpool.purge_expired_audio()
+
+        self.assertTrue(os.path.exists(path))
 
 
 class StandardInstructionTestCase(TestCase):

@@ -5,9 +5,10 @@ import { CAPABILITY, useAuth } from '../auth/AuthContext.jsx';
 import { useTheme } from '../lib/theme.jsx';
 import { Button, FOCUS } from './ui/index.jsx';
 import {
-  BrandLockup, BrandMark, GaugeIcon, HomeIcon, KeyIcon, LanguagesIcon, ListIcon, LogOutIcon,
+  GaugeIcon, HomeIcon, KeyIcon, LanguagesIcon, ListIcon, LogOutIcon,
   MenuIcon, MicIcon, MoonIcon, StudioIcon, SunIcon, UsersIcon,
 } from './icons.jsx';
+import { BrandLockup, BrandMark } from './Brand.jsx';
 
 // The frame every authenticated screen sits in.
 //

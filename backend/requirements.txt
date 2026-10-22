@@ -73,3 +73,7 @@ torchcodec>=0.15,<0.16
 # Without that step the package imports fine but the browser launch raises,
 # which is reported as "unavailable" rather than as a download failure.
 playwright>=1.45,<2.0
+
+# "Continue with Google" for outside taskers: verifies Google's signed ID
+# token locally (apps/workforce/tasker_auth.py).
+google-auth>=2.38,<3.0

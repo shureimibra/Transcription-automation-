@@ -198,6 +198,9 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    # Outside Eagle taskers reach a short allow-list of endpoints and
+    # nothing else -- see apps/workforce/perimeter.py.
+    'apps.workforce.perimeter.EagleTaskerPerimeterMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
@@ -364,7 +367,55 @@ THROTTLE_RATES = {
     'ai': os.environ.get('THROTTLE_AI', '30/hour'),
     'media': os.environ.get('THROTTLE_MEDIA', '120/hour'),
     'submit': os.environ.get('THROTTLE_SUBMIT', '60/hour'),
+    # Eagle taskers looking up a task by its exact ID. A person checks a
+    # few IDs an hour; walking the ID space to find tasks they do not hold
+    # needs thousands.
+    'tasker_lookup': os.environ.get('THROTTLE_TASKER_LOOKUP', '30/hour'),
+    # Public sign-up, per client address. A person signs up once; the daily
+    # ceiling stops a slow drip of throwaway accounts from one address.
+    'signup': os.environ.get('THROTTLE_SIGNUP', '5/hour'),
+    'signup_day': os.environ.get('THROTTLE_SIGNUP_DAY', '10/day'),
+    'google_auth': os.environ.get('THROTTLE_GOOGLE_AUTH', '30/hour'),
+    # Email confirmation codes, per account: guessing a 6-digit code at
+    # 10 tries an hour (and 5 per code) is hopeless; resending is capped so
+    # the form cannot be used to flood someone's inbox.
+    'verify_code': os.environ.get('THROTTLE_VERIFY_CODE', '10/hour'),
+    'resend_code': os.environ.get('THROTTLE_RESEND_CODE', '3/hour'),
 }
+
+# WHO IS THE CLIENT, BEHIND THE PROXY. Every per-address limit above keys on
+# the client's IP. Without NUM_PROXIES, DRF trusts the WHOLE X-Forwarded-For
+# header -- which the client writes -- so a fake value per request walks
+# straight past every limit. With it, DRF takes the address our own proxy
+# appended. 1 = one nginx in front (set 0 if Daphne faces the internet
+# directly). The proxy must send `X-Forwarded-For $proxy_add_x_forwarded_for`.
+THROTTLE_NUM_PROXIES = int(os.environ.get(
+    'THROTTLE_NUM_PROXIES', '0' if DEVELOPMENT else '1'))
+
+# Public sign-up for outside taskers (apps/workforce/tasker_auth.py). The
+# kill switch: set to 0 and no new account can be created, by form or Google.
+TASKER_SIGNUP_OPEN = os.environ.get('TASKER_SIGNUP_OPEN', '1')
+# "Continue with Google". The client id from Google Cloud Console (an OAuth
+# 2.0 Client ID of type Web application). Empty = the button is not shown.
+GOOGLE_OAUTH_CLIENT_ID = os.environ.get('GOOGLE_OAUTH_CLIENT_ID', '')
+
+# OUTGOING EMAIL -- sign-up confirmation codes for taskers.
+# Set EMAIL_HOST (and the rest) to send for real; e.g. Gmail with an app
+# password: EMAIL_HOST=smtp.gmail.com EMAIL_PORT=587 EMAIL_USE_TLS=1
+# EMAIL_HOST_USER=you@gmail.com EMAIL_HOST_PASSWORD=<16-char app password>.
+# Without EMAIL_HOST, codes are written to the server log instead of sent --
+# fine for local testing, not for real users.
+EMAIL_HOST = os.environ.get('EMAIL_HOST', '')
+if EMAIL_HOST:
+    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+    EMAIL_PORT = int(os.environ.get('EMAIL_PORT', '587'))
+    EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', '')
+    EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
+    EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', '1') not in ('0', 'false', '')
+    EMAIL_TIMEOUT = 15
+else:
+    EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', '') or EMAIL_HOST_USER if EMAIL_HOST else 'no-reply@localhost'
 
 REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [
@@ -389,6 +440,7 @@ REST_FRAMEWORK = {
         'rest_framework.throttling.ScopedRateThrottle',
     ],
     'DEFAULT_THROTTLE_RATES': THROTTLE_RATES,
+    'NUM_PROXIES': THROTTLE_NUM_PROXIES,
 
     # NO BROWSABLE API OUTSIDE DEVELOPMENT. DRF's own default renderer list
     # includes BrowsableAPIRenderer unconditionally -- not gated by DEBUG --

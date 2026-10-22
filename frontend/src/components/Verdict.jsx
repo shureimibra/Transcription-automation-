@@ -59,8 +59,8 @@ export default function Verdict({ findings = [], blocking = false, className = '
         <p className="rounded-xl2 border border-edge bg-overlay px-4 py-3 text-xs text-ink-dim">
           <span className="font-semibold text-ink">Nothing in this document blocks submission.</span>{' '}
           {notes === 1 ? 'One note' : `${notes} notes`} to glance at first — worth a look,
-          not worth stalling for. Our accepted task 4452 was passed by the platform
-          carrying three findings at these levels.
+          not worth stalling for. Accepted work regularly carries findings at
+          these levels.
         </p>
       )}
 

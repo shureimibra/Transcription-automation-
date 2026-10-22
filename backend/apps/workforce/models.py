@@ -58,6 +58,10 @@ class Account(models.Model):
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
         related_name='workforce_account',
     )
+    #: When the account proved it owns its email (a code, or Google). Only
+    #: required of self-registered taskers; staff-created accounts skip it.
+    email_verified_at = models.DateTimeField(null=True, blank=True)
+
     role = models.CharField(
         max_length=16, choices=roles.ROLE_CHOICES, default=roles.DEFAULT_ROLE,
         # Indexed because "list every tasker" and "list every admin" are
@@ -629,6 +633,117 @@ class TokenActivity(models.Model):
     token = models.OneToOneField(
         'authtoken.Token', on_delete=models.CASCADE, related_name='activity')
     last_used_at = models.DateTimeField(auto_now=True)
+
+
+# --------------------------------------------------------------------- #
+# Eagle taskers' private copies
+# --------------------------------------------------------------------- #
+
+class EagleTaskerCopy(models.Model):
+    """
+    One Eagle tasker's own working copy of one task's prepared draft.
+
+    WHY A COPY AND NOT THE TASK ITSELF. Several outside taskers can look up
+    the same task ID -- only one of them really holds it on Eagle, but this
+    system cannot tell which. Editing `job.segments` or `task.polished_text`
+    directly would let each of them overwrite the others' work. So the
+    shared draft is read once into this row, and every edit lands here.
+
+    SEGMENTS ARE JSON, NOT TranscriptSegment ROWS. They are a snapshot that
+    nothing else reads, edits never need a join, and a copy is thrown away
+    with its task. Each row carries the same fields the review screen
+    already expects from a real segment: id, start_time, end_time,
+    speaker_label, text, original_text.
+
+    THE SHARED DRAFT IS NEVER TOUCHED. Nothing here writes to the task, the
+    job or the deliverable revision; your own workers' work stays exactly
+    as it was.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name='tasker_copies')
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='eagle_copies',
+    )
+
+    #: Empty until the transcript is ready; filled once, on first read after.
+    segments = models.JSONField(default=list, blank=True)
+    snapshot_at = models.DateTimeField(null=True, blank=True)
+    speaker_aliases = models.JSONField(default=dict, blank=True)
+
+    polished_text = models.TextField(blank=True, default='')
+    polished_at = models.DateTimeField(null=True, blank=True)
+    verify_against_audio = models.TextField(blank=True, default='')
+
+    accuracy_check_notes = models.TextField(blank=True, default='')
+    accuracy_check_at = models.DateTimeField(null=True, blank=True)
+    #: [{"phrase", "suggestion", "occurred_at"}] -- what the checklist applied.
+    applied_findings = models.JSONField(default=list, blank=True)
+
+    #: Every press of re-translate is one paid provider request. Counted per
+    #: copy so real usage is visible before anyone decides on pricing.
+    retranslate_count = models.PositiveIntegerField(default=0)
+
+    opened_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['task', 'owner'], name='one_copy_per_tasker'),
+        ]
+        ordering = ['-updated_at']
+
+    def __str__(self):
+        return f'{self.owner} on {self.task.external_task_id or self.task_id}'
+
+
+class EmailCode(models.Model):
+    """
+    A one-time code sent by email to prove an address. One live code per
+    account: sending a new one deletes the old.
+
+    ONLY A HASH IS STORED. Whoever reads this table cannot use what is in
+    it -- the code itself exists only in the email.
+    """
+
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                                related_name='email_code')
+    code_hash = models.CharField(max_length=64)
+    expires_at = models.DateTimeField()
+    attempts = models.PositiveSmallIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class ExternalIdentity(models.Model):
+    """
+    A sign-in provider's account linked to one of ours ("Continue with Google").
+
+    KEYED ON THE PROVIDER'S SUBJECT, NEVER ON EMAIL. Google's `sub` is
+    stable and unique; an email address can change hands, and linking by
+    email would let someone who registered a password account under another
+    person's address inherit that person's Google sign-in later. See
+    tasker_auth.GoogleSignInView for the rule that prevents it.
+    """
+
+    GOOGLE = 'google'
+    PROVIDER_CHOICES = [(GOOGLE, 'Google')]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='external_identities',
+    )
+    provider = models.CharField(max_length=20, choices=PROVIDER_CHOICES)
+    subject = models.CharField(max_length=255)
+    email = models.EmailField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['provider', 'subject'], name='one_link_per_provider_account'),
+        ]
+
+    def __str__(self):
+        return f'{self.provider}:{self.email or self.subject} -> {self.user}'
 
 
 # --------------------------------------------------------------------- #

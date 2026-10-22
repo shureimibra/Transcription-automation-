@@ -88,8 +88,16 @@ DEFAULT_AI_LIMIT = int(os.environ.get('EAGLE_WARM_AI_LIMIT', '12'))
 #: How long cached audio outlives the task that needed it.
 AUDIO_RETENTION_DAYS = int(os.environ.get('EAGLE_AUDIO_RETENTION_DAYS', '4'))
 
-#: Audio for a task we never claimed is dead weight almost immediately.
-LOST_RACE_RETENTION_HOURS = int(os.environ.get('EAGLE_LOST_AUDIO_HOURS', '1'))
+#: Audio for a task we never claimed is dead weight once nobody can open it.
+#:
+#: WAS ONE HOUR. Eagle taskers (eagle_tasker.py) can still look a task up for
+#: 70 minutes after it leaves the pool -- usually because one of them just
+#: claimed it -- and then work it for a while after that. One hour deleted
+#: the audio before that window had even closed.
+LOST_RACE_RETENTION_HOURS = int(os.environ.get('EAGLE_LOST_AUDIO_HOURS', '3'))
+
+#: Audio is never purged while an Eagle tasker saved their copy this recently.
+TASKER_ACTIVE_HOURS = int(os.environ.get('EAGLE_TASKER_ACTIVE_HOURS', '2'))
 
 DOWNLOAD_TIMEOUT = 180
 
@@ -1090,6 +1098,15 @@ def purge_expired_audio(now=None) -> dict:
     )) + list(Task.objects.filter(
         status=states.CANCELLED, updated_at__lt=lost_cutoff,
     ))
+
+    # SOMEBODY IS STILL LISTENING. A task's own updated_at says nothing about
+    # an Eagle tasker working their private copy of it, so a copy saved
+    # recently keeps the audio regardless of what the task row says.
+    from .models import EagleTaskerCopy
+    in_use = set(EagleTaskerCopy.objects.filter(
+        updated_at__gte=now - dt.timedelta(hours=TASKER_ACTIVE_HOURS),
+    ).values_list('task_id', flat=True))
+    expired = [task for task in expired if task.id not in in_use]
 
     for task in expired:
         for path in (cache_path_for(task),

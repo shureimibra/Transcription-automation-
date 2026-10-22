@@ -24,9 +24,13 @@ const ROLE_HELP = {
   admin:  'Full control: every task, every worker, the analytics, and account management.',
   tasker: 'Works the queue: claims tasks, edits transcripts, submits. Measured on throughput.',
   tool:   'The transcription studio only. No queue, no assignments, no other worker’s data.',
+  eagle_tasker: 'An outside Eagle worker. Looks up a task by its exact Eagle ID and edits a private copy. No queue, no studio, no submitting.',
 };
 
-const ROLE_ORDER = ['admin', 'tasker', 'tool'];
+const ROLE_ORDER = ['admin', 'tasker', 'tool', 'eagle_tasker'];
+
+/** `eagle_tasker` reads as "eagle tasker", not as an identifier. */
+const roleName = (role) => String(role).replace(/_/g, ' ');
 
 export default function AdminAccounts() {
   const { user } = useAuth();
@@ -50,12 +54,28 @@ export default function AdminAccounts() {
     return [...list].sort((a, b) => rank(a) - rank(b) || a.username.localeCompare(b.username));
   }, [data]);
 
+  const toggleActive = async (account) => {
+    setBusyId(account.id);
+    setError('');
+    try {
+      await accountsApi.setActive(account.id, !account.user_is_active);
+      setNotice(account.user_is_active
+        ? `${account.username} can no longer sign in, and has been signed out.`
+        : `${account.username} can sign in again.`);
+      refresh({ silent: true });
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const changeRole = async (account, role, extra = {}) => {
     setBusyId(account.id);
     setError('');
     try {
       await accountsApi.setRole(account.id, role, extra);
-      setNotice(`${account.username} is now ${role}.`);
+      setNotice(`${account.username} is now ${roleName(role)}.`);
       setPromoting(null);
       refresh({ silent: true });
     } catch (err) {
@@ -97,11 +117,11 @@ export default function AdminAccounts() {
       {error && <ErrorState message={error} onRetry={() => setError('')} />}
       <LiveRegion message={notice} />
 
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {ROLE_ORDER.map((role) => (
           <div key={role} className="rounded-xl2 border border-edge bg-surface px-4 py-3">
             <div className="flex items-baseline justify-between gap-2">
-              <span className="text-xs font-medium capitalize text-ink">{role}</span>
+              <span className="text-xs font-medium capitalize text-ink">{roleName(role)}</span>
               <span className="text-sm tabular-nums text-ink-dim">
                 {rows.filter((r) => r.role === role).length}
               </span>
@@ -162,10 +182,10 @@ export default function AdminAccounts() {
                           // avoids offering a dead end.
                           disabled={isSelf || busyId === account.id}
                           onChange={(e) => onRoleSelect(account, e.target.value)}
-                          className="w-28 rounded-lg border border-edge bg-canvas px-2 py-1 text-2xs text-ink disabled:opacity-50"
+                          className="w-32 rounded-lg border border-edge bg-canvas px-2 py-1 text-2xs text-ink disabled:opacity-50"
                         >
                           {ROLE_ORDER.map((r) => (
-                            <option key={r} value={r}>{r}</option>
+                            <option key={r} value={r}>{roleName(r)}</option>
                           ))}
                           {!ROLE_ORDER.includes(account.role) && (
                             <option value={account.role}>{account.role}</option>
@@ -203,6 +223,15 @@ export default function AdminAccounts() {
                                 onClick={() => setResetting(account)}>
                           Reset password
                         </Button>
+                        {/* Takes access away without granting anything else --
+                            changing the role would (tool grants the studio). */}
+                        {!isSelf && (
+                          <Button size="sm" variant="ghost"
+                                  disabled={busyId === account.id}
+                                  onClick={() => toggleActive(account)}>
+                            {account.user_is_active ? 'Disable sign-in' : 'Enable sign-in'}
+                          </Button>
+                        )}
                       </td>
                     </tr>
                   );
@@ -242,7 +271,7 @@ export default function AdminAccounts() {
           onClose={() => setShowCreate(false)}
           onCreated={(username, role) => {
             setShowCreate(false);
-            setNotice(`Created ${username} as ${role}.`);
+            setNotice(`Created ${username} as ${roleName(role)}.`);
             refresh();
           }}
         />
@@ -436,7 +465,7 @@ function CreateAccountDialog({ onClose, onCreated }) {
 
         <Field label="Role" htmlFor="a-role" hint={ROLE_HELP[form.role]}>
           <select id="a-role" value={form.role} onChange={set('role')} className={inputClass}>
-            {ROLE_ORDER.map((r) => <option key={r} value={r}>{r}</option>)}
+            {ROLE_ORDER.map((r) => <option key={r} value={r}>{roleName(r)}</option>)}
           </select>
         </Field>
 

@@ -2,7 +2,7 @@ import React, { useRef, useState } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from './AuthContext.jsx';
 import { Button, Field, LiveRegion, FOCUS } from '../components/ui/index.jsx';
-import { BrandLockup, BrandMark } from '../components/icons.jsx';
+import { BrandLockup, BrandMark } from '../components/Brand.jsx';
 
 /**
  * The sign-in screen.

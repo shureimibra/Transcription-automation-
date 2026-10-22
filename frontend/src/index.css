@@ -131,6 +131,130 @@
 }
 
 /* ===================================================================== *
+ * THE EAGLE TASKER PAGES
+ *
+ * Outside Eagle taskers get the landing page's look -- Studio Ink, Paper,
+ * Terracotta -- instead of the workforce indigo. TaskerShell puts the
+ * `theme-desk` class on <html> while one of their pages is open and takes
+ * it off again on the way out, so every token-driven component (the review
+ * screens, dialogs, the scrollbar, the page behind an over-scroll) changes
+ * with it and no worker, tool or admin screen is touched.
+ *
+ * Same token names, same triplet format as above; the status and money
+ * colours are deliberately inherited. Values from landing/styles.css, with
+ * the muted ink and the text accent darkened a step so small text on Paper
+ * stays readable.
+ * ===================================================================== */
+
+:root.theme-desk {
+  --canvas:   247 243 236;   /* Paper */
+  --surface:  253 252 249;   /* Paper, raised */
+  --raised:   250 247 241;
+  --overlay:  239 233 223;
+  --edge:     232 226 216;
+  --edging:   214 206 193;
+
+  --ink:      23 21 26;      /* Studio Ink */
+  --ink-dim:  107 101 96;
+  --ink-mute: 134 127 118;
+
+  --accent:        176  74  38;
+  --accent-soft:   243 226 217;
+  --accent-strong: 154  63  31;
+  --accent-ink:    124  52  26;
+
+  --brand:        194  84  45;   /* Terracotta */
+  --brand-soft:   243 226 217;
+  --brand-strong: 154  63  31;
+
+  --shadow-panel: 0 1px 2px rgb(23 21 26 / .05), 0 8px 24px -14px rgb(23 21 26 / .18);
+  --shadow-lift:  0 2px 4px rgb(23 21 26 / .07), 0 18px 34px -20px rgb(23 21 26 / .28);
+
+  --font-display: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+  font-family: 'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+:root[data-theme="dark"].theme-desk {
+  --canvas:   23 21 26;
+  --surface:  31 29 35;
+  --raised:   38 35 42;
+  --overlay:  47 43 51;
+  --edge:     58 54 62;
+  --edging:   78 73 82;
+
+  --ink:      247 243 236;
+  --ink-dim:  196 189 179;
+  --ink-mute: 150 143 134;
+
+  --accent:        226 128  92;
+  --accent-soft:    63  37  29;
+  --accent-strong: 238 154 121;
+  --accent-ink:    242 176 150;
+
+  --brand:        194  84  45;
+  --brand-soft:    63  37  29;
+  --brand-strong: 214 104  64;
+
+  --shadow-panel: 0 1px 2px rgb(0 0 0 / .5), 0 8px 24px -12px rgb(0 0 0 / .6);
+  --shadow-lift:  0 2px 6px rgb(0 0 0 / .55), 0 20px 40px -18px rgb(0 0 0 / .7);
+  color-scheme: dark;
+}
+
+/* Headings in the display face; body text stays in Plex. */
+.theme-desk h1, .theme-desk h2, .theme-desk h3, .theme-desk .font-display {
+  font-family: var(--font-display);
+  letter-spacing: -0.01em;
+}
+
+/* ---- The sign-in scene (tasker/DeskScene.jsx) --------------------------
+   Every animation's resting style is the visible one, and none sets a fill
+   mode: with reduced motion (below) each runs once in 0.01ms and the scene
+   simply stands still, fully drawn. */
+@keyframes desk-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+@keyframes desk-drift {
+  0%, 100% { transform: translate(0, 0) rotate(-2deg); }
+  50%      { transform: translate(6px, -9px) rotate(1.5deg); }
+}
+@keyframes desk-wave { 0%, 100% { transform: scaleY(0.3); } 50% { transform: scaleY(1); } }
+@keyframes desk-sweep { 0% { background-size: 0% 100%; } 55%, 100% { background-size: 100% 100%; } }
+@keyframes desk-ring {
+  0%   { transform: scale(0.6); opacity: 0.7; }
+  100% { transform: scale(1.6); opacity: 0; }
+}
+@keyframes desk-pop {
+  0%, 12%   { opacity: 0; transform: translateY(8px) scale(0.96); }
+  20%, 70%  { opacity: 1; transform: none; }
+  80%, 100% { opacity: 0; transform: translateY(-4px); }
+}
+@keyframes desk-type { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
+
+.desk-float { animation: desk-float 6s ease-in-out infinite; }
+.desk-drift { animation: desk-drift 8s ease-in-out infinite; }
+.desk-wave  { transform-origin: 50% 100%; animation: desk-wave 1.1s ease-in-out infinite; }
+.desk-ring  { transform-origin: center; transform-box: fill-box; animation: desk-ring 2.4s ease-out infinite; }
+.desk-pop   { animation: desk-pop 7s ease-in-out infinite; }
+.desk-type  { animation: desk-type 0.5s ease-in-out infinite; }
+.desk-sweep {
+  background-image: linear-gradient(rgb(194 84 45 / 0.28), rgb(194 84 45 / 0.28));
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  animation: desk-sweep 4.5s ease-in-out infinite;
+}
+
+/* The form side: a warm glow and a faint dot grid, so it is not a blank sheet. */
+.desk-paper {
+  background-color: rgb(var(--canvas));
+  background-image:
+    radial-gradient(circle at 85% 12%, rgb(var(--brand) / 0.12), transparent 42%),
+    radial-gradient(circle at 10% 95%, rgb(var(--brand) / 0.08), transparent 38%),
+    radial-gradient(rgb(var(--ink) / 0.07) 1px, transparent 1.2px);
+  background-size: auto, auto, 22px 22px;
+}
+
+/* Tailwind's `font-sans` names Rubik directly; on these pages it means Plex. */
+.theme-desk .font-sans { font-family: inherit; }
+
+/* ===================================================================== *
  * BASE
  * ===================================================================== */
 

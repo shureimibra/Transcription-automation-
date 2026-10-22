@@ -16,6 +16,7 @@ advisory.
 import logging
 
 from django.contrib.auth import authenticate, login, logout
+from django.core.cache import cache
 from django.db.models import Count, Q
 from rest_framework import status, views, viewsets
 from rest_framework.pagination import PageNumberPagination
@@ -27,6 +28,7 @@ from rest_framework.response import Response
 
 from . import roles, services, states
 from .authentication import IdleTimeoutTokenAuthentication
+from .perimeter import PERIMETER_ROLES, public_identity
 from .models import Account, Task, TaskEvent, TokenActivity, WorkerProfile, ready_for_work_q
 from .permissions import (
     IsAdmin, IsAuthenticatedWorkerOrAdmin, TaskAccessPermission, account_of,
@@ -57,6 +59,10 @@ logger = logging.getLogger('workforce')
 # frontend does send X-CSRFToken when Django has set the cookie).
 AUTH_CLASSES = [IdleTimeoutTokenAuthentication, SessionAuthentication]
 
+#: Wrong passwords for one username before it is locked, and for how long.
+LOGIN_MAX_FAILURES = 10
+LOGIN_LOCK_SECONDS = 15 * 60
+
 
 class LoginView(views.APIView):
     """
@@ -83,6 +89,12 @@ class LoginView(views.APIView):
 
     authentication_classes = []
     permission_classes = [AllowAny]
+
+    @staticmethod
+    def door_admits(role) -> bool:
+        """The workers' door: every account except outside taskers."""
+        return role not in PERIMETER_ROLES
+
     # THE ONE ENDPOINT ANYBODY CAN REACH, so it is the one that gets
     # guessed at. Ten attempts a minute is generous for somebody mistyping
     # a password and useless for working through a wordlist.
@@ -97,13 +109,30 @@ class LoginView(views.APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # PER-ACCOUNT LOCKOUT, ON TOP OF THE PER-ADDRESS THROTTLE. The
+        # throttle stops one address guessing quickly; this stops many
+        # addresses guessing ONE account's password slowly. Checked before
+        # the password, so a locked account answers the same way whether or
+        # not the guess was right.
+        lock_key = f'login-fail:{username.lower()[:150]}'
+        if cache.get(lock_key, 0) >= LOGIN_MAX_FAILURES:
+            return Response(
+                {'error': 'Too many attempts. Try again in 15 minutes.'},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
+
         user = authenticate(request, username=username, password=password)
         if user is None or not user.is_active:
             logger.warning('[WORKFORCE] failed login for %r', username[:64])
+            try:
+                cache.incr(lock_key)
+            except ValueError:
+                cache.set(lock_key, 1, LOGIN_LOCK_SECONDS)
             return Response(
                 {'error': 'Invalid credentials.'},
                 status=status.HTTP_401_UNAUTHORIZED,
             )
+        cache.delete(lock_key)
 
         # SIGNING IN AND TAKING TASKS ARE DIFFERENT PERMISSIONS.
         #
@@ -113,6 +142,19 @@ class LoginView(views.APIView):
         # impossible to represent. Now the role decides what happens next,
         # and only a TASKER is required to have a working profile.
         role = account_role(user)
+
+        # TWO DOORS, NEVER INTERCHANGEABLE. The workers' sign-in refuses
+        # tasker accounts and the tasker sign-in (DeskLoginView) refuses
+        # everyone else -- with the SAME answer as a wrong password, so
+        # trying a known-good account at the wrong door does not even
+        # confirm that the account exists. Not counted as a failure: the
+        # password was right, and locking the account for it would let
+        # anyone lock out a worker by using the wrong page.
+        if not self.door_admits(role):
+            logger.warning('[WORKFORCE] %s tried the wrong sign-in page', user.username)
+            return Response({'error': 'Invalid credentials.'},
+                            status=status.HTTP_401_UNAUTHORIZED)
+
         profile = WorkerProfile.objects.filter(user=user).first()
 
         if role == roles.TASKER and (profile is None or not profile.is_active_worker):
@@ -138,6 +180,12 @@ class LoginView(views.APIView):
         if profile:
             profile.touch()
 
+        if role in PERIMETER_ROLES:
+            verified = Account.objects.filter(user=user, email_verified_at__isnull=False).exists()
+            identity = public_identity(user.username, role, verified)
+            return Response({'token': token.key, 'user': {'username': user.username},
+                             'capabilities': identity['capabilities'],
+                             'email_verified': identity['email_verified']})
         return Response({
             'token': token.key,
             'user': {
@@ -150,6 +198,20 @@ class LoginView(views.APIView):
             'capabilities': sorted(roles.capabilities(role)),
             'profile': WorkerProfileSerializer(profile).data if profile else None,
         })
+
+
+class DeskLoginView(LoginView):
+    """
+    POST /workforce/auth/desk-login/ -- the tasker sign-in page's door.
+
+    Identical to LoginView except for who it admits: outside taskers only.
+    A worker's or an administrator's correct password is refused here
+    exactly like a wrong one.
+    """
+
+    @staticmethod
+    def door_admits(role) -> bool:
+        return role in PERIMETER_ROLES
 
 
 class LogoutView(views.APIView):
@@ -173,6 +235,9 @@ class CurrentUserView(views.APIView):
     def get(self, request):
         profile = worker_profile(request.user)
         role = account_role(request.user)
+        if role in PERIMETER_ROLES:
+            return Response(public_identity(request.user.username, role,
+                                            account_of(request.user).email_verified_at is not None))
         return Response({
             'username': request.user.username,
             'role': role,
@@ -740,6 +805,37 @@ class AccountViewSet(viewsets.ModelViewSet):
         logger.info('[WORKFORCE] password reset for %s by %s',
                     account.user.username, request.user.username)
         return Response({'status': 'ok', 'username': account.user.username})
+
+    @action(detail=True, methods=['post'], url_path='set-active')
+    def set_active(self, request, pk=None):
+        """
+        Switch an account's sign-in off or back on.
+
+        WHY THIS EXISTS. The only way to take access away from a non-tasker
+        used to be changing their role -- and every role short of admin
+        grants something (tool grants the studio). Disabling the Django user
+        grants nothing, keeps the account and its history, and is reversible.
+
+        TOKENS ARE DELETED TOO, so a disabled account is signed out
+        everywhere at once rather than at its next idle timeout.
+        """
+        from django.contrib.sessions.models import Session
+
+        account = self.get_object()
+        active = bool(request.data.get('active'))
+        if account.user_id == request.user.id and not active:
+            return Response({'error': 'You cannot disable your own account.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        account.user.is_active = active
+        account.user.save(update_fields=['is_active'])
+        if not active:
+            Token.objects.filter(user=account.user).delete()
+            for session in Session.objects.all():
+                if str(session.get_decoded().get('_auth_user_id')) == str(account.user_id):
+                    session.delete()
+        logger.info('[WORKFORCE] account %s %s by %s', account.user.username,
+                    'enabled' if active else 'disabled', request.user.username)
+        return Response(AccountSerializer(account).data)
 
     @action(detail=True, methods=['post'], url_path='set-role')
     def set_role(self, request, pk=None):

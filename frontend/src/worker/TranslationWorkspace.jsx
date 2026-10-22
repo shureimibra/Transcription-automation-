@@ -1,18 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  aiRevisions, segments as segmentsApi, submission, taskMedia, translation,
-} from '../api/eagle.js';
+import { useWorkspaceApi } from './workspaceApi.js';
+import FinalDraftDialog from '../components/FinalDraftDialog.jsx';
 import { useAsync } from '../hooks/useAsync.js';
 import { useSegmentSearch, splitOnMatch } from '../hooks/useSegmentSearch.js';
 import { normalizeQuotes } from '../lib/accuracyFindings.js';
 import { parseVerifyItems } from '../lib/verifyAudio.js';
 import SegmentSearchBar from '../components/SegmentSearchBar.jsx';
 import AudioPlayer from './AudioPlayer.jsx';
-import Verdict from '../components/Verdict.jsx';
 import DeliveredBanner, { isDelivered } from '../components/DeliveredBanner.jsx';
-import SubmittedPanel from '../components/SubmittedPanel.jsx';
 import DeadlineClock from './DeadlineClock.jsx';
-import TranslationGuideModal from './TranslationGuideModal.jsx';
 import {
   Button, Card, ErrorState, FOCUS, Notice, Skeleton,
 } from '../components/ui/index.jsx';
@@ -37,6 +33,18 @@ import {
  * editable would repeat the bug this screen exists to fix.
  */
 export default function TranslationWorkspace({ task, onTaskChange }) {
+  // Your workers' shared draft, or an Eagle tasker's private copy -- see
+  // workspaceApi.js. `eagle` also swaps Submit for Copy below.
+  const workspaceApi = useWorkspaceApi();
+  const {
+    mode, aiRevisions, segments: segmentsApi, taskMedia, translation,
+  } = workspaceApi;
+  const eagleMode = mode === 'desk';
+  // Workers' Preview + Submit dialog. Supplied by workerApi.js, absent for
+  // Eagle taskers, whose bundle never contains it.
+  const SubmitDialog = workspaceApi.dialogs?.translation;
+  // The workers' guide describes their submit process; taskers do not get it.
+  const GuideModal = workspaceApi.dialogs?.translationGuide;
   const load = useCallback(() => translation.get(task.id), [task.id]);
   const { data, error, loading, refresh } = useAsync(load, [task.id]);
 
@@ -452,11 +460,11 @@ export default function TranslationWorkspace({ task, onTaskChange }) {
             ? 'The machine translation is not available — translate it yourself'
             : 'Three steps. You do not need to read French.'
         }
-        actions={
+        actions={GuideModal && (
           <Button size="sm" variant="ghost" onClick={() => setShowGuide(true)}>
             Full guide
           </Button>
-        }
+        )}
       >
         {notTranslatedYet ? (
           <ol className="space-y-3 text-xs text-ink-dim">
@@ -486,7 +494,7 @@ export default function TranslationWorkspace({ task, onTaskChange }) {
             <li className="flex gap-2">
               <Step n={3} />
               <p className="flex-1">
-                Fix anything flagged, then preview and submit.
+                Fix anything flagged, then {eagleMode ? 'get the final draft' : 'preview and submit'}.
               </p>
             </li>
           </ol>
@@ -534,7 +542,7 @@ export default function TranslationWorkspace({ task, onTaskChange }) {
           <li className="flex gap-2">
             <Step n={3} />
             <p className="flex-1">
-              Fix anything flagged, then preview and submit.
+              Fix anything flagged, then {eagleMode ? 'get the final draft' : 'preview and submit'}.
             </p>
           </li>
         </ol>
@@ -606,10 +614,15 @@ export default function TranslationWorkspace({ task, onTaskChange }) {
               // worker's-own-assistant loop actually ran at least once.
               // Skipped once delivered: that work already passed the gate,
               // and the button now only offers to VIEW it.
-              disabled={!isDelivered(task) && (
-                (notTranslatedYet && !data?.polished_text) || !data?.polished_at
-              )}
-              title={isDelivered(task) ? undefined
+              // AN EAGLE TASKER IS NOT GATED. Nothing is submitted from
+              // their screen, so the self-check is advice: the final draft
+              // opens as soon as there is any French to put in it.
+              disabled={eagleMode
+                ? notTranslatedYet && !data?.polished_text
+                : !isDelivered(task) && (
+                  (notTranslatedYet && !data?.polished_text) || !data?.polished_at
+                )}
+              title={isDelivered(task) && !eagleMode ? undefined
                 : notTranslatedYet && !data?.polished_text
                   ? 'Save a translation first'
                   : !data?.polished_at
@@ -617,7 +630,8 @@ export default function TranslationWorkspace({ task, onTaskChange }) {
                       + 'and save the result first'
                     : undefined}
             >
-              {isDelivered(task) ? 'View what was submitted' : 'Preview submission'}
+              {eagleMode ? 'Get final draft'
+                : isDelivered(task) ? 'View what was submitted' : 'Preview submission'}
             </Button>
           </div>
         }
@@ -832,8 +846,11 @@ export default function TranslationWorkspace({ task, onTaskChange }) {
       </div>
       </Card>
 
-      {showPreview && (
-        <PreviewDialog
+      {showPreview && eagleMode && (
+        <FinalDraftDialog taskId={task.id} onClose={() => setShowPreview(false)} />
+      )}
+      {showPreview && !eagleMode && SubmitDialog && (
+        <SubmitDialog
           task={task}
           onClose={() => setShowPreview(false)}
           onSubmitted={(updated) => {
@@ -845,7 +862,7 @@ export default function TranslationWorkspace({ task, onTaskChange }) {
         />
       )}
 
-      {showGuide && <TranslationGuideModal onClose={() => setShowGuide(false)} />}
+      {showGuide && GuideModal && <GuideModal onClose={() => setShowGuide(false)} />}
     </div>
   );
 }
@@ -937,132 +954,5 @@ function Findings({ result }) {
         </li>
       ))}
     </ul>
-  );
-}
-
-/**
- * The document, as the server will send it. Fetched, never built here --
- * a second formatter in the browser could disagree with the one that
- * submits, and the disagreement would arrive as a rejection an hour later.
- */
-function PreviewDialog({ task, onClose, onSubmitted }) {
-  const load = useCallback(() => submission.preview(task.id), [task.id]);
-  const { data, error, loading } = useAsync(load, [task.id]);
-  const [submitting, setSubmitting] = useState(false);
-  const [failure, setFailure] = useState('');
-  const [sent, setSent] = useState(null);
-
-  // A refused preview is blocking in its own right: if the document could
-  // not be rendered, there is nothing to send.
-  // ALREADY DELIVERED MEANS NO SUBMIT BUTTON AT ALL.
-  //
-  // The server refuses a second submission, so nothing breaks -- but a live
-  // button on a task that has already gone invites the click and answers it
-  // with a red error for doing the reasonable thing. Read-only is the honest
-  // shape for work that is out of your hands.
-  const delivered = isDelivered(task);
-  // A TASK NOBODY HAS CLAIMED CANNOT BE SUBMITTED. A worker may open and
-  // even preview a task in the open pool to decide whether to take it;
-  // sending it is a different act, and the server refuses it. Say so
-  // here, before the click, rather than answering the click with a
-  // vague refusal.
-  const notClaimed = task?.status === 'new' || task?.status === 'assigned';
-  const blocking = delivered || notClaimed || Boolean(error) || Boolean(data?.blocking);
-
-  // DELIVERED. The dialog stays, and says so.
-  if (sent) {
-    return (
-      <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4 sm:items-center">
-        <div
-          role="dialog" aria-modal="true" aria-label="Submitted"
-          className="w-full max-w-lg rounded-xl2 border border-edge bg-surface shadow-panel"
-        >
-          <SubmittedPanel task={task} onClose={onClose} />
-        </div>
-      </div>
-    );
-  }
-
-
-  const send = async () => {
-    setSubmitting(true);
-    setFailure('');
-    try {
-      const updated = await submission.submit(task.id);
-      setSent(updated || true);
-      onSubmitted(updated);
-    } catch (err) {
-      setFailure(err.message);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4 sm:items-center">
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="tpreview-title"
-        className="flex max-h-[90vh] w-full max-w-3xl flex-col rounded-xl2 border border-edge bg-surface shadow-panel"
-      >
-        <div className="border-b border-edge px-5 py-4">
-          <h2 id="tpreview-title" className="text-sm font-semibold text-ink">
-            What will be submitted
-          </h2>
-          <p className="mt-0.5 text-2xs text-ink-mute">
-            Rendered by the server — this is exactly what the platform receives.
-          </p>
-        </div>
-
-        <div className="min-h-0 flex-1 overflow-auto px-5 py-4">
-          {loading && <Skeleton className="h-40 rounded-lg" />}
-          {notClaimed && (
-            <p role="alert" className="mb-3 rounded-lg border border-status-review/50 bg-status-review/10 px-3 py-2 text-xs text-status-review">
-              Claim this task first. You can preview it, but only a task you have claimed can be submitted.
-            </p>
-          )}
-          {error && <ErrorState message={error.message} compact />}
-          {data && (
-            <>
-              <Verdict
-                findings={data.findings || []}
-                blocking={Boolean(data.blocking)}
-                className="mb-4"
-              />
-              <pre className="whitespace-pre-wrap rounded-lg border border-edge bg-canvas p-3 font-mono text-2xs text-ink">
-                {data.content}
-              </pre>
-            </>
-          )}
-          {failure && (
-            <p role="alert" className="mt-3 text-2xs text-status-rejected">{failure}</p>
-          )}
-        </div>
-
-        <div className="flex items-center justify-end gap-2 border-t border-edge px-5 py-3">
-          <Button variant="ghost" onClick={onClose} disabled={submitting}>Back</Button>
-          <Button
-            variant="primary"
-            onClick={send}
-            loading={submitting}
-            disabled={blocking || loading}
-            title={
-              delivered
-                ? 'This work has already been submitted'
-                : notClaimed
-                  ? 'Claim this task first'
-                  : error
-                  ? 'There is nothing to submit until this is resolved'
-                  : blocking
-                    ? 'Fix the critical findings first'
-                    : undefined
-            }
-          >
-            Submit to platform
-          </Button>
-        </div>
-      </div>
-    </div>
   );
 }

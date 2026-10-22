@@ -6,16 +6,8 @@
 // therefore has no `updateStatus` at all -- there is nothing for it to call.
 import { api } from './client.js';
 
-// The authentication calls opt out of the global 401 handling: for these two
-// a 401 is the answer to the question being asked, not a session that ended
-// mid-flight. See the note in client.js.
-export const auth = {
-  login: (username, password) => api.post(
-    '/workforce/auth/login/', { username, password }, { unauthorizedIsExpected: true },
-  ),
-  logout: () => api.post('/workforce/auth/logout/'),
-  me: () => api.get('/workforce/me/', { unauthorizedIsExpected: true }),
-};
+// Sign-in lives in auth.js so the tasker bundle can use it without this file.
+export { auth } from './auth.js';
 
 export const tasks = {
   list: (params = {}) => {
@@ -72,6 +64,9 @@ export const accounts = {
    *  silently goes nowhere is worse than no reset link. */
   setPassword: (id, password) =>
     api.post(`/workforce/accounts/${id}/set-password/`, { password }),
+  /** Switch sign-in off (signs them out everywhere) or back on. */
+  setActive: (id, active) =>
+    api.post(`/workforce/accounts/${id}/set-active/`, { active }),
 };
 
 export const stats = {

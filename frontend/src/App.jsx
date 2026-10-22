@@ -12,6 +12,10 @@ import AdminTasks from './admin/AdminTasks.jsx';
 import AdminWorkers from './admin/AdminWorkers.jsx';
 import AdminAccounts from './admin/AdminAccounts.jsx';
 import Dashboard from './views/Dashboard.jsx';
+import HardRedirect from './components/HardRedirect.jsx';
+import { TASKER_BASE } from './tasker/brand.js';
+// The worker endpoints for the shared review screens (see workspaceApi.js).
+import './worker/workerApi.js';
 
 /**
  * Routing for the whole application.
@@ -133,6 +137,11 @@ export default function App() {
               </RequireAuth>
             }
           />
+
+          {/* Outside Eagle taskers are a separate bundle (tasker/DeskApp.jsx).
+              Reaching their address from inside this app -- e.g. a tasker
+              signing in on the workers' page -- is a full page load. */}
+          <Route path={`${TASKER_BASE}/*`} element={<HardRedirect />} />
 
           <Route path="*" element={<NotFound />} />
         </Routes>

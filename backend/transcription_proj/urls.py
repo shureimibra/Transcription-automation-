@@ -8,7 +8,10 @@ from apps.transcriptions.views import (
     AIRevisionSegmentReviewView, AIRevisionQualityReportsView,
 )
 
+# NO BROWSABLE INDEX. DefaultRouter's root view lists every registered
+# collection to anyone who asks -- a map of the API handed to strangers.
 router = DefaultRouter()
+router.include_root_view = False
 router.register(r'projects', ProjectViewSet, basename='project')
 router.register(r'transcriptions', TranscriptionJobViewSet, basename='transcription')
 

@@ -232,13 +232,18 @@ def _revision_segments(task: Task):
     ]
 
 
-def render_for_eagle(task: Task) -> str:
+def render_for_eagle(task: Task, submitter: Optional[str] = None) -> str:
     """
     The submission document, in the format Eagle accepts.
 
     Transcription gets speaker labels and millisecond timestamps; translation
     gets clean paragraphs and a word count. Both headers were validated
     against real accepted submissions.
+
+    `submitter` overrides the name in the header. None (every existing
+    caller) means the Eagle account holder's. An Eagle tasker's final draft
+    passes a placeholder instead, because that document is pasted into
+    Eagle under THEIR account, not ours -- see eagle_tasker.py.
     """
     from core.services.export_formats import to_eagle_transcription, to_eagle_translation
 
@@ -322,7 +327,7 @@ def render_for_eagle(task: Task) -> str:
     # submitted through their account and graded against it. A tasker's name
     # would be wrong on both counts, and would also put a worker's identity
     # in front of an external platform.
-    name = submitter_name()
+    name = submitter_name() if submitter is None else submitter
     if name:
         metadata['transcriber'] = name
         metadata['translator'] = name
@@ -874,15 +879,15 @@ def run_quality_gate(task: Task, content: str) -> List[Dict]:
     return findings
 
 
-def preview_submission(task: Task) -> SubmissionPreview:
+def preview_submission(task: Task, submitter: Optional[str] = None) -> SubmissionPreview:
     """
     What Eagle will receive, plus what the gate thinks of it.
 
     Shown to the worker before they submit. Given the cost of a rejection,
     five seconds of a human looking at the real document is the cheapest
-    check available.
+    check available. `submitter` is passed through to render_for_eagle.
     """
-    content = render_for_eagle(task)
+    content = render_for_eagle(task, submitter=submitter)
     findings = run_quality_gate(task, content)
     return SubmissionPreview(
         content=content,

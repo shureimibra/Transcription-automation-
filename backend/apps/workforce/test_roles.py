@@ -57,6 +57,7 @@ class CapabilityTableTestCase(TestCase):
             frozenset({roles.WORKFORCE, roles.STUDIO, roles.MEASURED}),
         )
         self.assertEqual(roles.capabilities(roles.TOOL), frozenset({roles.STUDIO}))
+        self.assertEqual(roles.capabilities(roles.EAGLE_TASKER), frozenset({roles.EAGLE}))
 
     def test_a_tool_user_reaches_neither_the_workforce_nor_administration(self):
         self.assertFalse(roles.can(roles.TOOL, roles.WORKFORCE))
