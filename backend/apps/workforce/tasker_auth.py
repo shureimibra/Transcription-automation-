@@ -202,7 +202,7 @@ def _username_problem(username: str):
         return ('3–30 characters: letters, numbers, dots, dashes or underscores, '
                 'starting with a letter or number.')
     if username.lower() in RESERVED:
-        return 'That username is not available.'
+        return 'That name is reserved. Please choose another username.'
     if User.objects.filter(username__iexact=username).exists():
         return 'That username is taken.'
     return None
