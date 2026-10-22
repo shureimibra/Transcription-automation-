@@ -85,7 +85,14 @@ export default function AppShell({ children }) {
   const isAdministrator = can(CAPABILITY.ADMINISTRATION);
   const navigate = useNavigate();
 
-  const [collapsed, setCollapsed] = useState(false);
+  // Remembered per browser, so a reload does not undo the choice. Storage
+  // can be refused (private windows); then it simply starts expanded.
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem('nav-collapsed') === '1'; } catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('nav-collapsed', collapsed ? '1' : '0'); } catch { /* ignore */ }
+  }, [collapsed]);
   const [drawer, setDrawer] = useState(false);
 
   const handleLogout = async () => {
