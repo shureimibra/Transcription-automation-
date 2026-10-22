@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { taskerPath } from './brand.js';
 import { auth as authApi } from '../api/auth.js';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { Button, inputClass } from '../components/ui/index.jsx';
@@ -11,7 +13,8 @@ import { Button, inputClass } from '../components/ui/index.jsx';
  * screen in the browser gets nothing.
  */
 export default function VerifyEmail() {
-  const { markEmailVerified } = useAuth();
+  const { markEmailVerified, logout } = useAuth();
+  const navigate = useNavigate();
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState({ text: '', tone: 'info' });
@@ -77,6 +80,16 @@ export default function VerifyEmail() {
         <button type="button" onClick={resend} className="font-medium text-accent hover:underline">
           send a new code
         </button>.
+      </p>
+      {/* A way out that is not the browser's Back button: the account is
+          already created, so going "back" would only land here again. */}
+      <p className="mt-2 text-xs text-ink-mute">
+        Wrong email address?{' '}
+        <button type="button"
+                onClick={async () => { await logout(); navigate(taskerPath.signup, { replace: true }); }}
+                className="font-medium text-accent hover:underline">
+          Sign out and start again
+        </button>
       </p>
     </div>
   );

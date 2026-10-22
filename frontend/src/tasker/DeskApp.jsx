@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { AuthProvider, CAPABILITY } from '../auth/AuthContext.jsx';
 import RequireAuth from '../auth/RequireAuth.jsx';
 import HardRedirect from '../components/HardRedirect.jsx';
@@ -24,6 +24,22 @@ import { taskerPath, TASKER_BASE } from './brand.js';
  * Anything outside TASKER_BASE is a full page load into the main app, so an
  * administrator who opens these pages can still go back.
  */
+/**
+ * An address this app does not know.
+ *
+ * Under TASKER_BASE it goes to the tasker home. It must NOT reload the page:
+ * main.jsx would load this same app for that address, hit this same route,
+ * and reload again -- an endless loop that shows as a dark, empty screen.
+ * Only an address outside TASKER_BASE is a real page load into the main app.
+ */
+function Fallback() {
+  const { pathname } = useLocation();
+  if (pathname === TASKER_BASE || pathname.startsWith(`${TASKER_BASE}/`)) {
+    return <Navigate to={TASKER_BASE} replace />;
+  }
+  return <HardRedirect />;
+}
+
 export default function DeskApp() {
   return (
     <BrowserRouter>
@@ -47,7 +63,7 @@ export default function DeskApp() {
               </RequireAuth>
             }
           />
-          <Route path="*" element={<HardRedirect />} />
+          <Route path="*" element={<Fallback />} />
         </Routes>
       </AuthProvider>
     </BrowserRouter>
